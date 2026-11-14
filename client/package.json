@@ -1,0 +1,21 @@
+{
+  "name": "client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@boba/shared": "*",
+    "@colyseus/sdk": "^0.18.10",
+    "phaser": "~3.90.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3",
+    "vite": "^8.3.8"
+  }
+}

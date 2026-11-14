@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Boba Shop Co-op</title>
+  </head>
+  <body>
+    <!-- Lobby: create a room or join one by code -->
+    <section id="lobby" class="card">
+      <h1>🧋 Boba Shop Co-op</h1>
+      <p class="subtitle">Cùng bạn mở quán trà sữa — tối đa 2 người</p>
+
+      <button id="create-btn" class="btn primary" type="button">Tạo phòng mới</button>
+
+      <div class="divider"><span>hoặc vào phòng của bạn bè</span></div>
+
+      <form id="join-form" autocomplete="off">
+        <input
+          id="code-input"
+          class="code-input"
+          type="text"
+          inputmode="text"
+          maxlength="9"
+          placeholder="MÃ PHÒNG"
+          spellcheck="false"
+          aria-label="Mã phòng"
+        />
+        <button id="join-btn" class="btn" type="submit">Vào phòng</button>
+      </form>
+
+      <p id="lobby-error" class="error" role="alert"></p>
+    </section>
+
+    <!-- In-game: room code bar + Phaser canvas -->
+    <section id="game-screen" hidden>
+      <div class="room-bar">
+        <span>Mã phòng: <strong id="room-code"></strong></span>
+        <button id="copy-link-btn" class="btn small" type="button">Sao chép link mời</button>
+        <button id="leave-btn" class="btn small ghost" type="button">Rời phòng</button>
+      </div>
+      <div id="game"></div>
+    </section>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
