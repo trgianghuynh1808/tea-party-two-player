@@ -7,6 +7,7 @@ import {
   StationType,
   Messages,
   PLAYER_RADIUS,
+  POSITION_SEND_INTERVAL_MS,
   STATIONS,
   ServerEvents,
   WORLD_HEIGHT,
@@ -37,14 +38,20 @@ const fs = (px: number) => `${Math.round(px * FONT_SCALE)}px`;
 /** game.events event from the DOM 🪑 button: payload = true (enter decorate mode) / false (leave). */
 export const DECORATE_MODE_EVENT = "decorate-mode";
 
-/** Higher = snappier interpolation toward the server position. */
-const REMOTE_LERP_RATE = 12;
-/** Local prediction is corrected softly when it drifts from the server by more than this. */
-const LOCAL_CORRECTION_THRESHOLD = 6;
-const LOCAL_SNAP_THRESHOLD = 120;
+/**
+ * Remote players are drawn this far in the past so there are always two snapshots to interpolate between,
+ * which hides uneven packet arrival on high-latency connections.
+ */
+const REMOTE_INTERP_DELAY_MS = 120;
 
 export interface ShopSceneData {
   room: Room<BobaShopState>;
+}
+
+interface PositionSample {
+  t: number;
+  x: number;
+  y: number;
 }
 
 interface PlayerView {
@@ -52,9 +59,10 @@ interface PlayerView {
   sprite: Phaser.GameObjects.Sprite;
   heldCup: Phaser.GameObjects.Rectangle;
   heldLabel: Phaser.GameObjects.Text;
-  // Latest authoritative position from the server.
-  serverX: number;
-  serverY: number;
+  // Remote players: timestamped server positions for buffered interpolation.
+  samples: PositionSample[];
+  // Last Player.teleportSeq applied to this view (a change means "snap, don't interpolate").
+  teleportSeq: number;
   isLocal: boolean;
   // Walk bob animation (sheets have one frame per direction).
   lastX: number;
@@ -92,7 +100,7 @@ export class ShopScene extends Phaser.Scene {
   private touch?: TouchControls;
   private actionHint!: Phaser.GameObjects.Text;
   private lastActionKey = "";
-  private lastInput = { dx: 0, dy: 0 };
+  private lastSent = { x: NaN, y: NaN, direction: "", at: 0 };
   private localDirection: Direction = "down";
 
   private moneyText!: Phaser.GameObjects.Text;
@@ -164,8 +172,7 @@ export class ShopScene extends Phaser.Scene {
       this.players.set(sessionId, view);
       this.updateStatus();
 
-      $.listen(player, "x", (x) => (view.serverX = x));
-      $.listen(player, "y", (y) => (view.serverY = y));
+      $.onChange(player, () => this.onPlayerChanged(view, player));
       $.listen(player, "direction", (dir) => {
         if (!view.isLocal) this.applyFacing(view, dir);
       });
@@ -217,23 +224,11 @@ export class ShopScene extends Phaser.Scene {
     const dt = deltaMs / 1000;
     this.handleInput(dt);
 
-    const remoteAlpha = 1 - Math.exp(-REMOTE_LERP_RATE * dt);
+    const renderAt = performance.now() - REMOTE_INTERP_DELAY_MS;
     for (const view of this.players.values()) {
       const c = view.container;
-      if (view.isLocal) {
-        // Local player is predicted in handleInput(); reconcile with server here.
-        const err = Phaser.Math.Distance.Between(c.x, c.y, view.serverX, view.serverY);
-        if (err > LOCAL_SNAP_THRESHOLD) {
-          c.setPosition(view.serverX, view.serverY);
-        } else if (err > LOCAL_CORRECTION_THRESHOLD && this.lastInput.dx === 0 && this.lastInput.dy === 0) {
-          c.x = Phaser.Math.Linear(c.x, view.serverX, remoteAlpha);
-          c.y = Phaser.Math.Linear(c.y, view.serverY, remoteAlpha);
-        }
-      } else {
-        // Remote player: exponential smoothing toward the latest server position.
-        c.x = Phaser.Math.Linear(c.x, view.serverX, remoteAlpha);
-        c.y = Phaser.Math.Linear(c.y, view.serverY, remoteAlpha);
-      }
+      // Local player is moved directly in handleInput(); remote players follow the snapshot buffer.
+      if (!view.isLocal) this.interpolateRemote(view, renderAt);
       c.setDepth(c.y);
       this.animateWalk(view, dt);
     }
@@ -252,18 +247,16 @@ export class ShopScene extends Phaser.Scene {
       dy = this.touch.dy;
     }
 
-    // Only send when input changes — the server simulates continuously.
-    if (dx !== this.lastInput.dx || dy !== this.lastInput.dy) {
-      this.lastInput = { dx, dy };
-      this.room.send(Messages.Move, { dx, dy });
-    }
-
     const local = this.players.get(this.room.sessionId);
-    if (local && (dx !== 0 || dy !== 0)) {
-      const next = stepMovement(local.container, dx, dy, dt);
-      local.container.setPosition(next.x, next.y);
-      this.localDirection = directionFromInput(dx, dy, this.localDirection);
-      this.applyFacing(local, this.localDirection);
+    if (local) {
+      const moving = dx !== 0 || dy !== 0;
+      if (moving) {
+        const next = stepMovement(local.container, dx, dy, dt);
+        local.container.setPosition(next.x, next.y);
+        this.localDirection = directionFromInput(dx, dy, this.localDirection);
+        this.applyFacing(local, this.localDirection);
+      }
+      this.sendPosition(local, moving);
     }
 
     // Always consume both so a stale tap doesn't fire later.
@@ -397,8 +390,8 @@ export class ShopScene extends Phaser.Scene {
       sprite,
       heldCup,
       heldLabel,
-      serverX: state.x,
-      serverY: state.y,
+      samples: [{ t: performance.now(), x: state.x, y: state.y }],
+      teleportSeq: state.teleportSeq,
       isLocal,
       lastX: state.x,
       lastY: state.y,
@@ -414,6 +407,50 @@ export class ShopScene extends Phaser.Scene {
   }
 
   /** Small hop while moving, since the sheets only have one frame per direction. */
+  /** Report the local position: throttled while moving, immediately once stopped so the final spot is exact. */
+  private sendPosition(local: PlayerView, moving: boolean) {
+    const { x, y } = local.container;
+    const last = this.lastSent;
+    if (x === last.x && y === last.y && this.localDirection === last.direction) return;
+    const now = performance.now();
+    if (moving && now - last.at < POSITION_SEND_INTERVAL_MS) return;
+    this.room!.send(Messages.Position, { x, y, direction: this.localDirection, teleportSeq: local.teleportSeq });
+    this.lastSent = { x, y, direction: this.localDirection, at: now };
+  }
+
+  private onPlayerChanged(view: PlayerView, player: Player) {
+    const teleported = player.teleportSeq !== view.teleportSeq;
+    view.teleportSeq = player.teleportSeq;
+    if (view.isLocal) {
+      // The server only touches our position when teleporting (shift start, rejected move).
+      if (teleported) view.container.setPosition(player.x, player.y);
+      return;
+    }
+    const now = performance.now();
+    if (teleported) {
+      view.samples = [{ t: now, x: player.x, y: player.y }];
+      view.container.setPosition(player.x, player.y);
+      return;
+    }
+    const last = view.samples[view.samples.length - 1];
+    if (!last || last.x !== player.x || last.y !== player.y) view.samples.push({ t: now, x: player.x, y: player.y });
+  }
+
+  private interpolateRemote(view: PlayerView, renderAt: number) {
+    const samples = view.samples;
+    // Drop snapshots that are fully behind the render time, keeping one to interpolate from.
+    while (samples.length >= 2 && samples[1].t <= renderAt) samples.shift();
+    const a = samples[0];
+    if (!a) return;
+    const b = samples[1];
+    if (!b || renderAt <= a.t) {
+      view.container.setPosition(a.x, a.y);
+      return;
+    }
+    const k = (renderAt - a.t) / (b.t - a.t);
+    view.container.setPosition(Phaser.Math.Linear(a.x, b.x, k), Phaser.Math.Linear(a.y, b.y, k));
+  }
+
   private animateWalk(view: PlayerView, dt: number) {
     const { x, y } = view.container;
     const moving = Math.hypot(x - view.lastX, y - view.lastY) > 0.3;

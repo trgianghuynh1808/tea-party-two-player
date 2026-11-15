@@ -28,13 +28,23 @@ export * from "./menu";
 import { STATIONS, type StationDef } from "./menu";
 
 // Message payloads (client -> server)
-export interface MoveMessage {
-  dx: number; // -1, 0, 1
-  dy: number; // -1, 0, 1
+/**
+ * Client-authoritative movement: each client simulates its own player and reports its position.
+ * The server validates it (speed budget + collisions) and relays it to the other player.
+ */
+export interface PositionMessage {
+  x: number;
+  y: number;
+  direction: Direction;
+  /** Player.teleportSeq the client had applied; stale reports from before a server teleport are dropped. */
+  teleportSeq: number;
 }
 
+/** How often a moving client reports its position. */
+export const POSITION_SEND_INTERVAL_MS = 50;
+
 export const Messages = {
-  Move: "move",
+  Position: "position",
   Interact: "interact",
   BuyDecoration: "buy_decoration",
   MoveDecoration: "move_decoration",
@@ -74,8 +84,12 @@ export function stepMovement(pos: Vec2, dx: number, dy: number, dtSeconds: numbe
     nx /= len;
     ny /= len;
   }
-  let x = pos.x + nx * PLAYER_SPEED * dtSeconds;
-  let y = pos.y + ny * PLAYER_SPEED * dtSeconds;
+  return resolveCollisions({ x: pos.x + nx * PLAYER_SPEED * dtSeconds, y: pos.y + ny * PLAYER_SPEED * dtSeconds });
+}
+
+/** Push a player circle out of station rectangles and clamp it inside the world. */
+export function resolveCollisions(pos: Vec2): Vec2 {
+  let { x, y } = pos;
 
   // Push the player circle out of station rectangles.
   for (const s of STATIONS) {

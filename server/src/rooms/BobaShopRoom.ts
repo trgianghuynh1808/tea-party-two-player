@@ -15,7 +15,6 @@ import {
   ServerEvents,
   StationType,
   canPlaceDecoration,
-  directionFromInput,
   getDecorationDef,
   isGender,
   isValidShopId,
@@ -23,14 +22,14 @@ import {
   snapToGrid,
   findNearestStationDef,
   planInteraction,
-  stepMovement,
+  PLAYER_SPEED,
+  resolveCollisions,
   cupContents,
   getDrink,
   makeCup,
   type DeliveredEvent,
-  type Direction,
   type DrinkDef,
-  type MoveMessage,
+  type PositionMessage,
 } from "@boba/shared";
 import { BobaShopState, Decoration, Order, Player, Station } from "@boba/shared/schema";
 import { loadShop, saveShop } from "../persistence/ShopStore.js";
@@ -53,22 +52,26 @@ const SPAWN_POINTS = [
   { x: 500, y: 400 },
 ];
 
-interface InputState {
-  dx: number;
-  dy: number;
-}
+/**
+ * Movement anti-teleport: each player earns travel budget at PLAYER_SPEED * MOVE_BUDGET_SLACK per second,
+ * capped so that bursts of delayed packets still pass but warping across the shop does not.
+ */
+const MOVE_BUDGET_SLACK = 1.3;
+const MOVE_BUDGET_CAP = PLAYER_SPEED * 1.5;
+/** Collision corrections smaller than this are accepted silently (float noise between client and server). */
+const COLLISION_TOLERANCE = 2;
+const DIRECTIONS = new Set<string>(["up", "down", "left", "right"]);
 
-const clampAxis = (v: unknown): number => {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(-1, Math.min(1, Math.round(n)));
-};
+interface MoveBudget {
+  budget: number;
+  lastAt: number;
+}
 
 export class BobaShopRoom extends Room {
   maxClients = 2;
   state = new BobaShopState();
 
-  private moveInputs = new Map<string, InputState>();
+  private moveBudgets = new Map<string, MoveBudget>();
   private deliveryTimers = new Map<string, number>();
   private decorationSeq = 0;
   private orderSeq = 0;
@@ -77,8 +80,8 @@ export class BobaShopRoom extends Room {
   private saveTimer?: ReturnType<typeof setTimeout>;
 
   messages = {
-    move: (client: Client, payload: MoveMessage) => {
-      this.moveInputs.set(client.sessionId, { dx: clampAxis(payload?.dx), dy: clampAxis(payload?.dy) });
+    position: (client: Client, payload: PositionMessage) => {
+      this.handlePosition(client, payload);
     },
     interact: (client: Client) => {
       this.handleInteract(client);
@@ -132,13 +135,13 @@ export class BobaShopRoom extends Room {
     player.colorIndex = colorIndex;
     player.gender = isGender(options.gender) ? options.gender : "male";
     this.state.players.set(client.sessionId, player);
-    this.moveInputs.set(client.sessionId, { dx: 0, dy: 0 });
+    this.resetMoveBudget(client.sessionId);
     console.log(`[BobaShopRoom] ${client.sessionId} joined (${this.clients.length}/${this.maxClients})`);
   }
 
   onLeave(client: Client) {
     this.state.players.delete(client.sessionId);
-    this.moveInputs.delete(client.sessionId);
+    this.moveBudgets.delete(client.sessionId);
     console.log(`[BobaShopRoom] ${client.sessionId} left`);
   }
 
@@ -202,16 +205,6 @@ export class BobaShopRoom extends Room {
   }
 
   private update(dt: number) {
-    // Movement
-    this.state.players.forEach((player, sessionId) => {
-      const input = this.moveInputs.get(sessionId);
-      if (!input || (input.dx === 0 && input.dy === 0)) return;
-      const next = stepMovement(player, input.dx, input.dy, dt);
-      player.x = next.x;
-      player.y = next.y;
-      player.direction = directionFromInput(input.dx, input.dy, player.direction as Direction);
-    });
-
     this.updateMachines(dt);
 
     if (this.state.phase === GamePhase.Playing) {
@@ -245,11 +238,13 @@ export class BobaShopRoom extends Room {
     });
     this.deliveryTimers.clear();
 
-    this.state.players.forEach((player) => {
+    this.state.players.forEach((player, sessionId) => {
       const spawn = SPAWN_POINTS[player.colorIndex] ?? SPAWN_POINTS[0];
       player.x = spawn.x;
       player.y = spawn.y;
+      player.teleportSeq++;
       player.heldItem = EMPTY_HAND;
+      this.resetMoveBudget(sessionId);
     });
 
     this.state.shiftEarnings = 0;
@@ -306,6 +301,42 @@ export class BobaShopRoom extends Room {
         this.state.orders.push(order);
       }
     }
+  }
+
+  // ---------------------------------------------------------------- Movement
+
+  private resetMoveBudget(sessionId: string) {
+    this.moveBudgets.set(sessionId, { budget: MOVE_BUDGET_CAP, lastAt: Date.now() });
+  }
+
+  /** Accept a client-reported position if it is reachable and not inside a station; otherwise snap the client back. */
+  private handlePosition(client: Client, payload: PositionMessage) {
+    const player = this.state.players.get(client.sessionId);
+    const move = this.moveBudgets.get(client.sessionId);
+    if (!player || !move) return;
+    // Sent before the client saw our last teleport: ignore instead of undoing the teleport.
+    if (Number(payload?.teleportSeq) !== player.teleportSeq) return;
+    const x = Number(payload?.x);
+    const y = Number(payload?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+
+    const now = Date.now();
+    move.budget = Math.min(MOVE_BUDGET_CAP, move.budget + ((now - move.lastAt) / 1000) * PLAYER_SPEED * MOVE_BUDGET_SLACK);
+    move.lastAt = now;
+
+    const dist = Math.hypot(x - player.x, y - player.y);
+    if (dist > move.budget) {
+      // Too fast (or a huge lag spike): keep the server position and make the client snap to it.
+      player.teleportSeq++;
+      return;
+    }
+    move.budget -= dist;
+
+    const resolved = resolveCollisions({ x, y });
+    player.x = resolved.x;
+    player.y = resolved.y;
+    if (DIRECTIONS.has(payload.direction)) player.direction = payload.direction;
+    if (Math.hypot(resolved.x - x, resolved.y - y) > COLLISION_TOLERANCE) player.teleportSeq++;
   }
 
   private handleInteract(client: Client) {

@@ -7,6 +7,8 @@ export class Player extends Schema {
   @type("string") heldItem: string = ""; // "" | "cup" | "cup:black_tea,milk" (see makeCup)
   @type("number") colorIndex: number = 0;
   @type("string") gender: string = "male"; // "male" | "female" (see Gender in @boba/shared)
+  /** Bumped when the server moves the player itself (spawn, shift start, rejected move): the client must snap. */
+  @type("number") teleportSeq: number = 0;
 }
 
 export class Station extends Schema {
