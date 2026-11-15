@@ -204,8 +204,12 @@ export function canPlaceDecoration(
     return false;
   }
 
-  for (const s of STATIONS) {
-    if (overlaps(r, rectOf(s.x, s.y, s.width, s.height, STATION_MARGIN))) return false;
+  // Rugs lie flat on the floor and are drawn below everything (depth), so they may slide under
+  // counters, tables and machines; standing furniture must keep clear of them.
+  if (def.layer !== "floor") {
+    for (const s of STATIONS) {
+      if (overlaps(r, rectOf(s.x, s.y, s.width, s.height, STATION_MARGIN))) return false;
+    }
   }
 
   for (const o of others) {
