@@ -3,15 +3,16 @@ import Phaser from "phaser";
 import { Callbacks, Client, CloseCode, ErrorCode, type Room } from "@colyseus/sdk";
 import {
   GamePhase,
-  ROOM_CODE_LENGTH,
+  LOBBY_PATH,
+  MAX_PLAYERS,
   ROOM_NAME,
   SERVER_PORT,
   WORLD_HEIGHT,
   WORLD_WIDTH,
+  SHOP_FULL_ERROR_CODE,
   isGender,
-  isValidShopId,
-  normalizeRoomCode,
   type Gender,
+  type LobbyInfo,
 } from "@boba/shared";
 import type { BobaShopState } from "@boba/shared/schema";
 import { FORCE_TOUCH_PARAM, isTouchDevice } from "./input/TouchControls";
@@ -24,12 +25,10 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 
 const lobby = $<HTMLElement>("lobby");
 const gameScreen = $<HTMLElement>("game-screen");
-const createBtn = $<HTMLButtonElement>("create-btn");
-const joinForm = $<HTMLFormElement>("join-form");
-const joinBtn = $<HTMLButtonElement>("join-btn");
-const codeInput = $<HTMLInputElement>("code-input");
+const enterBtn = $<HTMLButtonElement>("enter-btn");
+const lobbyStatus = $<HTMLParagraphElement>("lobby-status");
 const lobbyError = $<HTMLParagraphElement>("lobby-error");
-const roomCodeLabel = $<HTMLElement>("room-code");
+const playerCountLabel = $<HTMLElement>("player-count");
 const copyLinkBtn = $<HTMLButtonElement>("copy-link-btn");
 const leaveBtn = $<HTMLButtonElement>("leave-btn");
 const menuBtn = $<HTMLButtonElement>("menu-btn");
@@ -60,38 +59,63 @@ let shiftOverlay: ShiftOverlay | undefined;
 let decorPanel: DecorPanel | undefined;
 let decorating = false;
 
-/**
- * Persistent id of "my shop" (money + furniture), kept in this browser. Sent when creating a room so
- * the server can restore the shop; players who join someone else's room play in the host's shop.
- */
-const SHOP_ID_KEY = "boba.shopId";
-function getShopId(): string {
-  let id = localStorage.getItem(SHOP_ID_KEY);
-  if (!isValidShopId(id)) {
-    id = crypto.randomUUID().replaceAll("-", "");
-    localStorage.setItem(SHOP_ID_KEY, id);
-  }
-  return id;
-}
-
 // Keep the ?touch=1 debug flag across URL rewrites so a refresh still forces touch controls.
 const forceTouch = new URLSearchParams(location.search).get(FORCE_TOUCH_PARAM) === "1";
 
-/** Rewrite the URL to `?room=CODE` (or no room), preserving ?touch=1. */
-function setUrl(roomId?: string) {
+/** Strip other query params (e.g. old ?room= invite links), preserving ?touch=1. */
+function cleanUrl() {
   const params = new URLSearchParams();
   if (forceTouch) params.set(FORCE_TOUCH_PARAM, "1");
-  if (roomId) params.set("room", roomId);
   const query = params.toString();
   history.replaceState(null, "", location.pathname + (query ? `?${query}` : ""));
 }
 
 // ---------------------------------------------------------------- Lobby
 
-function setBusy(busy: boolean) {
-  createBtn.disabled = busy;
-  joinBtn.disabled = busy;
-  codeInput.disabled = busy;
+let busy = false;
+let lobbyInfo: LobbyInfo | undefined;
+let lobbyPollTimer: ReturnType<typeof setTimeout> | undefined;
+const LOBBY_POLL_MS = 3000;
+
+function setBusy(on: boolean) {
+  busy = on;
+  renderLobbyStatus();
+}
+
+function renderLobbyStatus() {
+  const info = lobbyInfo;
+  const full = !!info && info.open && info.players >= info.maxPlayers;
+  lobbyStatus.classList.toggle("open", !!info?.open && !full);
+  lobbyStatus.classList.toggle("full", full);
+  if (!info) {
+    lobbyStatus.textContent = "Đang kết nối server… (lần đầu có thể mất ~1 phút)";
+    enterBtn.textContent = "Vào quán";
+  } else if (!info.open) {
+    lobbyStatus.textContent = "Quán đang đóng cửa.";
+    enterBtn.textContent = "Mở quán";
+  } else if (full) {
+    lobbyStatus.textContent = `Quán đã đủ ${info.maxPlayers} người, chờ chút nhé.`;
+    enterBtn.textContent = "Quán đã đủ người";
+  } else {
+    lobbyStatus.textContent = `🟢 Quán đang mở · ${info.players}/${info.maxPlayers} người`;
+    enterBtn.textContent = "Vào quán";
+  }
+  enterBtn.disabled = busy || full;
+}
+
+/** Poll the shop status while the home screen is visible (also wakes a sleeping free-tier server). */
+async function pollLobby() {
+  clearTimeout(lobbyPollTimer);
+  if (lobby.hidden) return;
+  try {
+    const res = await fetch(`${endpoint}${LOBBY_PATH}`, { cache: "no-store" });
+    if (res.ok) lobbyInfo = (await res.json()) as LobbyInfo;
+  } catch {
+    lobbyInfo = undefined; // server asleep or unreachable: keep trying
+  }
+  if (lobby.hidden) return;
+  renderLobbyStatus();
+  lobbyPollTimer = setTimeout(() => void pollLobby(), LOBBY_POLL_MS);
 }
 
 function showLobby(error = "") {
@@ -101,15 +125,14 @@ function showLobby(error = "") {
   lobby.hidden = false;
   lobbyError.textContent = error;
   setBusy(false);
-  // Drop ?room=... so a refresh doesn't auto-fill a stale code.
-  setUrl();
+  cleanUrl();
+  void pollLobby();
 }
 
 function describeError(err: unknown): string {
   const e = err as { code?: number; message?: string };
-  if (e?.code === ErrorCode.MATCHMAKE_INVALID_ROOM_ID) {
-    // Server reports a full room as "locked" and a missing one as "not found", both with this code.
-    return e.message?.includes("locked") ? "Phòng đã đủ 2 người." : "Không tìm thấy phòng với mã này.";
+  if (e?.code === SHOP_FULL_ERROR_CODE || e?.code === ErrorCode.MATCHMAKE_INVALID_ROOM_ID) {
+    return "Quán đã đủ người, chờ chút rồi thử lại nhé.";
   }
   if (err instanceof TypeError || e?.message?.toLowerCase().includes("fetch")) {
     return `Không kết nối được server (${endpoint}). Server đã chạy chưa?`;
@@ -126,6 +149,7 @@ async function enter(action: () => Promise<Room<BobaShopState>>) {
     console.error(err);
     lobbyError.textContent = describeError(err);
     setBusy(false);
+    void pollLobby();
   }
 }
 
@@ -161,43 +185,23 @@ for (const btn of genderOptions) {
 /** Returns the chosen character, or shows an error if none was picked yet. */
 function requireGender(): Gender | null {
   if (selectedGender) return selectedGender;
-  lobbyError.textContent = "Chọn nhân vật Nam hoặc Nữ trước khi vào phòng nhé.";
+  lobbyError.textContent = "Chọn nhân vật Nam hoặc Nữ trước khi vào quán nhé.";
   genderOptions[0]?.focus();
   return null;
 }
 
-createBtn.addEventListener("click", () => {
+enterBtn.addEventListener("click", () => {
   const gender = requireGender();
   if (!gender) return;
-  void enter(() => client.create<BobaShopState>(ROOM_NAME, { shopId: getShopId(), gender }));
-});
-
-joinForm.addEventListener("submit", (e) => {
-  e.preventDefault();
-  const code = normalizeRoomCode(codeInput.value);
-  if (code.length < ROOM_CODE_LENGTH) {
-    lobbyError.textContent = `Mã phòng gồm ${ROOM_CODE_LENGTH} ký tự.`;
-    codeInput.focus();
-    return;
-  }
-  const gender = requireGender();
-  if (!gender) return;
-  void enter(() => client.joinById<BobaShopState>(code, { gender }));
-});
-
-codeInput.addEventListener("input", () => {
-  const pos = codeInput.selectionStart;
-  codeInput.value = normalizeRoomCode(codeInput.value);
-  codeInput.setSelectionRange(pos, pos);
-  lobbyError.textContent = "";
+  // Joins the shared shop if it's open, otherwise opens it.
+  void enter(() => client.joinOrCreate<BobaShopState>(ROOM_NAME, { gender }));
 });
 
 // ---------------------------------------------------------------- Game
 
 function startGame(room: Room<BobaShopState>) {
   currentRoom = room;
-  roomCodeLabel.textContent = room.roomId;
-  setUrl(room.roomId);
+  clearTimeout(lobbyPollTimer);
   lobby.hidden = true;
   gameScreen.hidden = false;
   document.body.classList.add("in-game");
@@ -221,8 +225,13 @@ function startGame(room: Room<BobaShopState>) {
   shiftOverlay = new ShiftOverlay(shiftOverlayRoot, room);
   decorPanel = new DecorPanel(decorRoot, room, (e) => game?.events.emit(PALETTE_DRAG_START, e));
 
+  const $state = Callbacks.get(room);
+  const renderPlayerCount = () => (playerCountLabel.textContent = `${room.state.players.size}/${MAX_PLAYERS}`);
+  $state.onAdd("players", renderPlayerCount);
+  $state.onRemove("players", renderPlayerCount);
+
   // Decorating is only allowed between shifts: leave decorate mode when a shift starts.
-  Callbacks.get(room).listen("phase", (phase) => {
+  $state.listen("phase", (phase) => {
     const playing = phase === GamePhase.Playing;
     decorateBtn.disabled = playing;
     if (playing && decorating) setDecorating(false);
@@ -231,7 +240,7 @@ function startGame(room: Room<BobaShopState>) {
   room.onLeave((code) => {
     stopGame();
     // CONSENTED = we clicked "Rời phòng"; anything else is an unexpected disconnect.
-    showLobby(code === CloseCode.CONSENTED || code === CloseCode.NORMAL_CLOSURE ? "" : "Mất kết nối với phòng.");
+    showLobby(code === CloseCode.CONSENTED || code === CloseCode.NORMAL_CLOSURE ? "" : "Mất kết nối với quán.");
   });
 }
 
@@ -256,7 +265,7 @@ leaveBtn.addEventListener("click", () => {
 
 copyLinkBtn.addEventListener("click", async () => {
   if (!currentRoom) return;
-  const link = `${location.origin}${location.pathname}?room=${currentRoom.roomId}`;
+  const link = `${location.origin}${location.pathname}`;
   const label = copyLinkBtn.querySelector("span")!;
   try {
     await navigator.clipboard.writeText(link);
@@ -336,8 +345,4 @@ const menuTitle = document.createElement("h2");
 menuTitle.textContent = "📋 Menu";
 menuInline.append(menuTitle, buildMenu());
 
-// Invite links (?room=ABCD) pre-fill the code field.
-const invited = normalizeRoomCode(new URLSearchParams(location.search).get("room") ?? "");
 showLobby();
-codeInput.value = invited;
-codeInput.focus();

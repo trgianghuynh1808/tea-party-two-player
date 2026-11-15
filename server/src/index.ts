@@ -2,8 +2,8 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
-import { defineRoom, defineServer } from "colyseus";
-import { ROOM_NAME, SERVER_PORT } from "@boba/shared";
+import { defineRoom, defineServer, matchMaker } from "colyseus";
+import { LOBBY_PATH, MAX_PLAYERS, ROOM_NAME, SERVER_PORT, type LobbyInfo } from "@boba/shared";
 import { BobaShopRoom } from "./rooms/BobaShopRoom.js";
 
 const port = Number(process.env.PORT) || SERVER_PORT;
@@ -20,6 +20,12 @@ const server = defineServer({
   express: (app) => {
     app.get("/health", (_req, res) => {
       res.json({ ok: true });
+    });
+    // Home screen status. Public + CORS: the client may be hosted elsewhere (GitHub Pages).
+    app.get(LOBBY_PATH, async (_req, res) => {
+      const [room] = await matchMaker.query({ name: ROOM_NAME });
+      const info: LobbyInfo = { open: !!room, players: room?.clients ?? 0, maxPlayers: room?.maxClients ?? MAX_PLAYERS };
+      res.set("Access-Control-Allow-Origin", "*").set("Cache-Control", "no-store").json(info);
     });
     if (serveClient) app.use(express.static(clientDist));
   },

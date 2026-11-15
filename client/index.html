@@ -10,7 +10,7 @@
     <!-- Lobby: create a room or join one by code -->
     <section id="lobby" class="card">
       <h1>🧋 Boba Shop Co-op</h1>
-      <p class="subtitle">Cùng bạn mở quán trà sữa — tối đa 2 người</p>
+      <p class="subtitle">Một quán chung, ai vào trước mở quán — tối đa 2 người</p>
 
       <p class="picker-title">Chọn nhân vật</p>
       <div id="gender-picker" class="gender-picker" role="radiogroup" aria-label="Chọn nhân vật">
@@ -24,23 +24,8 @@
         </button>
       </div>
 
-      <button id="create-btn" class="btn primary" type="button">Tạo phòng mới</button>
-
-      <div class="divider"><span>hoặc vào phòng của bạn bè</span></div>
-
-      <form id="join-form" autocomplete="off">
-        <input
-          id="code-input"
-          class="code-input"
-          type="text"
-          inputmode="text"
-          maxlength="9"
-          placeholder="MÃ PHÒNG"
-          spellcheck="false"
-          aria-label="Mã phòng"
-        />
-        <button id="join-btn" class="btn" type="submit">Vào phòng</button>
-      </form>
+      <p id="lobby-status" class="lobby-status" aria-live="polite">Đang kiểm tra quán…</p>
+      <button id="enter-btn" class="btn primary" type="button">Vào quán</button>
 
       <p id="lobby-error" class="error" role="alert"></p>
     </section>
@@ -54,13 +39,13 @@
 
       <aside class="side-panel">
         <header class="panel-header">
-          <div class="room-code">Phòng <strong id="room-code"></strong></div>
+          <div class="room-code">Quán chung <strong id="player-count"></strong></div>
           <div class="tool-row">
-            <button id="copy-link-btn" class="tool" type="button" title="Sao chép link mời">🔗<span>Mời</span></button>
+            <button id="copy-link-btn" class="tool" type="button" title="Sao chép link game">🔗<span>Mời</span></button>
             <button id="menu-btn" class="tool compact-only" type="button" title="Menu công thức">📋<span>Menu</span></button>
             <button id="decorate-btn" class="tool" type="button" title="Trang trí quán (ngoài giờ ca)">🪑<span>Trang trí</span></button>
             <button id="fullscreen-btn" class="tool" type="button" title="Toàn màn hình" hidden>⛶<span>Full</span></button>
-            <button id="leave-btn" class="tool danger" type="button" title="Rời phòng">🚪<span>Rời</span></button>
+            <button id="leave-btn" class="tool danger" type="button" title="Rời quán">🚪<span>Rời</span></button>
           </div>
         </header>
         <div id="decor-panel" class="panel-section" hidden></div>

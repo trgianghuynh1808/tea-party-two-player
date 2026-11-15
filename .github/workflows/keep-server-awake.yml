@@ -1,0 +1,25 @@
+name: Keep Render server awake
+
+# Render free instances sleep after 15 min without traffic. GitHub only allows
+# schedules down to every 5 min, and scheduled runs can be delayed under load.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Ping /health
+        env:
+          SERVER_URL: ${{ vars.VITE_SERVER_URL }}
+        run: |
+          if [ -z "$SERVER_URL" ]; then
+            echo "VITE_SERVER_URL repository variable is not set"; exit 1
+          fi
+          # A cold start can take ~1 min, so allow a long timeout and a few retries.
+          curl -fsS --max-time 90 --retry 3 --retry-delay 10 "$SERVER_URL/health"

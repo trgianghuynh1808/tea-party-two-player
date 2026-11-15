@@ -537,7 +537,7 @@ export class ShopScene extends Phaser.Scene {
     this.statusText.setText(
       count >= 2
         ? "Đủ 2 người, cùng làm trà sữa nào!"
-        : `Chờ người chơi thứ 2... Gửi mã phòng ${this.room.roomId} cho bạn của bạn`,
+        : "Chờ người chơi thứ 2... Bạn của bạn chỉ cần mở game và bấm Vào quán",
     );
   }
 

@@ -1,4 +1,4 @@
-import { Room, type Client } from "colyseus";
+import { Room, ServerError, type Client } from "colyseus";
 import {
   DRINKS,
   EMPTY_CUP,
@@ -9,15 +9,15 @@ import {
   MAX_ACTIVE_ORDERS,
   ORDER_DURATION_SECONDS,
   ORDER_SPAWN_SECONDS,
-  ROOM_CODE_ALPHABET,
-  ROOM_CODE_LENGTH,
+  MAX_PLAYERS,
+  SHARED_SHOP_ID,
+  SHOP_FULL_ERROR_CODE,
   STATIONS,
   ServerEvents,
   StationType,
   canPlaceDecoration,
   getDecorationDef,
   isGender,
-  isValidShopId,
   refundFor,
   snapToGrid,
   findNearestStationDef,
@@ -37,12 +37,9 @@ import { loadShop, saveShop } from "../persistence/ShopStore.js";
 /** Wait this long after the last change before writing the shop save (batches rapid edits). */
 const SAVE_DEBOUNCE_MS = 1000;
 
-interface CreateOptions {
-  /** Host's persistent shop id (from their browser). Without it the shop is not saved. */
-  shopId?: unknown;
-}
+/** Only one shop room may exist per server process (see onCreate). */
+let shopRoomOpen = false;
 
-const ROOM_CODES_CHANNEL = "$boba_room_codes";
 const FIRST_ORDER_DELAY_SECONDS = 2;
 /** Override shift length for quick testing, e.g. SHIFT_SECONDS=20 npm run dev. */
 const SHIFT_DURATION = Number(process.env.SHIFT_SECONDS) || SHIFT_SECONDS;
@@ -68,7 +65,7 @@ interface MoveBudget {
 }
 
 export class BobaShopRoom extends Room {
-  maxClients = 2;
+  maxClients = MAX_PLAYERS;
   state = new BobaShopState();
 
   private moveBudgets = new Map<string, MoveBudget>();
@@ -76,7 +73,6 @@ export class BobaShopRoom extends Room {
   private decorationSeq = 0;
   private orderSeq = 0;
   private orderSpawnTimer = FIRST_ORDER_DELAY_SECONDS;
-  private shopId?: string;
   private saveTimer?: ReturnType<typeof setTimeout>;
 
   messages = {
@@ -100,16 +96,14 @@ export class BobaShopRoom extends Room {
     },
   };
 
-  async onCreate(options: CreateOptions = {}) {
-    // Short shareable room code; private so it can only be joined by code (joinById).
-    this.roomId = await this.generateRoomCode();
-    this.setPrivate(true);
+  async onCreate() {
+    // Everyone shares one shop. joinOrCreate only lands here when no joinable room exists,
+    // so if one is already open it must be full: refuse instead of opening a second shop.
+    if (shopRoomOpen) throw new ServerError(SHOP_FULL_ERROR_CODE, "Shop is full");
+    shopRoomOpen = true;
 
-    // Restore the host's shop (money + furniture) from a previous session.
-    if (isValidShopId(options.shopId)) {
-      this.shopId = options.shopId;
-      await this.restoreShop(options.shopId);
-    }
+    // Restore the shared shop (money + furniture) from a previous session.
+    await this.restoreShop(SHARED_SHOP_ID);
 
     for (const def of STATIONS) {
       const station = new Station();
@@ -146,8 +140,8 @@ export class BobaShopRoom extends Room {
   }
 
   async onDispose() {
+    shopRoomOpen = false;
     await this.flushSave();
-    await this.presence.srem(ROOM_CODES_CHANNEL, this.roomId);
   }
 
   // ---------------------------------------------------------------- Persistence
@@ -170,7 +164,6 @@ export class BobaShopRoom extends Room {
 
   /** Save soon (debounced). Call after anything that changes money or furniture. */
   private scheduleSave() {
-    if (!this.shopId) return;
     clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => void this.flushSave(), SAVE_DEBOUNCE_MS);
   }
@@ -178,30 +171,15 @@ export class BobaShopRoom extends Room {
   private async flushSave() {
     clearTimeout(this.saveTimer);
     this.saveTimer = undefined;
-    if (!this.shopId) return;
     try {
-      await saveShop(this.shopId, {
+      await saveShop(SHARED_SHOP_ID, {
         version: 1,
         money: this.state.money,
         decorations: this.state.decorations.map((d) => ({ kind: d.kind, x: d.x, y: d.y })),
       });
     } catch (err) {
-      console.error(`[BobaShopRoom] failed to save shop ${this.shopId}`, err);
+      console.error(`[BobaShopRoom] failed to save shop ${SHARED_SHOP_ID}`, err);
     }
-  }
-
-  /** Generate a code not used by any other live room, and register it via the Presence API. */
-  private async generateRoomCode(): Promise<string> {
-    const used = new Set(await this.presence.smembers(ROOM_CODES_CHANNEL));
-    let code: string;
-    do {
-      code = "";
-      for (let i = 0; i < ROOM_CODE_LENGTH; i++) {
-        code += ROOM_CODE_ALPHABET[Math.floor(Math.random() * ROOM_CODE_ALPHABET.length)];
-      }
-    } while (used.has(code));
-    await this.presence.sadd(ROOM_CODES_CHANNEL, code);
-    return code;
   }
 
   private update(dt: number) {

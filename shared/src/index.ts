@@ -3,12 +3,19 @@
 export const ROOM_NAME = "boba_shop";
 export const SERVER_PORT = 2567;
 
-// Room codes: short, uppercase, without easily confused characters (0/O, 1/I/L).
-export const ROOM_CODE_LENGTH = 4;
-export const ROOM_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+// One shared shop: the first player opens it (creates the single room), everyone else joins it.
+export const MAX_PLAYERS = 2;
+/** Save id of the shared shop (money + furniture). */
+export const SHARED_SHOP_ID = "shared-shop";
+/** Matchmaking error code when the shop is already open and full (a second room is refused). */
+export const SHOP_FULL_ERROR_CODE = 4210;
 
-export function normalizeRoomCode(input: string): string {
-  return input.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+/** HTTP endpoint for the home screen: is the shop open, and how many players are inside. */
+export const LOBBY_PATH = "/lobby";
+export interface LobbyInfo {
+  open: boolean;
+  players: number;
+  maxPlayers: number;
 }
 
 export const WORLD_WIDTH = 960;
