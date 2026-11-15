@@ -119,6 +119,8 @@ const STATION_ICONS: Partial<Record<string, { url: string; height: number }>> = 
 };
 const stationIconKey = (id: string) => `station-icon-${id}`;
 
+const FLOOR_TEXTURE = "floor-wood";
+
 /** On-screen cup heights: sitting on a station / carried above the head. */
 const STATION_CUP_HEIGHT = 32;
 const HELD_CUP_HEIGHT = 26;
@@ -175,6 +177,7 @@ export class ShopScene extends Phaser.Scene {
     for (const [id, icon] of Object.entries(STATION_ICONS)) {
       if (icon) this.load.image(stationIconKey(id), icon.url);
     }
+    this.load.image(FLOOR_TEXTURE, "assets/floor/wood.jpg");
     preloadCupTextures(this);
   }
 
@@ -326,16 +329,9 @@ export class ShopScene extends Phaser.Scene {
 
   // ---------------------------------------------------------------- Views
 
+  /** Wood floor art, pre-cropped to the world size (client/assets-src/floor/build_floor.py). */
   private drawFloor() {
-    const g = this.add.graphics();
-    const tile = 40;
-    for (let y = 0; y < WORLD_HEIGHT; y += tile) {
-      for (let x = 0; x < WORLD_WIDTH; x += tile) {
-        g.fillStyle(((x + y) / tile) % 2 === 0 ? 0xf6efe6 : 0xeee3d3, 1);
-        g.fillRect(x, y, tile, tile);
-      }
-    }
-    g.setDepth(-1000);
+    this.add.image(0, 0, FLOOR_TEXTURE).setOrigin(0).setDisplaySize(WORLD_WIDTH, WORLD_HEIGHT).setDepth(-1000);
   }
 
   private createStations() {

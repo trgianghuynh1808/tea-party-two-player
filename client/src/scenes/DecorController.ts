@@ -17,6 +17,11 @@ const OK_COLOR = 0x2a9d8f;
 const BAD_COLOR = 0xe63946;
 const FLOOR_DEPTH = -500; // rugs: above the floor tiles, below everything else
 const UI_DEPTH = 15000;
+/** Decorate-mode overlay: a light veil over the floor with a cell grid so positions are easy to read. */
+const PLACE_TOP = 40; // furniture can't go above this (HUD / machine labels)
+const GRID_CELL = DECOR_GRID * 4;
+const VEIL_ALPHA = 0.35;
+const GRID_LINE_ALPHA = 0.35;
 
 interface DecorView {
   state: Decoration;
@@ -37,6 +42,8 @@ export class DecorController {
   private draggingId: string | null = null;
   private dragStart = { x: 0, y: 0 };
   private readonly grid: Phaser.GameObjects.Graphics;
+  /** Floor area the dragged piece would cover (green = OK, red = blocked). */
+  private readonly footprint: Phaser.GameObjects.Rectangle;
   private readonly sellZone: Phaser.GameObjects.Container;
   private readonly sellZoneBg: Phaser.GameObjects.Rectangle;
   private ghost?: { def: DecorationDef; view: Phaser.GameObjects.Container; outline: Phaser.GameObjects.Rectangle };
@@ -46,10 +53,13 @@ export class DecorController {
     private readonly room: Room<BobaShopState>,
     private readonly fontSize: (px: number) => string,
   ) {
+    // Above the floor and rugs, below stations, furniture and players.
     this.grid = scene.add.graphics().setDepth(FLOOR_DEPTH + 1).setVisible(false);
-    this.grid.lineStyle(1, 0x3d2c29, 0.08);
-    for (let x = 0; x <= WORLD_WIDTH; x += DECOR_GRID * 4) this.grid.lineBetween(x, 40, x, WORLD_HEIGHT);
-    for (let y = 40; y <= WORLD_HEIGHT; y += DECOR_GRID * 4) this.grid.lineBetween(0, y, WORLD_WIDTH, y);
+    this.grid.fillStyle(0xffffff, VEIL_ALPHA).fillRect(0, PLACE_TOP, WORLD_WIDTH, WORLD_HEIGHT - PLACE_TOP);
+    this.grid.lineStyle(1, 0x3d2c29, GRID_LINE_ALPHA);
+    for (let x = 0; x <= WORLD_WIDTH; x += GRID_CELL) this.grid.lineBetween(x, PLACE_TOP, x, WORLD_HEIGHT);
+    for (let y = PLACE_TOP; y <= WORLD_HEIGHT; y += GRID_CELL) this.grid.lineBetween(0, y, WORLD_WIDTH, y);
+    this.footprint = scene.add.rectangle(0, 0, 1, 1, OK_COLOR, 0.3).setDepth(FLOOR_DEPTH + 2).setVisible(false);
 
     this.sellZoneBg = scene.add.rectangle(0, 0, 260, 56, 0xe63946, 0.18).setStrokeStyle(3, BAD_COLOR, 0.7);
     const sellText = scene.add
@@ -121,6 +131,7 @@ export class DecorController {
     for (const view of this.views.values()) this.setDraggable(view, enabled);
     if (!enabled) {
       this.cancelGhost();
+      this.footprint.setVisible(false);
       this.sellZone.setVisible(false);
     }
   }
@@ -167,6 +178,7 @@ export class DecorController {
     const overSell = this.isOverSellZone(pointer.worldX, pointer.worldY);
     const ok = overSell || canPlaceDecoration(hit.view.def.kind, x, y, this.placed(), hit.id);
     hit.view.outline.setVisible(true).setStrokeStyle(3, ok ? OK_COLOR : BAD_COLOR);
+    this.showFootprint(hit.view.def, x, y, ok, !overSell);
     this.sellZoneBg.setFillStyle(BAD_COLOR, overSell ? 0.4 : 0.18);
   }
 
@@ -177,6 +189,7 @@ export class DecorController {
     this.draggingId = null;
     this.sellZone.setVisible(false);
     view.outline.setVisible(false);
+    this.footprint.setVisible(false);
 
     if (this.isOverSellZone(pointer.worldX, pointer.worldY)) {
       this.room.send(Messages.SellDecoration, { id });
@@ -252,17 +265,29 @@ export class DecorController {
     if (!this.ghost) return;
     const target = this.ghostTarget(clientX, clientY);
     this.ghost.view.setVisible(!!target);
-    if (!target) return;
+    if (!target) return this.footprint.setVisible(false);
     this.ghost.view.setPosition(target.x, target.y);
     this.ghost.outline.setStrokeStyle(3, target.ok ? OK_COLOR : BAD_COLOR);
+    this.showFootprint(this.ghost.def, target.x, target.y, target.ok);
   }
 
   private cancelGhost() {
     this.ghost?.view.destroy();
     this.ghost = undefined;
+    this.footprint?.setVisible(false);
   }
 
   // ---------------------------------------------------------------- Helpers
+
+  /** Shade the floor under the piece being placed so its exact cells are visible. */
+  private showFootprint(def: DecorationDef, x: number, y: number, ok: boolean, visible = true) {
+    this.footprint
+      .setVisible(visible)
+      .setPosition(x, y)
+      .setSize(def.width, def.height)
+      .setFillStyle(ok ? OK_COLOR : BAD_COLOR, 0.3);
+    this.footprint.setOrigin(0.5); // keep it centred on (x, y) after resizing
+  }
 
   /** Current furniture positions as the client sees them (used for placement preview). */
   private placed() {
