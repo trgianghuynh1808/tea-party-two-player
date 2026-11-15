@@ -12,15 +12,20 @@
       <h1>🧋 Boba Shop Co-op</h1>
       <p class="subtitle">Một quán chung, ai vào trước mở quán — tối đa 2 người</p>
 
-      <p class="picker-title">Chọn nhân vật</p>
+      <div class="char-stage" aria-hidden="true">
+        <span id="char-preview-big" class="char-sprite spin"></span>
+        <span class="char-shadow"></span>
+      </div>
+      <p id="char-name" class="char-name"></p>
+
       <div id="gender-picker" class="gender-picker" role="radiogroup" aria-label="Chọn nhân vật">
-        <button type="button" class="gender-option" data-gender="male" role="radio" aria-checked="false">
-          <span class="char-preview male" aria-hidden="true"></span>
-          <span>Nam</span>
-        </button>
         <button type="button" class="gender-option" data-gender="female" role="radio" aria-checked="false">
-          <span class="char-preview female" aria-hidden="true"></span>
+          <span class="char-sprite" data-gender="female" aria-hidden="true"></span>
           <span>Nữ</span>
+        </button>
+        <button type="button" class="gender-option" data-gender="male" role="radio" aria-checked="false">
+          <span class="char-sprite" data-gender="male" aria-hidden="true"></span>
+          <span>Nam</span>
         </button>
       </div>
 

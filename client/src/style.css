@@ -139,6 +139,149 @@ h1 {
   font-size: 14px;
 }
 
+/* Character picker. Sheets are 32×128: four 32×32 frames top→bottom (down, left, right, up);
+   main.ts sets --sheet per element. */
+.char-sprite {
+  --px: 3; /* pixel scale */
+  display: block;
+  width: calc(32px * var(--px));
+  height: calc(32px * var(--px));
+  background-image: var(--sheet);
+  background-repeat: no-repeat;
+  background-size: calc(32px * var(--px)) calc(128px * var(--px));
+  background-position: 0 0;
+  image-rendering: pixelated;
+}
+
+.char-stage {
+  position: relative;
+  width: 144px;
+  height: 132px;
+  margin: 4px auto 0;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 60%, #fff 0%, #efe3d2 70%);
+}
+
+.char-stage .char-sprite {
+  --px: 4.5;
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  z-index: 1;
+}
+
+.char-shadow {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  width: 64px;
+  height: 14px;
+  border-radius: 50%;
+  background: rgba(61, 44, 41, 0.18);
+  transform: translateX(-50%);
+}
+
+/* Turn around: down → left → up → right. */
+.char-sprite.spin {
+  animation: char-spin 2.4s step-end infinite;
+}
+
+@keyframes char-spin {
+  0% { background-position: 0 0; }
+  25% { background-position: 0 calc(-32px * var(--px)); }
+  50% { background-position: 0 calc(-96px * var(--px)); }
+  75% { background-position: 0 calc(-64px * var(--px)); }
+}
+
+/* Small hop when a character is picked. */
+.char-sprite.pop {
+  animation: char-pop 0.3s ease-out, char-spin 2.4s step-end 0.3s infinite;
+}
+
+@keyframes char-pop {
+  0% { transform: translateX(-50%) translateY(0); }
+  40% { transform: translateX(-50%) translateY(-14px); }
+  100% { transform: translateX(-50%) translateY(0); }
+}
+
+.char-name {
+  min-height: 1.2em;
+  margin: 6px 0 12px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.gender-picker {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.gender-option {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px 8px;
+  border: 2px solid #d8cbb9;
+  border-radius: 12px;
+  background: #fff;
+  color: #6b5b57;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.05s;
+}
+
+.gender-option .char-sprite {
+  --px: 2;
+  opacity: 0.6;
+  filter: grayscale(0.5);
+  transition: opacity 0.15s, filter 0.15s;
+}
+
+.gender-option:hover {
+  border-color: #b8a99a;
+}
+
+.gender-option:active {
+  transform: translateY(1px);
+}
+
+.gender-option.selected {
+  border-color: #e76f51;
+  background: #fff4ee;
+  color: #3d2c29;
+  box-shadow: 0 0 0 3px rgba(231, 111, 81, 0.18);
+}
+
+.gender-option.selected .char-sprite {
+  opacity: 1;
+  filter: none;
+}
+
+.gender-option.selected::after {
+  content: "✓";
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #e76f51;
+  color: #fff;
+  font-size: 13px;
+  line-height: 22px;
+}
+
+.gender-option:focus-visible {
+  outline: 3px solid #457b9d;
+  outline-offset: 2px;
+}
+
 .lobby-status {
   margin: 18px 0 10px;
   color: #6b5b57;
@@ -697,6 +840,29 @@ h1 {
 
   .subtitle {
     margin-bottom: 12px;
+  }
+
+  .char-stage {
+    width: 104px;
+    height: 92px;
+  }
+
+  .char-stage .char-sprite {
+    --px: 3;
+  }
+
+  .char-shadow {
+    bottom: 15px;
+    width: 44px;
+    height: 10px;
+  }
+
+  .char-name {
+    margin: 2px 0 8px;
+  }
+
+  .gender-option .char-sprite {
+    --px: 1.5;
   }
 
   .lobby-status {
