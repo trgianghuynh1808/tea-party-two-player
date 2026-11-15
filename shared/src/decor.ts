@@ -39,14 +39,15 @@ const decor = (
   color = 0x8d6e63,
 ): DecorationDef => ({ kind, label, price, color, shape: "rect", width, height, layer: "object", image: `assets/decor/${image}.png`, imageHeight });
 
-const rug = (kind: string, label: string, price: number, image: string, color: number): DecorationDef => ({
+/** Rugs fill their footprint, so give it the artwork's aspect ratio. */
+const rug = (kind: string, label: string, price: number, image: string, color: number, width = 120, height = 80): DecorationDef => ({
   kind,
   label,
   price,
   color,
   shape: "rect",
-  width: 120,
-  height: 80,
+  width,
+  height,
   layer: "floor",
   image: `assets/decor/${image}.png`,
 });
@@ -71,8 +72,20 @@ export const DECORATION_CATALOG: DecorationDef[] = [
   decor("lantern_lit", "Đèn bão (sáng)", 85, "lantern_gold_lit", 26, 22, 48, 0xffd166),
   decor("lantern_bronze_lit", "Đèn bão đồng (sáng)", 85, "lantern_bronze_lit", 26, 22, 48, 0xb5838d),
   // Rugs (furniture can stand on them)
-  rug("rug", "Thảm cói", 120, "rug_woven", 0xd4a373),
-  rug("rug_blue", "Thảm xanh hoa văn", 150, "rug_blue", 0x457b9d),
+  // Kind "rug" kept for old saves (it used to be a woven rug).
+  rug("rug", "Thảm bánh mì", 120, "rug_bread", 0xf1dcc4, 150, 56),
+  rug("rug_lavender", "Thảm oải hương", 70, "rug_lavender", 0xc3a6e6, 176, 54),
+  rug("rug_red", "Thảm đỏ", 70, "rug_red", 0xe8616e, 160, 60),
+  rug("rug_yellow_check", "Thảm caro vàng", 90, "rug_yellow_check", 0xfbeaa8, 160, 60),
+  rug("rug_lilac", "Thảm hoa văn tím", 100, "rug_lilac", 0xb8b6dc, 162, 60),
+  rug("rug_jute", "Thảm cói tròn", 100, "rug_jute", 0xc8956a, 162, 58),
+  rug("rug_lily_pad", "Thảm lá sen", 110, "rug_lily_pad", 0x4fbf83, 158, 62),
+  rug("rug_monstera", "Thảm lá monstera", 120, "rug_monstera", 0x7ccb85, 142, 68),
+  rug("rug_meadow", "Thảm đồng cỏ hoa", 130, "rug_meadow", 0xa6d07a, 158, 60),
+  rug("rug_pineapple", "Thảm quả dứa", 140, "rug_pineapple", 0xf2c45a, 184, 52),
+  rug("rug_bear_brown", "Thảm gấu nâu", 150, "rug_bear_brown", 0xb08463, 146, 66),
+  rug("rug_bear_white", "Thảm gấu trắng", 150, "rug_bear_white", 0xf1e6d6, 158, 60),
+  rug("rug_tiger", "Thảm hổ con", 160, "rug_tiger", 0xe8b04a, 146, 66),
 ];
 
 export const getDecorationDef = (kind: string) => DECORATION_CATALOG.find((d) => d.kind === kind);

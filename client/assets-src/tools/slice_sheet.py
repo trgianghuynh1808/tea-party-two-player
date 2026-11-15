@@ -79,11 +79,20 @@ def extract(sheet, boxes_path, names_path, out_dir, mode="edges"):
     im, mask = sprite_mask(sheet, mode)
     boxes = json.load(open(boxes_path))
     names = json.load(open(names_path))
-    rgba = np.asarray(im).copy()
-    rgba[..., 3] = np.where(mask, rgba[..., 3], 0)
+    # Map each detected box back to its blob, so a sprite only keeps its own pixels even when
+    # a neighbour's bounding box overlaps it.
+    lab, _ = ndi.label(mask)
+    blob_of = {}
+    for i, sl in enumerate(ndi.find_objects(lab), 1):
+        if sl is not None:
+            blob_of[(sl[1].start, sl[0].start, sl[1].stop, sl[0].stop)] = i
+    src = np.asarray(im)
     for name, idx in names.items():
         x0 = min(boxes[i][0] for i in idx); y0 = min(boxes[i][1] for i in idx)
         x1 = max(boxes[i][2] for i in idx); y1 = max(boxes[i][3] for i in idx)
+        own = np.isin(lab, [blob_of[tuple(boxes[i])] for i in idx])
+        rgba = src.copy()
+        rgba[..., 3] = np.where(own, rgba[..., 3], 0)
         out = os.path.join(out_dir, name)
         os.makedirs(os.path.dirname(out), exist_ok=True)
         Image.fromarray(rgba[y0:y1, x0:x1]).save(out)
