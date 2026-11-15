@@ -96,7 +96,8 @@ export const STATIONS: StationDef[] = [
   machine("pearl", 556, "Trân châu"),
   machine("cheese_foam", 676, "Kem cheese", 1),
   machine("passion", 796, "Chanh dây"),
-  { id: "delivery_counter", type: StationType.DeliveryCounter, label: "Giao hàng", x: 900, y: 340, width: 70, height: 170, color: 0x90be6d },
+  // Horizontal market stall in the bottom-right corner (art is ~1.9:1, see client/public/assets/stations/stall_checkered.png).
+  { id: "delivery_counter", type: StationType.DeliveryCounter, label: "Giao hàng", x: 850, y: 450, width: 180, height: 95, color: 0x90be6d },
   { id: "trash", type: StationType.Trash, label: "Thùng rác", x: 52, y: 420, width: 56, height: 56, color: 0x9e9e9e },
   // Kitchen island made of empty counters, for passing cups between players.
   ...[0, 1, 2, 3, 4].map(

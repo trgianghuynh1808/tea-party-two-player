@@ -101,11 +101,32 @@ const STATION_TEXTURES: Partial<Record<string, string>> = {
  * Insets are in source pixels; SLICE_SCALE maps source pixels to screen pixels.
  */
 const SLICE_SCALE = 58 / 123; // a 58 px table shows the small counter art at its natural height
+/**
+ * Look of the counters. "art" = checkered tablecloth images, "counter" = the previous wooden counters (9-slice).
+ * Switch back by setting a style to "counter" (all images are kept in assets/stations/).
+ */
+const COUNTER_STYLE = "art" as "art" | "counter"; // "Bàn": round checkered tables
+const DELIVERY_STYLE = "art" as "art" | "counter"; // "Giao hàng": checkered market stall
+/**
+ * Checkered art drawn to fit the station box (aspect kept). `topCentre` = where cups stand on the table top,
+ * as a fraction of the image height.
+ */
+const FITTED_ART: Partial<Record<StationType, { url: string; topCentre: number }>> = {
+  ...(COUNTER_STYLE === "art" && { [StationType.Counter]: { url: "assets/stations/table_checkered.png", topCentre: 0.25 } }),
+  ...(DELIVERY_STYLE === "art" && { [StationType.DeliveryCounter]: { url: "assets/stations/stall_checkered.png", topCentre: 0.45 } }),
+};
+const fittedArtKey = (type: string) => `station-art-${type}`;
+
 const SLICED_STATIONS: Partial<Record<StationType, { url: string; left: number; right: number; top: number; bottom: number }>> = {
-  [StationType.Counter]: { url: "assets/stations/counter.png", left: 12, right: 12, top: 12, bottom: 37 },
-  [StationType.DeliveryCounter]: { url: "assets/stations/counter_long.png", left: 12, right: 16, top: 12, bottom: 35 },
+  ...(COUNTER_STYLE === "counter" && {
+    [StationType.Counter]: { url: "assets/stations/counter.png", left: 12, right: 12, top: 12, bottom: 37 },
+  }),
+  ...(DELIVERY_STYLE === "counter" && {
+    [StationType.DeliveryCounter]: { url: "assets/stations/counter_long.png", left: 12, right: 16, top: 12, bottom: 35 },
+  }),
 };
 const slicedTextureKey = (type: string) => `station-sliced-${type}`;
+
 
 /** Ingredient icons drawn on top of a station so it reads at a glance (height in screen px). */
 const STATION_ICONS: Partial<Record<string, { url: string; height: number }>> = {
@@ -170,6 +191,9 @@ export class ShopScene extends Phaser.Scene {
     }
     for (const [id, url] of Object.entries(STATION_TEXTURES)) {
       if (url) this.load.image(stationTextureKey(id), url);
+    }
+    for (const [type, art] of Object.entries(FITTED_ART)) {
+      if (art) this.load.image(fittedArtKey(type), art.url);
     }
     for (const [type, slice] of Object.entries(SLICED_STATIONS)) {
       if (slice) this.load.image(slicedTextureKey(type), slice.url);
@@ -361,7 +385,11 @@ export class ShopScene extends Phaser.Scene {
         .setDepth(def.y + def.height / 2 + 1);
       // Cups stand on the table top, not on the counter's front face.
       const slice = SLICED_STATIONS[def.type];
-      const topSurfaceBottom = slice ? def.y + def.height / 2 - slice.bottom * SLICE_SCALE : Infinity;
+      const topSurfaceBottom = slice
+        ? def.y + def.height / 2 - slice.bottom * SLICE_SCALE
+        : FITTED_ART[def.type]
+          ? def.y - def.height / 2 + def.height * FITTED_ART[def.type]!.topCentre + 8
+          : Infinity;
       const itemCup = new CupView(this, def.x, Math.min(def.y + STATION_CUP_HEIGHT / 2, topSurfaceBottom), STATION_CUP_HEIGHT);
       const inset = rect instanceof Phaser.GameObjects.Image ? BAR_INSET.image : BAR_INSET.rect;
       const visibleWidth = rect.displayWidth;
@@ -388,6 +416,10 @@ export class ShopScene extends Phaser.Scene {
 
   /** Station artwork: 9-slice counter, plain image, or a coloured rectangle as fallback. */
   private createStationBody(def: StationDef) {
+    if (FITTED_ART[def.type]) {
+      const img = this.add.image(def.x, def.y, fittedArtKey(def.type));
+      return img.setScale(Math.min(def.width / img.width, def.height / img.height));
+    }
     const slice = SLICED_STATIONS[def.type];
     if (slice) {
       return this.add
