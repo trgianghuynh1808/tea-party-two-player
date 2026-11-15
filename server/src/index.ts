@@ -5,6 +5,7 @@ import express from "express";
 import { defineRoom, defineServer, matchMaker } from "colyseus";
 import { LOBBY_PATH, MAX_PLAYERS, ROOM_NAME, SERVER_PORT, type LobbyInfo } from "@boba/shared";
 import { BobaShopRoom } from "./rooms/BobaShopRoom.js";
+import { storageName } from "./persistence/ShopStore.js";
 
 const port = Number(process.env.PORT) || SERVER_PORT;
 
@@ -33,4 +34,5 @@ const server = defineServer({
 
 server.listen(port);
 console.log(`[BobaShop] Colyseus server listening on ws://localhost:${port}`);
+console.log(`[BobaShop] Saving shops to ${storageName}`);
 if (serveClient) console.log(`[BobaShop] Serving client from ${clientDist} → http://localhost:${port}`);

@@ -66,13 +66,25 @@ WebSocket from the same origin. Then either:
 - Drag furniture from the side panel into the shop to buy it; drag placed furniture to move it, or drop it on
   **🗑** to sell it back for 50%. Red outline = can't place there (machines, counters, other furniture).
   Rugs lie on the floor, so furniture can go on top of them.
-- The host's shop (money + furniture) is saved on the server in `server/data/shops/<shopId>.json`
-  (`DATA_DIR` env to change the folder). The shop id lives in the host browser's localStorage, so creating
-  a new room later from the same browser restores the shop. Players who join play in the host's shop.
+- Everyone shares one shop. Its money + furniture are saved (debounced ~1 s after each change, and when the
+  shop closes) and restored when the shop opens again.
+- Where saves go:
+  - **Upstash Redis** when `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are set. Use this in the
+    cloud: Render free wipes its disk on every restart, sleep and deploy.
+  - Otherwise JSON files in `server/data/shops/` (`DATA_DIR` env to change the folder) — fine locally.
+  - The server logs which one it uses at startup (`Saving shops to …`).
+- If the save can't be read when the shop opens (storage down), the shop still opens but saving is disabled
+  for that session, so an empty shop never overwrites the real save.
 - Catalog and placement rules: `shared/src/decor.ts`.
 
-> Free cloud hosts such as Render free have an ephemeral disk: saves are lost when the instance restarts or
-> sleeps. Saving works reliably when the server runs on your own machine (e.g. with the Cloudflare tunnel).
+### Setting up Upstash (free)
+
+1. Create a free account at upstash.com → **Create Database** (Redis, pick a region near the Render server,
+   e.g. US West for Oregon).
+2. In the database page, open the **REST API** section and copy `UPSTASH_REDIS_REST_URL` and
+   `UPSTASH_REDIS_REST_TOKEN`.
+3. Render dashboard → your service → **Environment** → add both variables → save (the service redeploys).
+4. Check the Render logs for `Saving shops to Upstash Redis`.
 
 ## Controls
 

@@ -74,6 +74,11 @@ export class BobaShopRoom extends Room {
   private orderSeq = 0;
   private orderSpawnTimer = FIRST_ORDER_DELAY_SECONDS;
   private saveTimer?: ReturnType<typeof setTimeout>;
+  /**
+   * False when the saved shop couldn't be read (storage down): we then never save, so an empty
+   * shop can't overwrite the real save. Players can still play; progress just isn't kept.
+   */
+  private canSave = true;
 
   messages = {
     position: (client: Client, payload: PositionMessage) => {
@@ -158,12 +163,14 @@ export class BobaShopRoom extends Room {
       }
       console.log(`[BobaShopRoom] restored shop ${shopId}: $${save.money}, ${this.state.decorations.length} decorations`);
     } catch (err) {
-      console.error(`[BobaShopRoom] failed to load shop ${shopId}`, err);
+      this.canSave = false;
+      console.error(`[BobaShopRoom] failed to load shop ${shopId}; saving disabled for this room`, err);
     }
   }
 
   /** Save soon (debounced). Call after anything that changes money or furniture. */
   private scheduleSave() {
+    if (!this.canSave) return;
     clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => void this.flushSave(), SAVE_DEBOUNCE_MS);
   }
@@ -171,6 +178,7 @@ export class BobaShopRoom extends Room {
   private async flushSave() {
     clearTimeout(this.saveTimer);
     this.saveTimer = undefined;
+    if (!this.canSave) return;
     try {
       await saveShop(SHARED_SHOP_ID, {
         version: 1,

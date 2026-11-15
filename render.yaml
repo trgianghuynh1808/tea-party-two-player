@@ -12,3 +12,9 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "24"
+      # Persistent saves (money + furniture). The free disk is wiped on restart, so saves go to
+      # Upstash Redis (free tier). Set both values in the Render dashboard; sync: false keeps them out of git.
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
