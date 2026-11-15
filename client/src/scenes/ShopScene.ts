@@ -107,6 +107,18 @@ const SLICED_STATIONS: Partial<Record<StationType, { url: string; left: number; 
 };
 const slicedTextureKey = (type: string) => `station-sliced-${type}`;
 
+/** Ingredient icons drawn on top of a station so it reads at a glance (height in screen px). */
+const STATION_ICONS: Partial<Record<string, { url: string; height: number }>> = {
+  cup_shelf: { url: "assets/cups/empty.png", height: 40 },
+  black_tea: { url: "assets/items/icons/tea_leaves.png", height: 36 },
+  milk: { url: "assets/items/icons/milk_carton.png", height: 42 },
+  green_tea: { url: "assets/items/icons/tea_leaves.png", height: 36 },
+  pearl: { url: "assets/items/icons/coffee_beans.png", height: 36 },
+  cheese_foam: { url: "assets/items/icons/whipped_cream.png", height: 36 },
+  passion: { url: "assets/items/icons/passion_seeds.png", height: 32 },
+};
+const stationIconKey = (id: string) => `station-icon-${id}`;
+
 /** On-screen cup heights: sitting on a station / carried above the head. */
 const STATION_CUP_HEIGHT = 32;
 const HELD_CUP_HEIGHT = 26;
@@ -159,6 +171,9 @@ export class ShopScene extends Phaser.Scene {
     }
     for (const [type, slice] of Object.entries(SLICED_STATIONS)) {
       if (slice) this.load.image(slicedTextureKey(type), slice.url);
+    }
+    for (const [id, icon] of Object.entries(STATION_ICONS)) {
+      if (icon) this.load.image(stationIconKey(id), icon.url);
     }
     preloadCupTextures(this);
   }
@@ -330,6 +345,12 @@ export class ShopScene extends Phaser.Scene {
         .setStrokeStyle(3, 0xffd166)
         .setVisible(false);
       const rect = this.createStationBody(def);
+      const iconDef = STATION_ICONS[def.id];
+      if (iconDef) {
+        // Sits on the station, under any cup placed there (same depth, created earlier).
+        const icon = this.add.image(def.x, def.y, stationIconKey(def.id));
+        icon.setScale(iconDef.height / icon.height).setDepth(def.y + def.height / 2);
+      }
       // Phones: icon only, the seconds would make neighbouring labels overlap at the larger font size.
       const timed = def.processSeconds ? (FONT_SCALE > 1 ? " ⏱" : ` ⏱${def.processSeconds}s`) : "";
       this.add
