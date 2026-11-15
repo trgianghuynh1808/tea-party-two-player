@@ -16,7 +16,6 @@ import {
   findNearestStationDef,
   planInteraction,
   stepMovement,
-  cupColor,
   describeItem,
   type DeliveredEvent,
   type Direction,
@@ -25,6 +24,7 @@ import {
 import { KeyboardState } from "../input/KeyboardState";
 import { TouchControls, isTouchDevice } from "../input/TouchControls";
 import { PALETTE_DRAG_START, type PaletteDragStart } from "../ui/DecorPanel";
+import { CupView, preloadCupTextures } from "./CupView";
 import { DecorController } from "./DecorController";
 
 import type { BobaShopState, Player } from "@boba/shared/schema";
@@ -57,7 +57,7 @@ interface PositionSample {
 interface PlayerView {
   container: Phaser.GameObjects.Container;
   sprite: Phaser.GameObjects.Sprite;
-  heldCup: Phaser.GameObjects.Rectangle;
+  heldCup: CupView;
   heldLabel: Phaser.GameObjects.Text;
   // Remote players: timestamped server positions for buffered interpolation.
   samples: PositionSample[];
@@ -81,11 +81,46 @@ const HEAD_Y = FEET_Y - 20 * CHARACTER_SCALE; // top of the hat
 const DIRECTION_FRAME: Record<string, number> = { down: 0, left: 1, right: 2, up: 3 };
 const characterKey = (gender: string) => `char-${gender === "female" ? "female" : "male"}`;
 
+/**
+ * Stations drawn with an image instead of a coloured rectangle (client/public/assets/stations/).
+ * The image is scaled to the station height and centred, keeping its aspect ratio.
+ */
+const STATION_TEXTURES: Partial<Record<string, string>> = {
+  cup_shelf: "assets/stations/cup_shelf.png",
+  black_tea: "assets/stations/black_tea.png",
+  green_tea: "assets/stations/green_tea.png",
+  milk: "assets/stations/milk.png",
+  pearl: "assets/stations/pearl.png",
+  cheese_foam: "assets/stations/cheese_foam.png",
+  passion: "assets/stations/passion.png",
+  trash: "assets/stations/trash.png",
+};
+/**
+ * Counters are drawn as 9-slice images so any station size keeps crisp corners and the same
+ * front-face thickness: only the flat table top in the middle is stretched.
+ * Insets are in source pixels; SLICE_SCALE maps source pixels to screen pixels.
+ */
+const SLICE_SCALE = 58 / 123; // a 58 px table shows the small counter art at its natural height
+const SLICED_STATIONS: Partial<Record<StationType, { url: string; left: number; right: number; top: number; bottom: number }>> = {
+  [StationType.Counter]: { url: "assets/stations/counter.png", left: 12, right: 12, top: 12, bottom: 37 },
+  [StationType.DeliveryCounter]: { url: "assets/stations/counter_long.png", left: 12, right: 16, top: 12, bottom: 35 },
+};
+const slicedTextureKey = (type: string) => `station-sliced-${type}`;
+
+/** On-screen cup heights: sitting on a station / carried above the head. */
+const STATION_CUP_HEIGHT = 32;
+const HELD_CUP_HEIGHT = 26;
+/** Progress bar inset from the station's visible edges (images have a thicker dark border). */
+const BAR_INSET = { rect: { x: 6, bottom: 8 }, image: { x: 9, bottom: 11 } };
+const stationTextureKey = (id: string) => `station-${id}`;
+
 interface StationView {
   def: StationDef;
-  rect: Phaser.GameObjects.Rectangle;
-  itemCup: Phaser.GameObjects.Rectangle;
+  rect: Phaser.GameObjects.Rectangle | Phaser.GameObjects.Image | Phaser.GameObjects.NineSlice;
+  itemCup: CupView;
   progressBar: Phaser.GameObjects.Rectangle;
+  /** Progress bar length at 100%: fits inside the visible station (an image may be narrower than def.width). */
+  progressMaxWidth: number;
   highlight: Phaser.GameObjects.Rectangle;
   readyLabel: Phaser.GameObjects.Text;
 }
@@ -119,6 +154,13 @@ export class ShopScene extends Phaser.Scene {
         frameHeight: CHARACTER_FRAME,
       });
     }
+    for (const [id, url] of Object.entries(STATION_TEXTURES)) {
+      if (url) this.load.image(stationTextureKey(id), url);
+    }
+    for (const [type, slice] of Object.entries(SLICED_STATIONS)) {
+      if (slice) this.load.image(slicedTextureKey(type), slice.url);
+    }
+    preloadCupTextures(this);
   }
 
   init(data: ShopSceneData) {
@@ -287,7 +329,7 @@ export class ShopScene extends Phaser.Scene {
         .rectangle(def.x, def.y, def.width + 12, def.height + 12)
         .setStrokeStyle(3, 0xffd166)
         .setVisible(false);
-      const rect = this.add.rectangle(def.x, def.y, def.width, def.height, def.color).setStrokeStyle(2, 0x3d2c29);
+      const rect = this.createStationBody(def);
       // Phones: icon only, the seconds would make neighbouring labels overlap at the larger font size.
       const timed = def.processSeconds ? (FONT_SCALE > 1 ? " ⏱" : ` ⏱${def.processSeconds}s`) : "";
       this.add
@@ -299,9 +341,15 @@ export class ShopScene extends Phaser.Scene {
         })
         .setOrigin(0.5)
         .setDepth(def.y + def.height / 2 + 1);
-      const itemCup = this.add.rectangle(def.x, def.y, 18, 24, 0xffffff).setStrokeStyle(2, 0xffffff).setVisible(false);
+      // Cups stand on the table top, not on the counter's front face.
+      const slice = SLICED_STATIONS[def.type];
+      const topSurfaceBottom = slice ? def.y + def.height / 2 - slice.bottom * SLICE_SCALE : Infinity;
+      const itemCup = new CupView(this, def.x, Math.min(def.y + STATION_CUP_HEIGHT / 2, topSurfaceBottom), STATION_CUP_HEIGHT);
+      const inset = rect instanceof Phaser.GameObjects.Image ? BAR_INSET.image : BAR_INSET.rect;
+      const visibleWidth = rect.displayWidth;
+      const progressMaxWidth = visibleWidth - inset.x * 2;
       const progressBar = this.add
-        .rectangle(def.x - def.width / 2 + 6, def.y + def.height / 2 - 8, 0, 6, 0x2a9d8f)
+        .rectangle(def.x - visibleWidth / 2 + inset.x, def.y + def.height / 2 - inset.bottom, 0, 6, 0x2a9d8f)
         .setOrigin(0, 0.5);
       const readyLabel = this.add
         .text(def.x, def.y + def.height / 2 + 10, "Xong! Space để lấy", {
@@ -316,8 +364,21 @@ export class ShopScene extends Phaser.Scene {
 
       for (const o of [highlight, rect, itemCup, progressBar]) o.setDepth(def.y + def.height / 2);
       readyLabel.setDepth(9000); // above players standing in front of the machine
-      this.stations.set(def.id, { def, rect, itemCup, progressBar, highlight, readyLabel });
+      this.stations.set(def.id, { def, rect, itemCup, progressBar, progressMaxWidth, highlight, readyLabel });
     }
+  }
+
+  /** Station artwork: 9-slice counter, plain image, or a coloured rectangle as fallback. */
+  private createStationBody(def: StationDef) {
+    const slice = SLICED_STATIONS[def.type];
+    if (slice) {
+      return this.add
+        .nineslice(def.x, def.y, slicedTextureKey(def.type), undefined, def.width / SLICE_SCALE, def.height / SLICE_SCALE, slice.left, slice.right, slice.top, slice.bottom)
+        .setScale(SLICE_SCALE);
+    }
+    const key = stationTextureKey(def.id);
+    if (STATION_TEXTURES[def.id]) return this.add.image(def.x, def.y, key).setScale(def.height / this.textures.getFrame(key).height);
+    return this.add.rectangle(def.x, def.y, def.width, def.height, def.color).setStrokeStyle(2, 0x3d2c29);
   }
 
   private createHud() {
@@ -378,9 +439,9 @@ export class ShopScene extends Phaser.Scene {
         color: isLocal ? "#3d2c29" : "#457b9d",
       })
       .setOrigin(0.5);
-    const heldCup = this.add.rectangle(0, HEAD_Y - 30, 16, 20, 0xffffff).setStrokeStyle(2, 0x3d2c29).setVisible(false);
+    const heldCup = new CupView(this, 0, HEAD_Y - 18, HELD_CUP_HEIGHT);
     const heldLabel = this.add
-      .text(0, HEAD_Y - 50, "", { fontFamily: "sans-serif", fontSize: fs(11), color: "#3d2c29", backgroundColor: "#ffffffcc" })
+      .text(0, HEAD_Y - 62, "", { fontFamily: "sans-serif", fontSize: fs(11), color: "#3d2c29", backgroundColor: "#ffffffcc" })
       .setOrigin(0.5)
       .setVisible(false);
 
@@ -462,12 +523,9 @@ export class ShopScene extends Phaser.Scene {
 
   private applyHeldItem(view: PlayerView, item: string) {
     const has = item !== EMPTY_HAND;
-    view.heldCup.setVisible(has);
+    view.heldCup.setItem(item);
     view.heldLabel.setVisible(has);
-    if (has) {
-      view.heldCup.setFillStyle(cupColor(item));
-      view.heldLabel.setText(describeItem(item));
-    }
+    if (has) view.heldLabel.setText(describeItem(item));
   }
 
   private updateShiftText(state: BobaShopState) {
@@ -481,10 +539,9 @@ export class ShopScene extends Phaser.Scene {
   }
 
   private applyStationItem(view: StationView, item: string, progress: number) {
-    view.itemCup.setVisible(item !== EMPTY_HAND);
-    if (item !== EMPTY_HAND) view.itemCup.setFillStyle(cupColor(item));
+    view.itemCup.setItem(item);
     const showProgress = progress > 0 && progress < 1;
-    view.progressBar.width = showProgress ? (view.def.width - 12) * progress : 0;
+    view.progressBar.width = showProgress ? view.progressMaxWidth * progress : 0;
     if (view.def.type === StationType.Counter) {
       // Counters: show what's on it so the teammate knows what to pick up.
       view.readyLabel.setVisible(item !== EMPTY_HAND);

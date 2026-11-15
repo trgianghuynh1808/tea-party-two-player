@@ -1,0 +1,109 @@
+{
+  "stations/milk.png": [
+    3
+  ],
+  "stations/pearl.png": [
+    4
+  ],
+  "stations/cheese_foam.png": [
+    5
+  ],
+  "stations/passion.png": [
+    6
+  ],
+  "stations/counter_long.png": [
+    11
+  ],
+  "stations/counter_row.png": [
+    12
+  ],
+  "stations/counter.png": [
+    10
+  ],
+  "stations/trash.png": [
+    9
+  ],
+  "characters/extra/female_front.png": [
+    7
+  ],
+  "characters/extra/female_back.png": [
+    8
+  ],
+  "items/tiles/cup_empty.png": [
+    13
+  ],
+  "items/tiles/cup_black_tea.png": [
+    14
+  ],
+  "items/tiles/cup_green_tea.png": [
+    15
+  ],
+  "items/tiles/cup_milk.png": [
+    16
+  ],
+  "items/tiles/pearl.png": [
+    17
+  ],
+  "items/tiles/whipped_cream.png": [
+    18
+  ],
+  "items/tiles/passion.png": [
+    19
+  ],
+  "items/tiles/pearl_2.png": [
+    29
+  ],
+  "items/tiles/whipped_cream_2.png": [
+    30
+  ],
+  "items/tiles/passion_seeds.png": [
+    31
+  ],
+  "items/tiles/passion_seeds_2.png": [
+    41
+  ],
+  "items/tiles/cheese_foam.png": [
+    42
+  ],
+  "items/tiles/passion_seeds_3.png": [
+    43
+  ],
+  "items/drinks/milk_tea_pearl.png": [
+    20
+  ],
+  "items/drinks/green_milk_tea.png": [
+    32
+  ],
+  "items/icons/coffee_bean.png": [
+    45
+  ],
+  "items/icons/coffee_beans.png": [
+    46
+  ],
+  "items/icons/whipped_cream.png": [
+    47
+  ],
+  "items/icons/passion_seeds.png": [
+    48,
+    44,
+    49
+  ],
+  "items/icons/cheese_foam.png": [
+    50
+  ],
+  "items/icons/tea_leaves.png": [
+    51
+  ],
+  "items/icons/milk_carton.png": [
+    52
+  ],
+  "items/icons/chocolate_bar.png": [
+    53
+  ],
+  "items/icons/cheese.png": [
+    54
+  ],
+  "items/icons/chocolate_piece.png": [
+    55
+  ]
+}
