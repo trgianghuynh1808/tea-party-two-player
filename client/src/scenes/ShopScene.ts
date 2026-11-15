@@ -25,7 +25,7 @@ import {
 } from "@boba/shared";
 import { KeyboardState } from "../input/KeyboardState";
 import { TouchControls, isTouchDevice } from "../input/TouchControls";
-import { PALETTE_DRAG_START, type PaletteDragStart } from "../ui/DecorPanel";
+import { DECOR_ROTATE, PALETTE_DRAG_START, type PaletteDragStart } from "../ui/DecorPanel";
 import { CupView, preloadCupTextures } from "./CupView";
 import { DecorController, preloadDecorTextures } from "./DecorController";
 
@@ -238,11 +238,14 @@ export class ShopScene extends Phaser.Scene {
       this.touch?.setEnabled(!enabled); // joystick would fight with dragging furniture
     };
     const onPaletteDrag = (e: PaletteDragStart) => this.decor?.startPaletteDrag(e);
+    const onRotate = () => this.decor?.rotate();
     this.game.events.on(DECORATE_MODE_EVENT, onDecorateMode);
     this.game.events.on(PALETTE_DRAG_START, onPaletteDrag);
+    this.game.events.on(DECOR_ROTATE, onRotate);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.game.events.off(DECORATE_MODE_EVENT, onDecorateMode);
       this.game.events.off(PALETTE_DRAG_START, onPaletteDrag);
+      this.game.events.off(DECOR_ROTATE, onRotate);
       this.decor?.destroy();
     });
 
@@ -290,6 +293,7 @@ export class ShopScene extends Phaser.Scene {
       decor.add(deco);
       $.listen(deco, "x", () => decor.syncPosition(deco.id));
       $.listen(deco, "y", () => decor.syncPosition(deco.id));
+      $.listen(deco, "rotation", () => decor.syncRotation(deco.id));
     });
     $.onRemove("decorations", (deco) => decor.remove(deco.id));
 

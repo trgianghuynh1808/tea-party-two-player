@@ -4,6 +4,8 @@ import type { BobaShopState } from "@boba/shared/schema";
 
 /** game.events event: the player started dragging a catalog item out of the panel. */
 export const PALETTE_DRAG_START = "palette-drag-start";
+/** game.events event: turn the piece being placed / the selected piece (⟳ button). */
+export const DECOR_ROTATE = "decor-rotate";
 export interface PaletteDragStart {
   kind: string;
   pointerId: number;
@@ -26,6 +28,7 @@ export class DecorPanel {
     root: HTMLElement,
     room: Room<BobaShopState>,
     onDragStart: (event: PaletteDragStart) => void,
+    onRotate: () => void,
   ) {
     root.replaceChildren();
     const title = document.createElement("h2");
@@ -35,7 +38,18 @@ export class DecorPanel {
     const help = document.createElement("p");
     help.className = "hint";
     help.textContent =
-      `Kéo đồ vào quán để mua. Kéo đồ trong quán để di chuyển, kéo vào 🗑 để bán lại ${DECORATION_REFUND_RATE * 100}%.`;
+      `Kéo đồ vào quán để mua. Kéo đồ trong quán để di chuyển, kéo vào 🗑 để bán lại ${DECORATION_REFUND_RATE * 100}%. ` +
+      "Bấm R (hoặc ⟳) để xoay món đang kéo / vừa chọn.";
+
+    const rotateBtn = document.createElement("button");
+    rotateBtn.type = "button";
+    rotateBtn.className = "btn rotate-btn";
+    rotateBtn.textContent = "⟳ Xoay (R)";
+    // pointerdown + preventDefault: works while another finger drags, and doesn't steal focus from the game.
+    rotateBtn.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      onRotate();
+    });
 
     const list = document.createElement("div");
     list.className = "decor-list";
@@ -72,7 +86,7 @@ export class DecorPanel {
       this.items.push({ el, price: def.price });
     }
 
-    root.append(title, this.moneyLabel, help, list);
+    root.append(title, this.moneyLabel, help, rotateBtn, list);
 
     const $ = Callbacks.get(room);
     this.unsubscribers.push($.listen("money", (money) => this.updateMoney(money)));

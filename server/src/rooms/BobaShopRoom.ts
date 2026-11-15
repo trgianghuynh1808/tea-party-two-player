@@ -16,6 +16,7 @@ import {
   ServerEvents,
   StationType,
   canPlaceDecoration,
+  normalizeRotation,
   getDecorationDef,
   defaultCharacterOf,
   getCharacter,
@@ -89,10 +90,10 @@ export class BobaShopRoom extends Room {
     interact: (client: Client) => {
       this.handleInteract(client);
     },
-    buy_decoration: (client: Client, payload: { kind: string; x: number; y: number }) => {
+    buy_decoration: (client: Client, payload: { kind: string; x: number; y: number; rotation?: number }) => {
       this.handleBuyDecoration(client, payload);
     },
-    move_decoration: (client: Client, payload: { id: string; x: number; y: number }) => {
+    move_decoration: (client: Client, payload: { id: string; x: number; y: number; rotation?: number }) => {
       this.handleMoveDecoration(client, payload);
     },
     sell_decoration: (client: Client, payload: { id: string }) => {
@@ -163,8 +164,10 @@ export class BobaShopRoom extends Room {
       this.state.money = save.money;
       for (const d of save.decorations) {
         // Re-validate in case the layout or catalog changed since the save.
-        if (!canPlaceDecoration(d.kind, d.x, d.y, this.state.decorations)) continue;
-        this.addDecoration(d.kind, d.x, d.y);
+        const def = getDecorationDef(d.kind);
+        const rotation = def ? normalizeRotation(def, d.rotation) : 0;
+        if (!canPlaceDecoration(d.kind, d.x, d.y, this.state.decorations, undefined, rotation)) continue;
+        this.addDecoration(d.kind, d.x, d.y, rotation);
       }
       console.log(`[BobaShopRoom] restored shop ${shopId}: $${save.money}, ${this.state.decorations.length} decorations`);
     } catch (err) {
@@ -188,7 +191,7 @@ export class BobaShopRoom extends Room {
       await saveShop(SHARED_SHOP_ID, {
         version: 1,
         money: this.state.money,
-        decorations: this.state.decorations.map((d) => ({ kind: d.kind, x: d.x, y: d.y })),
+        decorations: this.state.decorations.map((d) => ({ kind: d.kind, x: d.x, y: d.y, rotation: d.rotation })),
       });
     } catch (err) {
       console.error(`[BobaShopRoom] failed to save shop ${SHARED_SHOP_ID}`, err);
@@ -402,12 +405,13 @@ export class BobaShopRoom extends Room {
 
   // ---------------------------------------------------------------- Decorations (furniture)
 
-  private addDecoration(kind: string, x: number, y: number): Decoration {
+  private addDecoration(kind: string, x: number, y: number, rotation = 0): Decoration {
     const deco = new Decoration();
     deco.id = "deco_" + ++this.decorationSeq;
     deco.kind = kind;
     deco.x = x;
     deco.y = y;
+    deco.rotation = rotation;
     this.state.decorations.push(deco);
     return deco;
   }
@@ -417,7 +421,7 @@ export class BobaShopRoom extends Room {
     return this.state.phase === GamePhase.Playing ? "Đang trong ca, trang trí sau khi hết ca nhé" : undefined;
   }
 
-  private handleBuyDecoration(client: Client, payload: { kind: string; x: number; y: number }) {
+  private handleBuyDecoration(client: Client, payload: { kind: string; x: number; y: number; rotation?: number }) {
     const fail = (reason: string) => client.send(ServerEvents.InteractFailed, { reason });
     const blocked = this.decorateBlockedReason();
     if (blocked) return fail(blocked);
@@ -426,27 +430,32 @@ export class BobaShopRoom extends Room {
     if (!def) return;
     const x = snapToGrid(Number(payload.x));
     const y = snapToGrid(Number(payload.y));
+    const rotation = normalizeRotation(def, payload.rotation);
     if (this.state.money < def.price) return fail(`Không đủ tiền (cần $${def.price})`);
-    if (!canPlaceDecoration(def.kind, x, y, this.state.decorations)) return fail("Không đặt được ở đây");
+    if (!canPlaceDecoration(def.kind, x, y, this.state.decorations, undefined, rotation)) return fail("Không đặt được ở đây");
 
     this.state.money -= def.price;
-    this.addDecoration(def.kind, x, y);
+    this.addDecoration(def.kind, x, y, rotation);
     this.scheduleSave();
   }
 
-  private handleMoveDecoration(client: Client, payload: { id: string; x: number; y: number }) {
+  /** Move and/or turn a placed piece (rotation omitted = keep the current one). */
+  private handleMoveDecoration(client: Client, payload: { id: string; x: number; y: number; rotation?: number }) {
     const fail = (reason: string) => client.send(ServerEvents.InteractFailed, { reason });
     const blocked = this.decorateBlockedReason();
     if (blocked) return fail(blocked);
 
     const deco = this.state.decorations.find((d) => d.id === payload?.id);
-    if (!deco) return;
+    const def = deco && getDecorationDef(deco.kind);
+    if (!deco || !def) return;
     const x = snapToGrid(Number(payload.x));
     const y = snapToGrid(Number(payload.y));
-    if (!canPlaceDecoration(deco.kind, x, y, this.state.decorations, deco.id)) return fail("Không đặt được ở đây");
+    const rotation = payload.rotation === undefined ? deco.rotation : normalizeRotation(def, payload.rotation);
+    if (!canPlaceDecoration(deco.kind, x, y, this.state.decorations, deco.id, rotation)) return fail("Không đặt được ở đây");
 
     deco.x = x;
     deco.y = y;
+    deco.rotation = rotation;
     this.scheduleSave();
   }
 

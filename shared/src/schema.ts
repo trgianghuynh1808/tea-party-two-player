@@ -26,6 +26,8 @@ export class Decoration extends Schema {
   @type("string") kind: string = "";
   @type("number") x: number = 0;
   @type("number") y: number = 0;
+  /** 0..3, meaning depends on the catalog item's rotation mode (see DecorationRotation). */
+  @type("number") rotation: number = 0;
 }
 
 export class Order extends Schema {

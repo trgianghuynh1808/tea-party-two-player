@@ -26,6 +26,38 @@ export interface DecorationDef {
    * like furniture seen from the front. Floor items (rugs) ignore this and fill the footprint.
    */
   imageHeight?: number;
+  /** How it can be turned in decorate mode (default "none"). */
+  rotation?: DecorationRotation;
+  /** For rotation "views": artwork per facing, used instead of `image`. */
+  views?: Record<DecorationView, string>;
+}
+
+/**
+ * How a piece turns (rotation index 0..3, one press of R = next index):
+ * - none:   looks the same from every side (plants, lanterns) — always 0.
+ * - flip:   0 = as drawn, 1 = mirrored left/right.
+ * - rotate: top-down art (rugs) turned by quarter turns; the footprint swaps width/height on 1 and 3.
+ * - views:  separate artwork per facing: 0 front, 1 left, 2 back, 3 right (see VIEW_ORDER).
+ */
+export type DecorationRotation = "none" | "flip" | "rotate" | "views";
+export type DecorationView = "front" | "left" | "back" | "right";
+export const VIEW_ORDER: readonly DecorationView[] = ["front", "left", "back", "right"];
+
+export function rotationCount(def: DecorationDef): number {
+  return def.rotation === "flip" ? 2 : def.rotation === "rotate" || def.rotation === "views" ? 4 : 1;
+}
+
+/** Clamp untrusted input (client messages, old saves) to a rotation this piece supports. */
+export function normalizeRotation(def: DecorationDef, rotation: unknown): number {
+  const r = Number(rotation);
+  return Number.isInteger(r) && r >= 0 && r < rotationCount(def) ? r : 0;
+}
+
+/** Floor footprint for a rotation: rugs turned a quarter swap width and height. */
+export function footprintOf(def: DecorationDef, rotation = 0): { width: number; height: number } {
+  return def.rotation === "rotate" && rotation % 2 === 1
+    ? { width: def.height, height: def.width }
+    : { width: def.width, height: def.height };
 }
 
 const decor = (
@@ -37,7 +69,20 @@ const decor = (
   height: number,
   imageHeight: number,
   color = 0x8d6e63,
-): DecorationDef => ({ kind, label, price, color, shape: "rect", width, height, layer: "object", image: `assets/decor/${image}.png`, imageHeight });
+  rotation: DecorationRotation = "none",
+): DecorationDef => ({
+  kind,
+  label,
+  price,
+  color,
+  shape: "rect",
+  width,
+  height,
+  layer: "object",
+  image: `assets/decor/${image}.png`,
+  imageHeight,
+  rotation,
+});
 
 /** Rugs fill their footprint, so give it the artwork's aspect ratio. */
 const rug = (kind: string, label: string, price: number, image: string, color: number, width = 120, height = 80): DecorationDef => ({
@@ -50,6 +95,7 @@ const rug = (kind: string, label: string, price: number, image: string, color: n
   height,
   layer: "floor",
   image: `assets/decor/${image}.png`,
+  rotation: "rotate",
 });
 
 // Kinds are saved in shop files: keep existing ones (plant, lamp, chair, table, rug) when changing the catalog.
@@ -62,8 +108,17 @@ export const DECORATION_CATALOG: DecorationDef[] = [
   decor("succulent_small", "Sen đá mini", 25, "succulent_small", 22, 20, 30, 0x457b9d),
   decor("succulent_large", "Sen đá lớn", 55, "succulent_5", 30, 28, 46, 0x457b9d),
   // Seating
-  decor("chair", "Ghế mây", 40, "woven_chair", 30, 26, 58, 0xa1887f),
-  decor("stool", "Đôn gỗ", 35, "stool", 28, 24, 40, 0xa1887f),
+  {
+    ...decor("chair", "Ghế mây", 40, "woven_chair_front", 30, 26, 58, 0xa1887f, "views"),
+    // Built by client/assets-src/tools/build_chair_views.py from the 4-view sheet.
+    views: {
+      front: "assets/decor/woven_chair_front.png",
+      left: "assets/decor/woven_chair_left.png",
+      back: "assets/decor/woven_chair_back.png",
+      right: "assets/decor/woven_chair_right.png",
+    },
+  },
+  decor("stool", "Đôn gỗ", 35, "stool", 28, 24, 40, 0xa1887f, "flip"),
   { kind: "table", label: "Bàn khách", price: 90, color: 0x8d6e63, shape: "rect", width: 60, height: 40, layer: "object" },
   // Lighting
   decor("lamp", "Lồng đèn đỏ", 75, "red_lantern_lit", 30, 26, 56, 0xf4a261),
@@ -109,6 +164,7 @@ export interface PlacedDecoration {
   kind: string;
   x: number;
   y: number;
+  rotation?: number;
 }
 
 interface Rect {
@@ -128,7 +184,7 @@ const rectOf = (x: number, y: number, w: number, h: number, margin = 0): Rect =>
 const overlaps = (a: Rect, b: Rect) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
 
 /**
- * Can a decoration of `kind` be placed with its center at (x, y)?
+ * Can a decoration of `kind`, turned to `rotation`, be placed with its center at (x, y)?
  * `others` = furniture already in the shop; `ignoreId` = the piece being moved.
  */
 export function canPlaceDecoration(
@@ -137,11 +193,13 @@ export function canPlaceDecoration(
   y: number,
   others: Iterable<PlacedDecoration>,
   ignoreId?: string,
+  rotation = 0,
 ): boolean {
   const def = getDecorationDef(kind);
   if (!def || !Number.isFinite(x) || !Number.isFinite(y)) return false;
 
-  const r = rectOf(x, y, def.width, def.height);
+  const size = footprintOf(def, rotation);
+  const r = rectOf(x, y, size.width, size.height);
   if (r.left < PLACE_AREA.minX || r.top < PLACE_AREA.minY || r.right > PLACE_AREA.maxX || r.bottom > PLACE_AREA.maxY) {
     return false;
   }
@@ -155,7 +213,8 @@ export function canPlaceDecoration(
     const od = getDecorationDef(o.kind);
     // Furniture may sit on a rug, but rugs don't stack and furniture doesn't stack.
     if (!od || od.layer !== def.layer) continue;
-    if (overlaps(r, rectOf(o.x, o.y, od.width, od.height))) return false;
+    const os = footprintOf(od, o.rotation ?? 0);
+    if (overlaps(r, rectOf(o.x, o.y, os.width, os.height))) return false;
   }
   return true;
 }
@@ -166,7 +225,7 @@ export function canPlaceDecoration(
 export interface ShopSave {
   version: 1;
   money: number;
-  decorations: { kind: string; x: number; y: number }[];
+  decorations: { kind: string; x: number; y: number; rotation?: number }[];
 }
 
 /** Shop ids are generated by the host's browser; keep them filename-safe. */

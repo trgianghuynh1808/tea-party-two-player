@@ -21,7 +21,7 @@ import {
 import type { BobaShopState } from "@boba/shared/schema";
 import { FORCE_TOUCH_PARAM, isTouchDevice } from "./input/TouchControls";
 import { DECORATE_MODE_EVENT, ShopScene, type ShopSceneData } from "./scenes/ShopScene";
-import { DecorPanel, PALETTE_DRAG_START } from "./ui/DecorPanel";
+import { DECOR_ROTATE, DecorPanel, PALETTE_DRAG_START } from "./ui/DecorPanel";
 import { OrdersPanel, buildMenu } from "./ui/OrdersPanel";
 import { ShiftOverlay } from "./ui/ShiftOverlay";
 
@@ -295,7 +295,12 @@ function startGame(room: Room<BobaShopState>) {
   game.scene.add("ShopScene", ShopScene, true, data);
   ordersPanel = new OrdersPanel(ordersRoot, room);
   shiftOverlay = new ShiftOverlay(shiftOverlayRoot, room);
-  decorPanel = new DecorPanel(decorRoot, room, (e) => game?.events.emit(PALETTE_DRAG_START, e));
+  decorPanel = new DecorPanel(
+    decorRoot,
+    room,
+    (e) => game?.events.emit(PALETTE_DRAG_START, e),
+    () => game?.events.emit(DECOR_ROTATE),
+  );
 
   const $state = Callbacks.get(room);
   const renderPlayerCount = () => (playerCountLabel.textContent = `${room.state.players.size}/${MAX_PLAYERS}`);

@@ -3,11 +3,15 @@ import type { Room } from "@colyseus/sdk";
 import {
   DECOR_GRID,
   Messages,
+  VIEW_ORDER,
   WORLD_HEIGHT,
   WORLD_WIDTH,
   canPlaceDecoration,
   DECORATION_CATALOG,
+  footprintOf,
   getDecorationDef,
+  normalizeRotation,
+  rotationCount,
   snapToGrid,
   type DecorationDef,
 } from "@boba/shared";
@@ -16,6 +20,7 @@ import type { PaletteDragStart } from "../ui/DecorPanel";
 
 const OK_COLOR = 0x2a9d8f;
 const BAD_COLOR = 0xe63946;
+const SELECT_COLOR = 0xffd166;
 const FLOOR_DEPTH = -500; // rugs: above the floor tiles, below everything else
 const UI_DEPTH = 15000;
 /** Decorate-mode overlay: a light veil over the floor with a cell grid so positions are easy to read. */
@@ -23,38 +28,52 @@ const PLACE_TOP = 40; // furniture can't go above this (HUD / machine labels)
 const GRID_CELL = DECOR_GRID * 4;
 const VEIL_ALPHA = 0.35;
 const GRID_LINE_ALPHA = 0.35;
+/** If the server rejects a move/turn, the synced state doesn't change: re-sync to it after this long. */
+const RESYNC_MS = 600;
 
-const decorTextureKey = (kind: string) => `decor-${kind}`;
+const decorTextureKey = (kind: string, view?: string) => (view ? `decor-${kind}-${view}` : `decor-${kind}`);
 
 /** Load the artwork of every catalog item (call from the scene's preload). */
 export function preloadDecorTextures(scene: Phaser.Scene) {
-  for (const def of DECORATION_CATALOG) if (def.image) scene.load.image(decorTextureKey(def.kind), def.image);
+  for (const def of DECORATION_CATALOG) {
+    if (def.image) scene.load.image(decorTextureKey(def.kind), def.image);
+    for (const [view, url] of Object.entries(def.views ?? {})) scene.load.image(decorTextureKey(def.kind, view), url);
+  }
 }
 
 /**
- * The visible part of a piece of furniture, centred on its floor footprint.
+ * The visible part of a piece of furniture turned to `rotation`, centred on its floor footprint.
  * Artwork stands on the footprint (bottom-aligned) and may rise above it; rugs fill the footprint.
  * Returns the objects plus the box they cover (for the drag hit area).
  */
-function buildDecorVisual(scene: Phaser.Scene, def: DecorationDef, alpha = 1) {
-  const key = decorTextureKey(def.kind);
-  if (def.image && scene.textures.exists(key)) {
+function buildDecorVisual(
+  scene: Phaser.Scene,
+  def: DecorationDef,
+  rotation: number,
+  alpha = 1,
+): { objects: Phaser.GameObjects.GameObject[]; width: number; halfHeight: number; hasArt: boolean } {
+  const size = footprintOf(def, rotation);
+  const viewKey = def.rotation === "views" ? decorTextureKey(def.kind, VIEW_ORDER[rotation]) : undefined;
+  const key = viewKey && scene.textures.exists(viewKey) ? viewKey : decorTextureKey(def.kind);
+  if (scene.textures.exists(key)) {
     const img = scene.add.image(0, 0, key).setAlpha(alpha);
     if (def.layer === "floor") {
-      img.setDisplaySize(def.width, def.height);
-    } else {
-      img.setOrigin(0.5, 1).setY(def.height / 2).setScale((def.imageHeight ?? def.height) / img.height);
+      // Top-down art: size it unrotated, then turn it (a quarter turn swaps its on-screen width/height).
+      img.setDisplaySize(def.width, def.height).setAngle(def.rotation === "rotate" ? rotation * 90 : 0);
+      return { objects: [img], width: size.width, halfHeight: size.height / 2, hasArt: true };
     }
-    const top = def.layer === "floor" ? def.height / 2 : Math.max(def.height / 2, img.displayHeight - def.height / 2);
+    img.setOrigin(0.5, 1).setY(def.height / 2).setScale((def.imageHeight ?? def.height) / img.height);
+    if (def.rotation === "flip") img.setFlipX(rotation === 1);
+    const top = Math.max(def.height / 2, img.displayHeight - def.height / 2);
     return { objects: [img], width: Math.max(def.width, img.displayWidth), halfHeight: top, hasArt: true };
   }
   const shape =
     def.shape === "circle"
-      ? scene.add.circle(0, 0, def.width / 2, def.color, alpha)
-      : scene.add.rectangle(0, 0, def.width, def.height, def.color, alpha);
+      ? scene.add.circle(0, 0, size.width / 2, def.color, alpha)
+      : scene.add.rectangle(0, 0, size.width, size.height, def.color, alpha);
   shape.setStrokeStyle(2, 0x3d2c29, def.layer === "floor" ? 0.35 : 1);
   if (def.layer === "floor") shape.setAlpha(0.75 * alpha);
-  return { objects: [shape], width: def.width, halfHeight: def.height / 2, hasArt: false };
+  return { objects: [shape], width: size.width, halfHeight: size.height / 2, hasArt: false };
 }
 
 interface DecorView {
@@ -62,25 +81,42 @@ interface DecorView {
   def: DecorationDef;
   container: Phaser.GameObjects.Container;
   outline: Phaser.GameObjects.Rectangle;
+  /** Current artwork objects (rebuilt when the piece turns). */
+  visual: Phaser.GameObjects.GameObject[];
+  /** Rotation currently drawn (may differ from state.rotation while dragging / waiting for the server). */
+  rotation: number;
+}
+
+interface Ghost {
+  def: DecorationDef;
+  view: Phaser.GameObjects.Container;
+  outline: Phaser.GameObjects.Rectangle;
+  visual: Phaser.GameObjects.GameObject[];
+  rotation: number;
+  lastClient: { x: number; y: number };
 }
 
 /**
  * Furniture in the shop: renders synced decorations and, in "decorate mode", lets the player
  * - drag catalog items from the DOM panel into the shop (buy + place),
- * - drag placed furniture to move it, or onto the 🗑 zone to sell it.
+ * - drag placed furniture to move it, or onto the 🗑 zone to sell it,
+ * - turn pieces with R / the ⟳ button (the piece being dragged, or the last one touched).
  * Placement is previewed with shared rules (canPlaceDecoration); the server re-validates.
  */
 export class DecorController {
   private views = new Map<string, DecorView>();
   private enabled = false;
   private draggingId: string | null = null;
-  private dragStart = { x: 0, y: 0 };
+  private dragStart = { x: 0, y: 0, rotation: 0 };
+  private lastDragPointer = { x: 0, y: 0 };
+  /** Last placed piece the player touched: R / ⟳ turns it. */
+  private selectedId: string | null = null;
   private readonly grid: Phaser.GameObjects.Graphics;
   /** Floor area the dragged piece would cover (green = OK, red = blocked). */
   private readonly footprint: Phaser.GameObjects.Rectangle;
   private readonly sellZone: Phaser.GameObjects.Container;
   private readonly sellZoneBg: Phaser.GameObjects.Rectangle;
-  private ghost?: { def: DecorationDef; view: Phaser.GameObjects.Container; outline: Phaser.GameObjects.Rectangle };
+  private ghost?: Ghost;
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -107,6 +143,8 @@ export class DecorController {
     scene.input.on(Phaser.Input.Events.DRAG_START, this.onDragStart, this);
     scene.input.on(Phaser.Input.Events.DRAG, this.onDrag, this);
     scene.input.on(Phaser.Input.Events.DRAG_END, this.onDragEnd, this);
+    scene.input.on(Phaser.Input.Events.POINTER_DOWN, this.onPointerDown, this);
+    window.addEventListener("keydown", this.onKeyDown);
   }
 
   get isEnabled() {
@@ -117,10 +155,12 @@ export class DecorController {
   add(state: Decoration) {
     const def = getDecorationDef(state.kind);
     if (!def) return;
-    const visual = buildDecorVisual(this.scene, def);
+    const rotation = normalizeRotation(def, state.rotation);
+    const visual = buildDecorVisual(this.scene, def, rotation);
+    const size = footprintOf(def, rotation);
 
     const outline = this.scene.add
-      .rectangle(0, 0, def.width + 6, def.height + 6)
+      .rectangle(0, 0, size.width + 6, size.height + 6)
       .setStrokeStyle(3, OK_COLOR)
       .setVisible(false);
     const children: Phaser.GameObjects.GameObject[] = [...visual.objects, outline];
@@ -135,7 +175,7 @@ export class DecorController {
 
     // Hit area: a centred box tall enough to cover artwork that rises above the footprint.
     const container = this.scene.add.container(state.x, state.y, children).setSize(visual.width, visual.halfHeight * 2);
-    const view: DecorView = { state, def, container, outline };
+    const view: DecorView = { state, def, container, outline, visual: visual.objects, rotation };
     this.views.set(state.id, view);
     this.applyDepth(view);
     this.setDraggable(view, this.enabled);
@@ -149,9 +189,17 @@ export class DecorController {
     this.applyDepth(view);
   }
 
+  /** Synced rotation changed (or a local turn needs to snap back to the server's value). */
+  syncRotation(id: string) {
+    const view = this.views.get(id);
+    if (!view || this.draggingId === id) return;
+    this.renderRotation(view, normalizeRotation(view.def, view.state.rotation));
+  }
+
   remove(id: string) {
     this.views.get(id)?.container.destroy();
     this.views.delete(id);
+    if (this.selectedId === id) this.selectedId = null;
   }
 
   /** Turn decorate mode on/off: grid, draggable furniture. */
@@ -162,16 +210,77 @@ export class DecorController {
     for (const view of this.views.values()) this.setDraggable(view, enabled);
     if (!enabled) {
       this.cancelGhost();
+      this.select(null);
       this.footprint.setVisible(false);
       this.sellZone.setVisible(false);
     }
+  }
+
+  /**
+   * Turn the piece being placed: the catalog item being dragged in, the placed piece being dragged,
+   * or else the last placed piece the player touched (saved right away if it still fits).
+   */
+  rotate() {
+    if (!this.enabled) return;
+    if (this.ghost) {
+      const g = this.ghost;
+      this.setGhostRotation((g.rotation + 1) % rotationCount(g.def));
+      this.updateGhost(g.lastClient.x, g.lastClient.y);
+      return;
+    }
+    const dragged = this.draggingId ? this.views.get(this.draggingId) : undefined;
+    if (dragged) {
+      this.renderRotation(dragged, (dragged.rotation + 1) % rotationCount(dragged.def));
+      this.previewDrag(dragged, this.lastDragPointer.x, this.lastDragPointer.y);
+      return;
+    }
+    const id = this.selectedId;
+    const view = id ? this.views.get(id) : undefined;
+    if (!id || !view || rotationCount(view.def) === 1) return;
+    const next = (view.rotation + 1) % rotationCount(view.def);
+    const { x, y } = view.state;
+    if (!canPlaceDecoration(view.def.kind, x, y, this.placed(), id, next)) {
+      // Doesn't fit turned this way (e.g. a rug would hit a counter): flash red, keep it as is.
+      view.outline.setStrokeStyle(3, BAD_COLOR);
+      this.scene.time.delayedCall(400, () => this.selectedId === id && view.outline.setStrokeStyle(3, SELECT_COLOR));
+      return;
+    }
+    this.renderRotation(view, next);
+    this.room.send(Messages.MoveDecoration, { id, x, y, rotation: next });
+    this.scene.time.delayedCall(RESYNC_MS, () => this.syncRotation(id));
   }
 
   destroy() {
     this.scene.input.off(Phaser.Input.Events.DRAG_START, this.onDragStart, this);
     this.scene.input.off(Phaser.Input.Events.DRAG, this.onDrag, this);
     this.scene.input.off(Phaser.Input.Events.DRAG_END, this.onDragEnd, this);
+    this.scene.input.off(Phaser.Input.Events.POINTER_DOWN, this.onPointerDown, this);
+    window.removeEventListener("keydown", this.onKeyDown);
     this.cancelGhost();
+  }
+
+  // ---------------------------------------------------------------- Selection + keyboard
+
+  /** R turns the current piece. Physical key code, so Vietnamese IMEs (Telex uses "r") don't swallow it. */
+  private onKeyDown = (e: KeyboardEvent) => {
+    if (e.code !== "KeyR" || e.repeat || !this.enabled) return;
+    const target = e.target as HTMLElement | null;
+    if (target?.closest("input, textarea, [contenteditable]")) return;
+    e.preventDefault();
+    this.rotate();
+  };
+
+  /** Clicking empty floor clears the selection. */
+  private onPointerDown(_pointer: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]) {
+    if (this.enabled && !over.some((o) => this.viewOf(o))) this.select(null);
+  }
+
+  private select(id: string | null) {
+    const prev = this.selectedId ? this.views.get(this.selectedId) : undefined;
+    prev?.outline.setVisible(false);
+    this.selectedId = id;
+    const view = id ? this.views.get(id) : undefined;
+    view?.outline.setVisible(true).setStrokeStyle(3, SELECT_COLOR);
   }
 
   // ---------------------------------------------------------------- Dragging placed furniture (Phaser input)
@@ -190,11 +299,13 @@ export class DecorController {
     return undefined;
   }
 
-  private onDragStart(_pointer: Phaser.Input.Pointer, obj: Phaser.GameObjects.GameObject) {
+  private onDragStart(pointer: Phaser.Input.Pointer, obj: Phaser.GameObjects.GameObject) {
     const hit = this.viewOf(obj);
     if (!hit || !this.enabled) return;
+    this.select(hit.id);
     this.draggingId = hit.id;
-    this.dragStart = { x: hit.view.container.x, y: hit.view.container.y };
+    this.dragStart = { x: hit.view.container.x, y: hit.view.container.y, rotation: hit.view.rotation };
+    this.lastDragPointer = { x: pointer.worldX, y: pointer.worldY };
     hit.view.container.setDepth(UI_DEPTH - 1);
     this.sellZone.setVisible(true);
   }
@@ -202,14 +313,18 @@ export class DecorController {
   private onDrag(pointer: Phaser.Input.Pointer, obj: Phaser.GameObjects.GameObject, dragX: number, dragY: number) {
     const hit = this.viewOf(obj);
     if (!hit || this.draggingId !== hit.id) return;
-    const x = snapToGrid(dragX);
-    const y = snapToGrid(dragY);
-    hit.view.container.setPosition(x, y);
+    hit.view.container.setPosition(snapToGrid(dragX), snapToGrid(dragY));
+    this.lastDragPointer = { x: pointer.worldX, y: pointer.worldY };
+    this.previewDrag(hit.view, pointer.worldX, pointer.worldY);
+  }
 
-    const overSell = this.isOverSellZone(pointer.worldX, pointer.worldY);
-    const ok = overSell || canPlaceDecoration(hit.view.def.kind, x, y, this.placed(), hit.id);
-    hit.view.outline.setVisible(true).setStrokeStyle(3, ok ? OK_COLOR : BAD_COLOR);
-    this.showFootprint(hit.view.def, x, y, ok, !overSell);
+  /** Outline + floor shading for the piece being dragged, at its current position and rotation. */
+  private previewDrag(view: DecorView, pointerX: number, pointerY: number) {
+    const { x, y } = view.container;
+    const overSell = this.isOverSellZone(pointerX, pointerY);
+    const ok = overSell || canPlaceDecoration(view.def.kind, x, y, this.placed(), view.state.id, view.rotation);
+    view.outline.setVisible(true).setStrokeStyle(3, ok ? OK_COLOR : BAD_COLOR);
+    this.showFootprint(view.def, view.rotation, x, y, ok, !overSell);
     this.sellZoneBg.setFillStyle(BAD_COLOR, overSell ? 0.4 : 0.18);
   }
 
@@ -219,7 +334,7 @@ export class DecorController {
     const { id, view } = hit;
     this.draggingId = null;
     this.sellZone.setVisible(false);
-    view.outline.setVisible(false);
+    view.outline.setStrokeStyle(3, SELECT_COLOR); // stays selected for R / ⟳
     this.footprint.setVisible(false);
 
     if (this.isOverSellZone(pointer.worldX, pointer.worldY)) {
@@ -228,13 +343,17 @@ export class DecorController {
     }
 
     const { x, y } = view.container;
-    const moved = x !== this.dragStart.x || y !== this.dragStart.y;
-    if (moved && canPlaceDecoration(view.def.kind, x, y, this.placed(), id)) {
-      this.room.send(Messages.MoveDecoration, { id, x, y });
-      // If the server rejects it, the synced position won't change: snap back to it shortly after.
-      this.scene.time.delayedCall(600, () => this.syncPosition(id));
+    const { rotation } = view;
+    const changed = x !== this.dragStart.x || y !== this.dragStart.y || rotation !== this.dragStart.rotation;
+    if (changed && canPlaceDecoration(view.def.kind, x, y, this.placed(), id, rotation)) {
+      this.room.send(Messages.MoveDecoration, { id, x, y, rotation });
+      this.scene.time.delayedCall(RESYNC_MS, () => {
+        this.syncPosition(id);
+        this.syncRotation(id);
+      });
     } else {
       view.container.setPosition(this.dragStart.x, this.dragStart.y);
+      this.renderRotation(view, this.dragStart.rotation);
     }
     this.applyDepth(view);
   }
@@ -242,6 +361,21 @@ export class DecorController {
   private isOverSellZone(x: number, y: number) {
     const z = this.sellZone;
     return Math.abs(x - z.x) <= this.sellZoneBg.width / 2 && Math.abs(y - z.y) <= this.sellZoneBg.height / 2;
+  }
+
+  /** Redraw a placed piece turned to `rotation` (artwork, outline, hit area). */
+  private renderRotation(view: DecorView, rotation: number) {
+    if (view.rotation === rotation) return;
+    view.rotation = rotation;
+    for (const o of view.visual) o.destroy();
+    const visual = buildDecorVisual(this.scene, view.def, rotation);
+    view.visual = visual.objects;
+    view.container.addAt(visual.objects, 0);
+    const size = footprintOf(view.def, rotation);
+    view.outline.setSize(size.width + 6, size.height + 6).setOrigin(0.5);
+    view.container.setSize(visual.width, visual.halfHeight * 2);
+    const hitArea = view.container.input?.hitArea as Phaser.Geom.Rectangle | undefined;
+    hitArea?.setSize(visual.width, visual.halfHeight * 2);
   }
 
   // ---------------------------------------------------------------- Dragging a new item in from the DOM panel
@@ -254,11 +388,13 @@ export class DecorController {
     const def = getDecorationDef(event.kind);
     if (!def || !this.enabled) return;
     this.cancelGhost();
+    this.select(null);
 
-    const visual = buildDecorVisual(this.scene, def, 0.8);
-    const outline = this.scene.add.rectangle(0, 0, def.width + 6, def.height + 6).setStrokeStyle(3, BAD_COLOR);
-    const view = this.scene.add.container(-1000, -1000, [...visual.objects, outline]).setDepth(UI_DEPTH).setVisible(false);
-    this.ghost = { def, view, outline };
+    const size = footprintOf(def, 0);
+    const outline = this.scene.add.rectangle(0, 0, size.width + 6, size.height + 6).setStrokeStyle(3, BAD_COLOR);
+    const view = this.scene.add.container(-1000, -1000, [outline]).setDepth(UI_DEPTH).setVisible(false);
+    this.ghost = { def, view, outline, visual: [], rotation: -1, lastClient: { x: event.clientX, y: event.clientY } };
+    this.setGhostRotation(0);
 
     const move = (e: PointerEvent) => {
       if (e.pointerId !== event.pointerId) return;
@@ -270,13 +406,26 @@ export class DecorController {
       window.removeEventListener("pointerup", end);
       window.removeEventListener("pointercancel", end);
       const target = e.type === "pointerup" ? this.ghostTarget(e.clientX, e.clientY) : undefined;
-      if (target?.ok) this.room.send(Messages.BuyDecoration, { kind: def.kind, x: target.x, y: target.y });
+      if (target?.ok && this.ghost) {
+        this.room.send(Messages.BuyDecoration, { kind: def.kind, x: target.x, y: target.y, rotation: this.ghost.rotation });
+      }
       this.cancelGhost();
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", end);
     window.addEventListener("pointercancel", end);
     this.updateGhost(event.clientX, event.clientY);
+  }
+
+  private setGhostRotation(rotation: number) {
+    const g = this.ghost;
+    if (!g || g.rotation === rotation) return;
+    g.rotation = rotation;
+    for (const o of g.visual) o.destroy();
+    g.visual = buildDecorVisual(this.scene, g.def, rotation, 0.8).objects;
+    g.view.addAt(g.visual, 0);
+    const size = footprintOf(g.def, rotation);
+    g.outline.setSize(size.width + 6, size.height + 6).setOrigin(0.5);
   }
 
   private ghostTarget(clientX: number, clientY: number) {
@@ -286,17 +435,18 @@ export class DecorController {
     if (!inside) return undefined;
     const x = snapToGrid(((clientX - rect.left) / rect.width) * WORLD_WIDTH);
     const y = snapToGrid(((clientY - rect.top) / rect.height) * WORLD_HEIGHT);
-    return { x, y, ok: canPlaceDecoration(this.ghost.def.kind, x, y, this.placed()) };
+    return { x, y, ok: canPlaceDecoration(this.ghost.def.kind, x, y, this.placed(), undefined, this.ghost.rotation) };
   }
 
   private updateGhost(clientX: number, clientY: number) {
     if (!this.ghost) return;
+    this.ghost.lastClient = { x: clientX, y: clientY };
     const target = this.ghostTarget(clientX, clientY);
     this.ghost.view.setVisible(!!target);
     if (!target) return this.footprint.setVisible(false);
     this.ghost.view.setPosition(target.x, target.y);
     this.ghost.outline.setStrokeStyle(3, target.ok ? OK_COLOR : BAD_COLOR);
-    this.showFootprint(this.ghost.def, target.x, target.y, target.ok);
+    this.showFootprint(this.ghost.def, this.ghost.rotation, target.x, target.y, target.ok);
   }
 
   private cancelGhost() {
@@ -308,18 +458,19 @@ export class DecorController {
   // ---------------------------------------------------------------- Helpers
 
   /** Shade the floor under the piece being placed so its exact cells are visible. */
-  private showFootprint(def: DecorationDef, x: number, y: number, ok: boolean, visible = true) {
+  private showFootprint(def: DecorationDef, rotation: number, x: number, y: number, ok: boolean, visible = true) {
+    const size = footprintOf(def, rotation);
     this.footprint
       .setVisible(visible)
       .setPosition(x, y)
-      .setSize(def.width, def.height)
+      .setSize(size.width, size.height)
       .setFillStyle(ok ? OK_COLOR : BAD_COLOR, 0.3);
     this.footprint.setOrigin(0.5); // keep it centred on (x, y) after resizing
   }
 
-  /** Current furniture positions as the client sees them (used for placement preview). */
+  /** Current furniture as the client sees it (used for placement preview). */
   private placed() {
-    return [...this.views.entries()].map(([id, v]) => ({ id, kind: v.def.kind, x: v.state.x, y: v.state.y }));
+    return [...this.views.entries()].map(([id, v]) => ({ id, kind: v.def.kind, x: v.state.x, y: v.state.y, rotation: v.state.rotation }));
   }
 
   private applyDepth(view: DecorView) {

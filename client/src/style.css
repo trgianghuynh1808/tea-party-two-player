@@ -652,6 +652,14 @@ h1 {
   font-weight: 700;
 }
 
+/* Turn the dragged / selected piece (same as the R key). */
+.rotate-btn {
+  margin-top: 8px;
+  padding: 8px 12px;
+  font-size: 14px;
+  touch-action: manipulation;
+}
+
 .decor-list {
   display: flex;
   flex-direction: column;
