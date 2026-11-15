@@ -1,4 +1,4 @@
-# Boba Shop Co-op
+# Tiệm Trà Bé Ngọc Giang
 
 2-player online co-op boba tea shop game (npm workspaces monorepo).
 
