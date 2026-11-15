@@ -71,16 +71,13 @@ interface PlayerView {
 }
 
 // ---------------------------------------------------------------- Character sprites
-// client/public/assets/characters/<gender>.png: 32×200 sheets, four 32×50 frames top→bottom:
-// down, left, right, up. Built by client/assets-src/characters/build_sheets.py: both characters are
-// ~40 px tall with their feet ending on row 48 in every frame.
-const CHARACTER_FRAME_W = 32;
-const CHARACTER_FRAME_H = 50;
-const CHARACTER_BODY_H = 40;
-const CHARACTER_SCALE = 1.5;
-const CHARACTER_FEET_ROW = 48; // anchor the sprite at its feet
+// client/public/assets/characters/<gender>.png: 32×128 sheets, four 32×32 frames top→bottom:
+// down, left, right, up. The character occupies roughly rows 4–23 of each frame.
+const CHARACTER_FRAME = 32;
+const CHARACTER_SCALE = 3;
+const CHARACTER_FEET_ROW = 24; // anchor the sprite at its feet
 const FEET_Y = PLAYER_RADIUS - 2; // feet sit near the bottom of the collision circle
-const HEAD_Y = FEET_Y - CHARACTER_BODY_H * CHARACTER_SCALE; // top of the hat
+const HEAD_Y = FEET_Y - 20 * CHARACTER_SCALE; // top of the hat
 const DIRECTION_FRAME: Record<string, number> = { down: 0, left: 1, right: 2, up: 3 };
 const characterKey = (gender: string) => `char-${gender === "female" ? "female" : "male"}`;
 
@@ -118,8 +115,8 @@ export class ShopScene extends Phaser.Scene {
   preload() {
     for (const gender of GENDERS) {
       this.load.spritesheet(characterKey(gender), `assets/characters/${gender}.png`, {
-        frameWidth: CHARACTER_FRAME_W,
-        frameHeight: CHARACTER_FRAME_H,
+        frameWidth: CHARACTER_FRAME,
+        frameHeight: CHARACTER_FRAME,
       });
     }
   }
@@ -371,7 +368,7 @@ export class ShopScene extends Phaser.Scene {
       .setStrokeStyle(isLocal ? 3 : 2, isLocal ? 0xffd166 : color, 1);
     const sprite = this.add
       .sprite(0, FEET_Y, characterKey(state.gender), DIRECTION_FRAME.down)
-      .setOrigin(0.5, CHARACTER_FEET_ROW / CHARACTER_FRAME_H)
+      .setOrigin(0.5, CHARACTER_FEET_ROW / CHARACTER_FRAME)
       .setScale(CHARACTER_SCALE);
     const name = this.add
       .text(0, HEAD_Y - 8, isLocal ? "Bạn" : "P2", {

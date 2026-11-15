@@ -139,22 +139,21 @@ h1 {
   font-size: 14px;
 }
 
-/* Character picker. Sheets are 32×200: four 32×50 frames top→bottom (down, left, right, up),
-   feet on row 48 in every frame; main.ts sets --sheet per element. */
+/* Character picker. Sheets are 32×128: four 32×32 frames top→bottom (down, left, right, up);
+   main.ts sets --sheet per element. */
 .char-sprite {
   --px: 3; /* pixel scale */
   display: block;
   width: calc(32px * var(--px));
-  height: calc(50px * var(--px));
+  height: calc(32px * var(--px));
   background-image: var(--sheet);
   background-repeat: no-repeat;
-  background-size: calc(32px * var(--px)) calc(200px * var(--px));
+  background-size: calc(32px * var(--px)) calc(128px * var(--px));
   background-position: 0 0;
   image-rendering: pixelated;
 }
 
 .char-stage {
-  --feet: 25px; /* distance from the stage bottom to the feet line (centre of the shadow) */
   position: relative;
   width: 144px;
   height: 132px;
@@ -164,11 +163,10 @@ h1 {
 }
 
 .char-stage .char-sprite {
-  --px: 2.25;
+  --px: 4.5;
   position: absolute;
   left: 50%;
-  /* frames have 2 empty rows below the feet */
-  bottom: calc(var(--feet) - 2px * var(--px));
+  bottom: 0;
   transform: translateX(-50%);
   z-index: 1;
 }
@@ -176,7 +174,7 @@ h1 {
 .char-shadow {
   position: absolute;
   left: 50%;
-  bottom: calc(var(--feet) - 7px);
+  bottom: 22px;
   width: 64px;
   height: 14px;
   border-radius: 50%;
@@ -191,9 +189,9 @@ h1 {
 
 @keyframes char-spin {
   0% { background-position: 0 0; }
-  25% { background-position: 0 calc(-50px * var(--px)); }
-  50% { background-position: 0 calc(-150px * var(--px)); }
-  75% { background-position: 0 calc(-100px * var(--px)); }
+  25% { background-position: 0 calc(-32px * var(--px)); }
+  50% { background-position: 0 calc(-96px * var(--px)); }
+  75% { background-position: 0 calc(-64px * var(--px)); }
 }
 
 /* Small hop when a character is picked. */
@@ -239,7 +237,7 @@ h1 {
 }
 
 .gender-option .char-sprite {
-  --px: 1;
+  --px: 2;
   opacity: 0.6;
   filter: grayscale(0.5);
   transition: opacity 0.15s, filter 0.15s;
@@ -845,17 +843,16 @@ h1 {
   }
 
   .char-stage {
-    --feet: 17px;
     width: 104px;
     height: 92px;
   }
 
   .char-stage .char-sprite {
-    --px: 1.6;
+    --px: 3;
   }
 
   .char-shadow {
-    bottom: calc(var(--feet) - 5px);
+    bottom: 15px;
     width: 44px;
     height: 10px;
   }
@@ -865,7 +862,7 @@ h1 {
   }
 
   .gender-option .char-sprite {
-    --px: 0.8;
+    --px: 1.5;
   }
 
   .lobby-status {
