@@ -27,9 +27,7 @@ export const INTERACT_RANGE = 70; // max distance from player center to station 
 export type Direction = "up" | "down" | "left" | "right";
 
 /** Character chosen in the lobby before entering a room. */
-export type Gender = "male" | "female";
-export const GENDERS: readonly Gender[] = ["male", "female"];
-export const isGender = (v: unknown): v is Gender => v === "male" || v === "female";
+export * from "./characters";
 
 export * from "./menu";
 import { STATIONS, type StationDef } from "./menu";

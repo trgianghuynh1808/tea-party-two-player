@@ -2,7 +2,8 @@ import Phaser from "phaser";
 import { Callbacks, type Room } from "@colyseus/sdk";
 import {
   EMPTY_HAND,
-  GENDERS,
+  CHARACTERS,
+  getCharacter,
   GamePhase,
   StationType,
   Messages,
@@ -18,6 +19,7 @@ import {
   stepMovement,
   describeItem,
   type DeliveredEvent,
+  type CharacterDef,
   type Direction,
   type StationDef,
 } from "@boba/shared";
@@ -64,22 +66,26 @@ interface PlayerView {
   // Last Player.teleportSeq applied to this view (a change means "snap, don't interpolate").
   teleportSeq: number;
   isLocal: boolean;
-  // Walk bob animation (sheets have one frame per direction).
+  character: CharacterDef;
+  direction: string;
+  // Walk animation: frame cycle for multi-frame sheets, a small hop for single-frame ones.
   lastX: number;
   lastY: number;
   walkPhase: number;
 }
 
 // ---------------------------------------------------------------- Character sprites
-// client/public/assets/characters/<gender>.png: 32×128 sheets, four 32×32 frames top→bottom:
-// down, left, right, up. The character occupies roughly rows 4–23 of each frame.
-const CHARACTER_FRAME = 32;
-const CHARACTER_SCALE = 3;
-const CHARACTER_FEET_ROW = 24; // anchor the sprite at its feet
+// Sheets and their frame layout are described by CHARACTERS (shared/src/characters.ts).
+/** Every character is drawn with its body this tall on screen. */
+const CHARACTER_BODY_PX = 60;
 const FEET_Y = PLAYER_RADIUS - 2; // feet sit near the bottom of the collision circle
-const HEAD_Y = FEET_Y - 20 * CHARACTER_SCALE; // top of the hat
-const DIRECTION_FRAME: Record<string, number> = { down: 0, left: 1, right: 2, up: 3 };
-const characterKey = (gender: string) => `char-${gender === "female" ? "female" : "male"}`;
+const HEAD_Y = FEET_Y - CHARACTER_BODY_PX; // top of the head / hat
+const DIRECTION_ROW: Record<string, number> = { down: 0, left: 1, right: 2, up: 3 };
+/** Walk cycle over the sheet columns for multi-frame characters (step, stand, step, stand). */
+const WALK_COLUMNS = [0, 1, 2, 1];
+const WALK_FPS = 8;
+const characterKey = (id: string) => `char-${id}`;
+const characterOf = (id: string) => getCharacter(id) ?? CHARACTERS[0];
 
 /**
  * Stations drawn with an image instead of a coloured rectangle (client/public/assets/stations/).
@@ -183,11 +189,8 @@ export class ShopScene extends Phaser.Scene {
   }
 
   preload() {
-    for (const gender of GENDERS) {
-      this.load.spritesheet(characterKey(gender), `assets/characters/${gender}.png`, {
-        frameWidth: CHARACTER_FRAME,
-        frameHeight: CHARACTER_FRAME,
-      });
+    for (const c of CHARACTERS) {
+      this.load.spritesheet(characterKey(c.id), c.sheet, { frameWidth: c.frameWidth, frameHeight: c.frameHeight });
     }
     for (const [id, url] of Object.entries(STATION_TEXTURES)) {
       if (url) this.load.image(stationTextureKey(id), url);
@@ -212,7 +215,7 @@ export class ShopScene extends Phaser.Scene {
 
   create() {
     // Pixel-art sprites: nearest-neighbour scaling for these textures only (text stays smooth).
-    for (const gender of GENDERS) this.textures.get(characterKey(gender)).setFilter(Phaser.Textures.FilterMode.NEAREST);
+    for (const c of CHARACTERS) this.textures.get(characterKey(c.id)).setFilter(Phaser.Textures.FilterMode.NEAREST);
 
     this.drawFloor();
     this.createStations();
@@ -477,10 +480,11 @@ export class ShopScene extends Phaser.Scene {
     const shadow = this.add
       .ellipse(0, FEET_Y, 44, 16, color, 0.45)
       .setStrokeStyle(isLocal ? 3 : 2, isLocal ? 0xffd166 : color, 1);
+    const character = characterOf(state.character);
     const sprite = this.add
-      .sprite(0, FEET_Y, characterKey(state.gender), DIRECTION_FRAME.down)
-      .setOrigin(0.5, CHARACTER_FEET_ROW / CHARACTER_FRAME)
-      .setScale(CHARACTER_SCALE);
+      .sprite(0, FEET_Y, characterKey(character.id), character.standColumn)
+      .setOrigin(0.5, character.feetRow / character.frameHeight)
+      .setScale(CHARACTER_BODY_PX / character.bodyHeight);
     const name = this.add
       .text(0, HEAD_Y - 8, isLocal ? "Bạn" : "P2", {
         fontFamily: "sans-serif",
@@ -507,6 +511,8 @@ export class ShopScene extends Phaser.Scene {
       lastX: state.x,
       lastY: state.y,
       walkPhase: 0,
+      character,
+      direction: "down",
     };
     this.applyFacing(view, state.direction);
     this.applyHeldItem(view, state.heldItem);
@@ -514,10 +520,16 @@ export class ShopScene extends Phaser.Scene {
   }
 
   private applyFacing(view: PlayerView, dir: string) {
-    view.sprite.setFrame(DIRECTION_FRAME[dir] ?? DIRECTION_FRAME.down);
+    view.direction = dir;
+    this.setCharacterFrame(view, view.character.standColumn);
   }
 
-  /** Small hop while moving, since the sheets only have one frame per direction. */
+  /** Show `column` of the row for the view's current direction. */
+  private setCharacterFrame(view: PlayerView, column: number) {
+    const { columns } = view.character;
+    view.sprite.setFrame((DIRECTION_ROW[view.direction] ?? DIRECTION_ROW.down) * columns + column);
+  }
+
   /** Report the local position: throttled while moving, immediately once stopped so the final spot is exact. */
   private sendPosition(local: PlayerView, moving: boolean) {
     const { x, y } = local.container;
@@ -567,8 +579,15 @@ export class ShopScene extends Phaser.Scene {
     const moving = Math.hypot(x - view.lastX, y - view.lastY) > 0.3;
     view.lastX = x;
     view.lastY = y;
-    view.walkPhase = moving ? view.walkPhase + dt * 14 : 0;
-    view.sprite.y = FEET_Y - (moving ? Math.abs(Math.sin(view.walkPhase)) * 4 : 0);
+    view.walkPhase = moving ? view.walkPhase + dt : 0;
+    if (view.character.columns > 1) {
+      // Real walk cycle from the sheet.
+      const column = moving ? WALK_COLUMNS[Math.floor(view.walkPhase * WALK_FPS) % WALK_COLUMNS.length] : view.character.standColumn;
+      this.setCharacterFrame(view, column);
+    } else {
+      // One pose per direction: fake the steps with a small hop.
+      view.sprite.y = FEET_Y - (moving ? Math.abs(Math.sin(view.walkPhase * 14)) * 4 : 0);
+    }
   }
 
   private applyHeldItem(view: PlayerView, item: string) {

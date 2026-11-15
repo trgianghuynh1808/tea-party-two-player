@@ -17,6 +17,8 @@ import {
   StationType,
   canPlaceDecoration,
   getDecorationDef,
+  defaultCharacterOf,
+  getCharacter,
   isGender,
   refundFor,
   snapToGrid,
@@ -123,7 +125,7 @@ export class BobaShopRoom extends Room {
     this.setSimulationInterval((deltaTime) => this.update(deltaTime / 1000), 1000 / 60);
   }
 
-  onJoin(client: Client, options: { gender?: unknown } = {}) {
+  onJoin(client: Client, options: { gender?: unknown; character?: unknown } = {}) {
     const usedColors = new Set([...this.state.players.values()].map((p) => p.colorIndex));
     const colorIndex = usedColors.has(0) ? 1 : 0;
     const spawn = SPAWN_POINTS[colorIndex];
@@ -132,7 +134,10 @@ export class BobaShopRoom extends Room {
     player.x = spawn.x;
     player.y = spawn.y;
     player.colorIndex = colorIndex;
-    player.gender = isGender(options.gender) ? options.gender : "male";
+    // Character picked on the home screen; fall back to the default one of the gender (older clients).
+    const character = getCharacter(options.character) ?? defaultCharacterOf(isGender(options.gender) ? options.gender : "male");
+    player.character = character.id;
+    player.gender = character.gender;
     this.state.players.set(client.sessionId, player);
     this.resetMoveBudget(client.sessionId);
     console.log(`[BobaShopRoom] ${client.sessionId} joined (${this.clients.length}/${this.maxClients})`);

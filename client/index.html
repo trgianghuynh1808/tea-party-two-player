@@ -18,16 +18,12 @@
       </div>
       <p id="char-name" class="char-name"></p>
 
-      <div id="gender-picker" class="gender-picker" role="radiogroup" aria-label="Chọn nhân vật">
-        <button type="button" class="gender-option" data-gender="female" role="radio" aria-checked="false">
-          <span class="char-sprite" data-gender="female" aria-hidden="true"></span>
-          <span>Nữ</span>
-        </button>
-        <button type="button" class="gender-option" data-gender="male" role="radio" aria-checked="false">
-          <span class="char-sprite" data-gender="male" aria-hidden="true"></span>
-          <span>Nam</span>
-        </button>
+      <div id="gender-picker" class="gender-tabs" role="radiogroup" aria-label="Giới tính">
+        <button type="button" class="gender-tab" data-gender="female" role="radio" aria-checked="false">♀ Nữ</button>
+        <button type="button" class="gender-tab" data-gender="male" role="radio" aria-checked="false">♂ Nam</button>
       </div>
+      <!-- Characters of the selected gender (filled by main.ts) -->
+      <div id="char-picker" class="char-picker" role="radiogroup" aria-label="Chọn nhân vật"></div>
 
       <p id="lobby-status" class="lobby-status" aria-live="polite">Đang kiểm tra quán…</p>
       <button id="enter-btn" class="btn primary" type="button">Vào quán</button>

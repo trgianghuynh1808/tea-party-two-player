@@ -10,7 +10,11 @@ import {
   WORLD_HEIGHT,
   WORLD_WIDTH,
   SHOP_FULL_ERROR_CODE,
+  charactersOf,
+  defaultCharacterOf,
+  getCharacter,
   isGender,
+  type CharacterDef,
   type Gender,
   type LobbyInfo,
 } from "@boba/shared";
@@ -155,34 +159,77 @@ async function enter(action: () => Promise<Room<BobaShopState>>) {
 
 // ---------------------------------------------------------------- Character (gender) picker
 
-const GENDER_KEY = "boba.gender";
-const GENDER_LABEL: Record<Gender, string> = { female: "Nữ", male: "Nam" };
-const genderOptions = [...document.querySelectorAll<HTMLButtonElement>(".gender-option")];
+const CHARACTER_KEY = "boba.character";
+const LEGACY_GENDER_KEY = "boba.gender"; // before characters existed, only the gender was saved
+const genderTabs = [...document.querySelectorAll<HTMLButtonElement>(".gender-tab")];
+const charPicker = $<HTMLElement>("char-picker");
 const charPreview = $<HTMLElement>("char-preview-big");
 const charName = $<HTMLElement>("char-name");
-// Remember the last pick; first-time players start as female.
-let selectedGender: Gender | null = (() => {
-  const saved = localStorage.getItem(GENDER_KEY);
-  return isGender(saved) ? saved : "female";
+
+// Remember the last pick; first-time players start with the first female character.
+let selectedCharacter: CharacterDef = (() => {
+  const saved = getCharacter(localStorage.getItem(CHARACTER_KEY));
+  if (saved) return saved;
+  const legacy = localStorage.getItem(LEGACY_GENDER_KEY);
+  return defaultCharacterOf(isGender(legacy) ? legacy : "female");
 })();
+/** Last character picked per gender, so switching tabs back and forth keeps the choice. */
+const lastPerGender = new Map<Gender, CharacterDef>([[selectedCharacter.gender, selectedCharacter]]);
 
-/** Sprite sheet URL; BASE_URL keeps it working under the GitHub Pages sub-path. */
-const sheetUrl = (gender: Gender) => `url("${import.meta.env.BASE_URL}assets/characters/${gender}.png")`;
-
-for (const el of document.querySelectorAll<HTMLElement>(".gender-option .char-sprite")) {
-  if (isGender(el.dataset.gender)) el.style.setProperty("--sheet", sheetUrl(el.dataset.gender));
+/** Point a .char-sprite element at a character's sheet (CSS reads the frame layout from these vars). */
+function applySprite(el: HTMLElement, c: CharacterDef) {
+  const vars: Record<string, string> = {
+    "--sheet": `url("${import.meta.env.BASE_URL}${c.sheet}")`,
+    "--fw": String(c.frameWidth),
+    "--fh": String(c.frameHeight),
+    "--cols": String(c.columns),
+    "--col": String(c.standColumn),
+    "--below": String(c.frameHeight - c.feetRow),
+    "--k": String(20 / c.bodyHeight), // CSS sizes are tuned for a 20 px tall body
+  };
+  for (const [k, v] of Object.entries(vars)) el.style.setProperty(k, v);
 }
 
-function renderGenderPicker(animate = false) {
-  for (const btn of genderOptions) {
-    const on = btn.dataset.gender === selectedGender;
-    btn.classList.toggle("selected", on);
-    btn.setAttribute("aria-checked", String(on));
-    btn.tabIndex = on ? 0 : -1;
+function renderCharacterPicker(animate = false) {
+  const c = selectedCharacter;
+  for (const tab of genderTabs) {
+    const on = tab.dataset.gender === c.gender;
+    tab.classList.toggle("selected", on);
+    tab.setAttribute("aria-checked", String(on));
+    tab.tabIndex = on ? 0 : -1;
   }
-  if (!selectedGender) return;
-  charPreview.style.setProperty("--sheet", sheetUrl(selectedGender));
-  charName.textContent = GENDER_LABEL[selectedGender];
+
+  charPicker.replaceChildren(
+    ...charactersOf(c.gender).map((option) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "char-option";
+      btn.setAttribute("role", "radio");
+      const on = option.id === c.id;
+      btn.classList.toggle("selected", on);
+      btn.setAttribute("aria-checked", String(on));
+      btn.tabIndex = on ? 0 : -1;
+      const sprite = document.createElement("span");
+      sprite.className = "char-sprite";
+      sprite.setAttribute("aria-hidden", "true");
+      applySprite(sprite, option);
+      const label = document.createElement("span");
+      label.textContent = option.name;
+      btn.append(sprite, label);
+      btn.addEventListener("click", () => selectCharacter(option));
+      btn.addEventListener("keydown", (e) => {
+        if (!["ArrowLeft", "ArrowRight"].includes(e.key)) return;
+        e.preventDefault();
+        const list = charactersOf(c.gender);
+        const step = e.key === "ArrowRight" ? 1 : -1;
+        selectCharacter(list[(list.indexOf(option) + step + list.length) % list.length], true);
+      });
+      return btn;
+    }),
+  );
+
+  applySprite(charPreview, c);
+  charName.textContent = c.name;
   if (animate) {
     // Restart the hop animation.
     charPreview.classList.remove("pop");
@@ -191,41 +238,35 @@ function renderGenderPicker(animate = false) {
   }
 }
 
-function selectGender(gender: Gender) {
-  selectedGender = gender;
-  localStorage.setItem(GENDER_KEY, gender);
+function selectCharacter(c: CharacterDef, focus = false) {
+  selectedCharacter = c;
+  lastPerGender.set(c.gender, c);
+  localStorage.setItem(CHARACTER_KEY, c.id);
   lobbyError.textContent = "";
-  renderGenderPicker(true);
+  renderCharacterPicker(true);
+  if (focus) charPicker.querySelector<HTMLButtonElement>(".char-option.selected")?.focus();
 }
 
-for (const btn of genderOptions) {
-  btn.addEventListener("click", () => {
-    if (isGender(btn.dataset.gender)) selectGender(btn.dataset.gender);
+for (const tab of genderTabs) {
+  const pick = (gender: Gender) => selectCharacter(lastPerGender.get(gender) ?? defaultCharacterOf(gender));
+  tab.addEventListener("click", () => {
+    if (isGender(tab.dataset.gender)) pick(tab.dataset.gender);
   });
-  // Radio-group keyboard behaviour: arrows switch the selection.
-  btn.addEventListener("keydown", (e) => {
+  // Radio-group keyboard behaviour: arrows switch the gender.
+  tab.addEventListener("keydown", (e) => {
     if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
     e.preventDefault();
-    const next = genderOptions[(genderOptions.indexOf(btn) + 1) % genderOptions.length];
-    if (isGender(next.dataset.gender)) selectGender(next.dataset.gender);
+    const next = genderTabs[(genderTabs.indexOf(tab) + 1) % genderTabs.length];
+    if (isGender(next.dataset.gender)) pick(next.dataset.gender);
     next.focus();
   });
 }
-renderGenderPicker();
-
-/** Returns the chosen character, or shows an error if none was picked yet. */
-function requireGender(): Gender | null {
-  if (selectedGender) return selectedGender;
-  lobbyError.textContent = "Chọn nhân vật Nam hoặc Nữ trước khi vào quán nhé.";
-  genderOptions[0]?.focus();
-  return null;
-}
+renderCharacterPicker();
 
 enterBtn.addEventListener("click", () => {
-  const gender = requireGender();
-  if (!gender) return;
+  const { id: character, gender } = selectedCharacter;
   // Joins the shared shop if it's open, otherwise opens it.
-  void enter(() => client.joinOrCreate<BobaShopState>(ROOM_NAME, { gender }));
+  void enter(() => client.joinOrCreate<BobaShopState>(ROOM_NAME, { character, gender }));
 });
 
 // ---------------------------------------------------------------- Game
