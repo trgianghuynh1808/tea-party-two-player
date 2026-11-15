@@ -43,9 +43,19 @@ export class DecorPanel {
       const el = document.createElement("div");
       el.className = "decor-item";
       el.title = `Kéo vào quán để mua ${def.label}`;
-      const swatch = document.createElement("span");
-      swatch.className = `swatch ${def.shape}`;
-      swatch.style.background = hex(def.color);
+      let swatch: HTMLElement;
+      if (def.image) {
+        const img = document.createElement("img");
+        img.className = "swatch-img";
+        img.src = `${import.meta.env.BASE_URL}${def.image}`;
+        img.alt = "";
+        img.draggable = false;
+        swatch = img;
+      } else {
+        swatch = document.createElement("span");
+        swatch.className = `swatch ${def.shape}`;
+        swatch.style.background = hex(def.color);
+      }
       const name = document.createElement("span");
       name.className = "name";
       name.textContent = def.label;

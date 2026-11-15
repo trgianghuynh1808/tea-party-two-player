@@ -6,6 +6,7 @@ import {
   WORLD_HEIGHT,
   WORLD_WIDTH,
   canPlaceDecoration,
+  DECORATION_CATALOG,
   getDecorationDef,
   snapToGrid,
   type DecorationDef,
@@ -22,6 +23,39 @@ const PLACE_TOP = 40; // furniture can't go above this (HUD / machine labels)
 const GRID_CELL = DECOR_GRID * 4;
 const VEIL_ALPHA = 0.35;
 const GRID_LINE_ALPHA = 0.35;
+
+const decorTextureKey = (kind: string) => `decor-${kind}`;
+
+/** Load the artwork of every catalog item (call from the scene's preload). */
+export function preloadDecorTextures(scene: Phaser.Scene) {
+  for (const def of DECORATION_CATALOG) if (def.image) scene.load.image(decorTextureKey(def.kind), def.image);
+}
+
+/**
+ * The visible part of a piece of furniture, centred on its floor footprint.
+ * Artwork stands on the footprint (bottom-aligned) and may rise above it; rugs fill the footprint.
+ * Returns the objects plus the box they cover (for the drag hit area).
+ */
+function buildDecorVisual(scene: Phaser.Scene, def: DecorationDef, alpha = 1) {
+  const key = decorTextureKey(def.kind);
+  if (def.image && scene.textures.exists(key)) {
+    const img = scene.add.image(0, 0, key).setAlpha(alpha);
+    if (def.layer === "floor") {
+      img.setDisplaySize(def.width, def.height);
+    } else {
+      img.setOrigin(0.5, 1).setY(def.height / 2).setScale((def.imageHeight ?? def.height) / img.height);
+    }
+    const top = def.layer === "floor" ? def.height / 2 : Math.max(def.height / 2, img.displayHeight - def.height / 2);
+    return { objects: [img], width: Math.max(def.width, img.displayWidth), halfHeight: top, hasArt: true };
+  }
+  const shape =
+    def.shape === "circle"
+      ? scene.add.circle(0, 0, def.width / 2, def.color, alpha)
+      : scene.add.rectangle(0, 0, def.width, def.height, def.color, alpha);
+  shape.setStrokeStyle(2, 0x3d2c29, def.layer === "floor" ? 0.35 : 1);
+  if (def.layer === "floor") shape.setAlpha(0.75 * alpha);
+  return { objects: [shape], width: def.width, halfHeight: def.height / 2, hasArt: false };
+}
 
 interface DecorView {
   state: Decoration;
@@ -83,19 +117,15 @@ export class DecorController {
   add(state: Decoration) {
     const def = getDecorationDef(state.kind);
     if (!def) return;
-    const shape =
-      def.shape === "circle"
-        ? this.scene.add.circle(0, 0, def.width / 2, def.color)
-        : this.scene.add.rectangle(0, 0, def.width, def.height, def.color);
-    shape.setStrokeStyle(2, 0x3d2c29, def.layer === "floor" ? 0.35 : 1);
-    if (def.layer === "floor") shape.setAlpha(0.75);
+    const visual = buildDecorVisual(this.scene, def);
 
     const outline = this.scene.add
       .rectangle(0, 0, def.width + 6, def.height + 6)
       .setStrokeStyle(3, OK_COLOR)
       .setVisible(false);
-    const children: Phaser.GameObjects.GameObject[] = [shape, outline];
-    if (def.layer === "object") {
+    const children: Phaser.GameObjects.GameObject[] = [...visual.objects, outline];
+    // Plain shapes need a name; artwork speaks for itself.
+    if (def.layer === "object" && !visual.hasArt) {
       children.push(
         this.scene.add
           .text(0, def.height / 2 + 8, def.label, { fontFamily: "sans-serif", fontSize: this.fontSize(10), color: "#3d2c29" })
@@ -103,7 +133,8 @@ export class DecorController {
       );
     }
 
-    const container = this.scene.add.container(state.x, state.y, children).setSize(def.width, def.height);
+    // Hit area: a centred box tall enough to cover artwork that rises above the footprint.
+    const container = this.scene.add.container(state.x, state.y, children).setSize(visual.width, visual.halfHeight * 2);
     const view: DecorView = { state, def, container, outline };
     this.views.set(state.id, view);
     this.applyDepth(view);
@@ -224,12 +255,9 @@ export class DecorController {
     if (!def || !this.enabled) return;
     this.cancelGhost();
 
-    const shape =
-      def.shape === "circle"
-        ? this.scene.add.circle(0, 0, def.width / 2, def.color, 0.75)
-        : this.scene.add.rectangle(0, 0, def.width, def.height, def.color, 0.75);
+    const visual = buildDecorVisual(this.scene, def, 0.8);
     const outline = this.scene.add.rectangle(0, 0, def.width + 6, def.height + 6).setStrokeStyle(3, BAD_COLOR);
-    const view = this.scene.add.container(-1000, -1000, [shape, outline]).setDepth(UI_DEPTH).setVisible(false);
+    const view = this.scene.add.container(-1000, -1000, [...visual.objects, outline]).setDepth(UI_DEPTH).setVisible(false);
     this.ghost = { def, view, outline };
 
     const move = (e: PointerEvent) => {

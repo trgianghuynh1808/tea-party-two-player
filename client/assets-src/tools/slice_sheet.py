@@ -4,13 +4,15 @@ Needs Pillow, NumPy and SciPy (e.g. in a throwaway venv:
     python3 -m venv /tmp/sprite-venv && /tmp/sprite-venv/bin/pip install pillow numpy scipy).
 
 1) Detect sprites, write a numbered preview + the detected boxes:
-       python slice_sheet.py detect sheet.png preview.png boxes.json
+       python slice_sheet.py detect sheet.png preview.png boxes.json [edges|flat]
 2) Name the sprites you want in a JSON file: {"output/path/name.png": [index, ...], ...}
    (several indices = one sprite made of separate pieces), then cut them out:
-       python slice_sheet.py extract sheet.png boxes.json names.json <out_dir>
+       python slice_sheet.py extract sheet.png boxes.json names.json <out_dir> [edges|flat]
 
-How it works: strong luminance edges (the sprite outlines) are closed and hole-filled into solid masks;
-the blurred background has almost no edges, so it drops out and becomes transparent.
+Background modes (use the same one for both steps):
+- edges (default): blurred/gradient background. Strong luminance edges (the sprite outlines) are closed
+  and hole-filled into solid masks; the blurred background has almost no edges and drops out.
+- flat: plain single-colour background. Pixels that differ from the border colour are the sprites.
 """
 import json
 import os
@@ -24,17 +26,36 @@ EDGE_THRESHOLD = 60  # Sobel magnitude on 0..255 luminance
 MIN_AREA = 300  # ignore specks smaller than this (pixels)
 
 
-def sprite_mask(path):
+FLAT_TOLERANCE = 28  # RGB distance from the background colour
+HOLE_MIN_AREA = 30
+HOLE_TOLERANCE = 12
+
+
+def sprite_mask(path, mode="edges"):
     im = Image.open(path).convert("RGBA")
     rgb = np.asarray(im)[..., :3].astype(np.float64)
+    if mode == "flat":
+        border = np.concatenate([rgb[0], rgb[-1], rgb[:, 0], rgb[:, -1]])
+        bg = np.median(border, axis=0)
+        dist = np.linalg.norm(rgb - bg, axis=-1)
+        solid = ndi.binary_closing(dist > FLAT_TOLERANCE, iterations=1)
+        mask = ndi.binary_fill_holes(solid)
+        # Re-open holes that are really background seen through the sprite (e.g. between chair slats):
+        # big enough and almost exactly the background colour. Small/odd-coloured holes stay filled.
+        holes, n = ndi.label(mask & ~solid)
+        for i in range(1, n + 1):
+            hole = holes == i
+            if hole.sum() >= HOLE_MIN_AREA and np.median(dist[hole]) < HOLE_TOLERANCE:
+                mask[hole] = False
+        return im, ndi.binary_opening(mask, iterations=1)
     lum = 0.299 * rgb[..., 0] + 0.587 * rgb[..., 1] + 0.114 * rgb[..., 2]
     edge = np.hypot(ndi.sobel(lum, 1), ndi.sobel(lum, 0)) > EDGE_THRESHOLD
     mask = ndi.binary_fill_holes(ndi.binary_closing(edge, iterations=2))
     return im, ndi.binary_opening(mask, iterations=2)
 
 
-def detect(sheet, preview_path, boxes_path):
-    im, mask = sprite_mask(sheet)
+def detect(sheet, preview_path, boxes_path, mode="edges"):
+    im, mask = sprite_mask(sheet, mode)
     lab, _ = ndi.label(mask)
     boxes = []
     for i, sl in enumerate(ndi.find_objects(lab), 1):
@@ -54,8 +75,8 @@ def detect(sheet, preview_path, boxes_path):
     print(f"{len(boxes)} sprites -> {preview_path}, {boxes_path}")
 
 
-def extract(sheet, boxes_path, names_path, out_dir):
-    im, mask = sprite_mask(sheet)
+def extract(sheet, boxes_path, names_path, out_dir, mode="edges"):
+    im, mask = sprite_mask(sheet, mode)
     boxes = json.load(open(boxes_path))
     names = json.load(open(names_path))
     rgba = np.asarray(im).copy()

@@ -25,7 +25,7 @@ import { KeyboardState } from "../input/KeyboardState";
 import { TouchControls, isTouchDevice } from "../input/TouchControls";
 import { PALETTE_DRAG_START, type PaletteDragStart } from "../ui/DecorPanel";
 import { CupView, preloadCupTextures } from "./CupView";
-import { DecorController } from "./DecorController";
+import { DecorController, preloadDecorTextures } from "./DecorController";
 
 import type { BobaShopState, Player } from "@boba/shared/schema";
 
@@ -179,6 +179,7 @@ export class ShopScene extends Phaser.Scene {
     }
     this.load.image(FLOOR_TEXTURE, "assets/floor/wood.jpg");
     preloadCupTextures(this);
+    preloadDecorTextures(this);
   }
 
   init(data: ShopSceneData) {

@@ -1,0 +1,23 @@
+{
+  "decor/woven_chair.png": [2],
+  "decor/stool.png": [3],
+  "decor/lantern_brass.png": [5],
+  "decor/lantern_bronze.png": [6],
+  "decor/lantern_gold_lit.png": [7],
+  "decor/lantern_bronze_lit.png": [8],
+  "decor/fern_large.png": [19],
+  "decor/fern_medium.png": [21],
+  "decor/fern_medium_2.png": [31],
+  "decor/fern_small.png": [29],
+  "decor/succulent_1.png": [23],
+  "decor/succulent_2.png": [24],
+  "decor/succulent_small.png": [25],
+  "decor/succulent_3.png": [35],
+  "decor/succulent_4.png": [37],
+  "decor/succulent_5.png": [39],
+  "decor/rug_blue.png": [45],
+  "decor/rug_woven.png": [46],
+  "decor/red_lantern.png": [47],
+  "decor/red_lantern_2.png": [48],
+  "decor/red_lantern_lit.png": [49]
+}
