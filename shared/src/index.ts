@@ -19,47 +19,13 @@ export const INTERACT_RANGE = 70; // max distance from player center to station 
 
 export type Direction = "up" | "down" | "left" | "right";
 
-export enum StationType {
-  CupShelf = "cup_shelf",
-  TeaDispenser = "tea_dispenser",
-  PearlPot = "pearl_pot",
-  DeliveryCounter = "delivery_counter",
-}
+/** Character chosen in the lobby before entering a room. */
+export type Gender = "male" | "female";
+export const GENDERS: readonly Gender[] = ["male", "female"];
+export const isGender = (v: unknown): v is Gender => v === "male" || v === "female";
 
-// Item progression: "" -> cup -> cup_tea -> cup_tea_pearl -> delivered
-export enum Item {
-  None = "",
-  Cup = "cup",
-  CupTea = "cup_tea",
-  CupTeaPearl = "cup_tea_pearl",
-}
-
-export const ITEM_LABELS: Record<string, string> = {
-  [Item.None]: "",
-  [Item.Cup]: "Ly",
-  [Item.CupTea]: "Trà",
-  [Item.CupTeaPearl]: "Trà sữa TC",
-};
-
-export const DRINK_PRICE = 25;
-
-export interface StationDef {
-  id: string;
-  type: StationType;
-  label: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  color: number;
-}
-
-export const STATIONS: StationDef[] = [
-  { id: "cup_shelf", type: StationType.CupShelf, label: "Kệ ly", x: 160, y: 110, width: 120, height: 60, color: 0x8ecae6 },
-  { id: "tea_dispenser", type: StationType.TeaDispenser, label: "Bình trà", x: 380, y: 110, width: 120, height: 60, color: 0xd4a373 },
-  { id: "pearl_pot", type: StationType.PearlPot, label: "Nồi trân châu", x: 600, y: 110, width: 120, height: 60, color: 0x6d4c41 },
-  { id: "delivery_counter", type: StationType.DeliveryCounter, label: "Quầy giao hàng", x: 820, y: 300, width: 80, height: 160, color: 0x90be6d },
-];
+export * from "./menu";
+import { STATIONS, type StationDef } from "./menu";
 
 // Message payloads (client -> server)
 export interface MoveMessage {
@@ -71,25 +37,26 @@ export const Messages = {
   Move: "move",
   Interact: "interact",
   BuyDecoration: "buy_decoration",
+  MoveDecoration: "move_decoration",
+  SellDecoration: "sell_decoration",
+  StartShift: "start_shift",
 } as const;
 
 // Server -> client events
 export const ServerEvents = {
   Delivered: "delivered",
   InteractFailed: "interact_failed",
+  OrderExpired: "order_expired",
 } as const;
 
-export interface DecorationDef {
-  kind: string;
-  label: string;
-  price: number;
-  color: number;
+export interface DeliveredEvent {
+  by: string;
+  drinkName: string;
+  amount: number;
+  tip: number;
 }
 
-export const DECORATION_CATALOG: DecorationDef[] = [
-  { kind: "plant", label: "Chậu cây", price: 50, color: 0x2a9d8f },
-  { kind: "lamp", label: "Đèn lồng", price: 75, color: 0xf4a261 },
-];
+export * from "./decor";
 
 // ---- Shared movement (used by server simulation and client prediction) ----
 
@@ -156,3 +123,19 @@ export function distanceToStation(p: Vec2, s: StationDef): number {
   const cy = Math.max(s.y - s.height / 2, Math.min(p.y, s.y + s.height / 2));
   return Math.hypot(p.x - cx, p.y - cy);
 }
+
+/** Nearest station within INTERACT_RANGE of a position (same rule on server and client). */
+export function findNearestStationDef(p: Vec2): StationDef | undefined {
+  let best: StationDef | undefined;
+  let bestDist = INTERACT_RANGE;
+  for (const def of STATIONS) {
+    const d = distanceToStation(p, def);
+    if (d <= bestDist) {
+      bestDist = d;
+      best = def;
+    }
+  }
+  return best;
+}
+
+export * from "./interaction";

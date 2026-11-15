@@ -1,9 +1,24 @@
 import "./style.css";
 import Phaser from "phaser";
-import { Client, CloseCode, ErrorCode, type Room } from "@colyseus/sdk";
-import { ROOM_CODE_LENGTH, ROOM_NAME, SERVER_PORT, WORLD_HEIGHT, WORLD_WIDTH, normalizeRoomCode } from "@boba/shared";
+import { Callbacks, Client, CloseCode, ErrorCode, type Room } from "@colyseus/sdk";
+import {
+  GamePhase,
+  ROOM_CODE_LENGTH,
+  ROOM_NAME,
+  SERVER_PORT,
+  WORLD_HEIGHT,
+  WORLD_WIDTH,
+  isGender,
+  isValidShopId,
+  normalizeRoomCode,
+  type Gender,
+} from "@boba/shared";
 import type { BobaShopState } from "@boba/shared/schema";
-import { ShopScene, type ShopSceneData } from "./scenes/ShopScene";
+import { FORCE_TOUCH_PARAM, isTouchDevice } from "./input/TouchControls";
+import { DECORATE_MODE_EVENT, ShopScene, type ShopSceneData } from "./scenes/ShopScene";
+import { DecorPanel, PALETTE_DRAG_START } from "./ui/DecorPanel";
+import { OrdersPanel, buildMenu } from "./ui/OrdersPanel";
+import { ShiftOverlay } from "./ui/ShiftOverlay";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -17,12 +32,59 @@ const lobbyError = $<HTMLParagraphElement>("lobby-error");
 const roomCodeLabel = $<HTMLElement>("room-code");
 const copyLinkBtn = $<HTMLButtonElement>("copy-link-btn");
 const leaveBtn = $<HTMLButtonElement>("leave-btn");
+const menuBtn = $<HTMLButtonElement>("menu-btn");
+const decorateBtn = $<HTMLButtonElement>("decorate-btn");
+const fullscreenBtn = $<HTMLButtonElement>("fullscreen-btn");
+const ordersRoot = $<HTMLElement>("orders-panel");
+const decorRoot = $<HTMLElement>("decor-panel");
+const menuInline = $<HTMLElement>("menu-inline");
+const shiftOverlayRoot = $<HTMLElement>("shift-overlay");
+const modal = $<HTMLElement>("modal");
+const modalTitle = $<HTMLElement>("modal-title");
+const modalBody = $<HTMLElement>("modal-body");
+const modalClose = $<HTMLButtonElement>("modal-close");
 
-const endpoint = `${location.protocol}//${location.hostname}:${SERVER_PORT}`;
+// Game server address:
+// - VITE_SERVER_URL if set (client hosted separately from the server);
+// - dev (Vite on :5173): the Colyseus server on this host at SERVER_PORT;
+// - production build: served by the game server itself, so use the same origin.
+const endpoint: string =
+  import.meta.env.VITE_SERVER_URL ||
+  (import.meta.env.DEV ? `${location.protocol}//${location.hostname}:${SERVER_PORT}` : location.origin);
 const client = new Client(endpoint);
 
 let game: Phaser.Game | undefined;
 let currentRoom: Room<BobaShopState> | undefined;
+let ordersPanel: OrdersPanel | undefined;
+let shiftOverlay: ShiftOverlay | undefined;
+let decorPanel: DecorPanel | undefined;
+let decorating = false;
+
+/**
+ * Persistent id of "my shop" (money + furniture), kept in this browser. Sent when creating a room so
+ * the server can restore the shop; players who join someone else's room play in the host's shop.
+ */
+const SHOP_ID_KEY = "boba.shopId";
+function getShopId(): string {
+  let id = localStorage.getItem(SHOP_ID_KEY);
+  if (!isValidShopId(id)) {
+    id = crypto.randomUUID().replaceAll("-", "");
+    localStorage.setItem(SHOP_ID_KEY, id);
+  }
+  return id;
+}
+
+// Keep the ?touch=1 debug flag across URL rewrites so a refresh still forces touch controls.
+const forceTouch = new URLSearchParams(location.search).get(FORCE_TOUCH_PARAM) === "1";
+
+/** Rewrite the URL to `?room=CODE` (or no room), preserving ?touch=1. */
+function setUrl(roomId?: string) {
+  const params = new URLSearchParams();
+  if (forceTouch) params.set(FORCE_TOUCH_PARAM, "1");
+  if (roomId) params.set("room", roomId);
+  const query = params.toString();
+  history.replaceState(null, "", location.pathname + (query ? `?${query}` : ""));
+}
 
 // ---------------------------------------------------------------- Lobby
 
@@ -33,12 +95,14 @@ function setBusy(busy: boolean) {
 }
 
 function showLobby(error = "") {
+  document.body.classList.remove("in-game");
+  closeModal();
   gameScreen.hidden = true;
   lobby.hidden = false;
   lobbyError.textContent = error;
   setBusy(false);
   // Drop ?room=... so a refresh doesn't auto-fill a stale code.
-  history.replaceState(null, "", location.pathname);
+  setUrl();
 }
 
 function describeError(err: unknown): string {
@@ -65,8 +129,47 @@ async function enter(action: () => Promise<Room<BobaShopState>>) {
   }
 }
 
+// ---------------------------------------------------------------- Character (gender) picker
+
+const GENDER_KEY = "boba.gender";
+const genderOptions = [...document.querySelectorAll<HTMLButtonElement>(".gender-option")];
+// Remember the last pick for convenience; first-time players must choose.
+let selectedGender: Gender | null = (() => {
+  const saved = localStorage.getItem(GENDER_KEY);
+  return isGender(saved) ? saved : null;
+})();
+
+function renderGenderPicker() {
+  for (const btn of genderOptions) {
+    const on = btn.dataset.gender === selectedGender;
+    btn.classList.toggle("selected", on);
+    btn.setAttribute("aria-checked", String(on));
+  }
+}
+
+for (const btn of genderOptions) {
+  btn.addEventListener("click", () => {
+    const gender = btn.dataset.gender;
+    if (!isGender(gender)) return;
+    selectedGender = gender;
+    localStorage.setItem(GENDER_KEY, gender);
+    lobbyError.textContent = "";
+    renderGenderPicker();
+  });
+}
+
+/** Returns the chosen character, or shows an error if none was picked yet. */
+function requireGender(): Gender | null {
+  if (selectedGender) return selectedGender;
+  lobbyError.textContent = "Chọn nhân vật Nam hoặc Nữ trước khi vào phòng nhé.";
+  genderOptions[0]?.focus();
+  return null;
+}
+
 createBtn.addEventListener("click", () => {
-  void enter(() => client.create<BobaShopState>(ROOM_NAME));
+  const gender = requireGender();
+  if (!gender) return;
+  void enter(() => client.create<BobaShopState>(ROOM_NAME, { shopId: getShopId(), gender }));
 });
 
 joinForm.addEventListener("submit", (e) => {
@@ -77,7 +180,9 @@ joinForm.addEventListener("submit", (e) => {
     codeInput.focus();
     return;
   }
-  void enter(() => client.joinById<BobaShopState>(code));
+  const gender = requireGender();
+  if (!gender) return;
+  void enter(() => client.joinById<BobaShopState>(code, { gender }));
 });
 
 codeInput.addEventListener("input", () => {
@@ -92,9 +197,10 @@ codeInput.addEventListener("input", () => {
 function startGame(room: Room<BobaShopState>) {
   currentRoom = room;
   roomCodeLabel.textContent = room.roomId;
-  history.replaceState(null, "", `?room=${room.roomId}`);
+  setUrl(room.roomId);
   lobby.hidden = true;
   gameScreen.hidden = false;
+  document.body.classList.add("in-game");
 
   const data: ShopSceneData = { room };
   game = new Phaser.Game({
@@ -103,8 +209,24 @@ function startGame(room: Room<BobaShopState>) {
     width: WORLD_WIDTH,
     height: WORLD_HEIGHT,
     backgroundColor: "#f6efe6",
+    // Scale the fixed 960×600 world to fit the available area (phones, small windows), letterboxed.
+    scale: {
+      mode: Phaser.Scale.FIT,
+      autoCenter: Phaser.Scale.CENTER_BOTH,
+      max: { width: WORLD_WIDTH * 1.5, height: WORLD_HEIGHT * 1.5 },
+    },
   });
   game.scene.add("ShopScene", ShopScene, true, data);
+  ordersPanel = new OrdersPanel(ordersRoot, room);
+  shiftOverlay = new ShiftOverlay(shiftOverlayRoot, room);
+  decorPanel = new DecorPanel(decorRoot, room, (e) => game?.events.emit(PALETTE_DRAG_START, e));
+
+  // Decorating is only allowed between shifts: leave decorate mode when a shift starts.
+  Callbacks.get(room).listen("phase", (phase) => {
+    const playing = phase === GamePhase.Playing;
+    decorateBtn.disabled = playing;
+    if (playing && decorating) setDecorating(false);
+  });
 
   room.onLeave((code) => {
     stopGame();
@@ -116,6 +238,13 @@ function startGame(room: Room<BobaShopState>) {
 function stopGame() {
   game?.destroy(true);
   game = undefined;
+  ordersPanel?.destroy();
+  shiftOverlay?.destroy();
+  decorPanel?.destroy();
+  decorPanel = undefined;
+  if (decorating) setDecorating(false);
+  shiftOverlay = undefined;
+  ordersPanel = undefined;
   currentRoom = undefined;
 }
 
@@ -128,17 +257,84 @@ leaveBtn.addEventListener("click", () => {
 copyLinkBtn.addEventListener("click", async () => {
   if (!currentRoom) return;
   const link = `${location.origin}${location.pathname}?room=${currentRoom.roomId}`;
+  const label = copyLinkBtn.querySelector("span")!;
   try {
     await navigator.clipboard.writeText(link);
-    copyLinkBtn.textContent = "Đã sao chép!";
+    label.textContent = "Đã chép!";
   } catch {
     // Clipboard API needs a secure context (localhost/https); fall back to a prompt over LAN http.
     window.prompt("Sao chép link mời:", link);
   }
-  setTimeout(() => (copyLinkBtn.textContent = "Sao chép link mời"), 1500);
+  setTimeout(() => (label.textContent = "Mời"), 1500);
 });
 
+// ---------------------------------------------------------------- Modal (menu on phones, decoration shop)
+
+function openModal(title: string, content: HTMLElement) {
+  modalTitle.textContent = title;
+  modalBody.replaceChildren(content);
+  modal.hidden = false;
+}
+
+function closeModal() {
+  modal.hidden = true;
+  modalBody.replaceChildren();
+}
+
+modalClose.addEventListener("click", closeModal);
+modal.addEventListener("click", (e) => {
+  if (e.target === modal) closeModal(); // tap on the backdrop
+});
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !modal.hidden) closeModal();
+});
+
+menuBtn.addEventListener("click", () => openModal("📋 Menu", buildMenu()));
+
+// ---------------------------------------------------------------- Decorate mode (between shifts only)
+
+function setDecorating(on: boolean) {
+  decorating = on;
+  decorateBtn.classList.toggle("active", on);
+  decorateBtn.querySelector("span")!.textContent = on ? "Xong" : "Trang trí";
+  decorRoot.hidden = !on;
+  ordersRoot.hidden = on;
+  if (on) shiftOverlay?.collapse(); // the shift card would cover the shop
+  game?.events.emit(DECORATE_MODE_EVENT, on);
+}
+
+decorateBtn.addEventListener("click", () => {
+  if (!currentRoom || currentRoom.state?.phase === GamePhase.Playing) return;
+  setDecorating(!decorating);
+  decorateBtn.blur(); // keep Space for the game
+});
+
+// ---------------------------------------------------------------- Fullscreen (Android; iPhone Safari has no Fullscreen API)
+
+if (isTouchDevice() && document.documentElement.requestFullscreen) {
+  fullscreenBtn.hidden = false;
+  fullscreenBtn.addEventListener("click", async () => {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+        return;
+      }
+      await document.documentElement.requestFullscreen({ navigationUI: "hide" });
+      // Orientation lock only works in fullscreen and isn't supported everywhere.
+      const orientation = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> };
+      await orientation.lock?.("landscape");
+    } catch {
+      /* not supported on this device — ignore */
+    }
+  });
+}
+
 // ---------------------------------------------------------------- Boot
+
+// Full menu shown inline in the side panel on large screens (hidden on phones; 📋 opens it in a modal).
+const menuTitle = document.createElement("h2");
+menuTitle.textContent = "📋 Menu";
+menuInline.append(menuTitle, buildMenu());
 
 // Invite links (?room=ABCD) pre-fill the code field.
 const invited = normalizeRoomCode(new URLSearchParams(location.search).get("room") ?? "");

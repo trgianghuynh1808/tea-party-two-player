@@ -1,0 +1,14 @@
+# Render Blueprint: one free web service running the Colyseus server,
+# which also serves the built client (same origin for HTTP + WebSocket).
+# Free instances sleep after 15 min without traffic; the first visit after that takes ~1 min to wake up.
+services:
+  - type: web
+    name: boba-shop
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "24"

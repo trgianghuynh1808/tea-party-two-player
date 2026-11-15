@@ -2,7 +2,8 @@
 <html lang="vi">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#1e1b2e" />
     <title>Boba Shop Co-op</title>
   </head>
   <body>
@@ -10,6 +11,18 @@
     <section id="lobby" class="card">
       <h1>🧋 Boba Shop Co-op</h1>
       <p class="subtitle">Cùng bạn mở quán trà sữa — tối đa 2 người</p>
+
+      <p class="picker-title">Chọn nhân vật</p>
+      <div id="gender-picker" class="gender-picker" role="radiogroup" aria-label="Chọn nhân vật">
+        <button type="button" class="gender-option" data-gender="male" role="radio" aria-checked="false">
+          <span class="char-preview male" aria-hidden="true"></span>
+          <span>Nam</span>
+        </button>
+        <button type="button" class="gender-option" data-gender="female" role="radio" aria-checked="false">
+          <span class="char-preview female" aria-hidden="true"></span>
+          <span>Nữ</span>
+        </button>
+      </div>
 
       <button id="create-btn" class="btn primary" type="button">Tạo phòng mới</button>
 
@@ -32,15 +45,46 @@
       <p id="lobby-error" class="error" role="alert"></p>
     </section>
 
-    <!-- In-game: room code bar + Phaser canvas -->
+    <!-- In-game: Phaser canvas (scales to fit) + side panel. Fills the whole viewport. -->
     <section id="game-screen" hidden>
-      <div class="room-bar">
-        <span>Mã phòng: <strong id="room-code"></strong></span>
-        <button id="copy-link-btn" class="btn small" type="button">Sao chép link mời</button>
-        <button id="leave-btn" class="btn small ghost" type="button">Rời phòng</button>
+      <div class="game-wrap">
+        <div id="game"></div>
+        <div id="shift-overlay" class="shift-overlay" hidden></div>
       </div>
-      <div id="game"></div>
+
+      <aside class="side-panel">
+        <header class="panel-header">
+          <div class="room-code">Phòng <strong id="room-code"></strong></div>
+          <div class="tool-row">
+            <button id="copy-link-btn" class="tool" type="button" title="Sao chép link mời">🔗<span>Mời</span></button>
+            <button id="menu-btn" class="tool compact-only" type="button" title="Menu công thức">📋<span>Menu</span></button>
+            <button id="decorate-btn" class="tool" type="button" title="Trang trí quán (ngoài giờ ca)">🪑<span>Trang trí</span></button>
+            <button id="fullscreen-btn" class="tool" type="button" title="Toàn màn hình" hidden>⛶<span>Full</span></button>
+            <button id="leave-btn" class="tool danger" type="button" title="Rời phòng">🚪<span>Rời</span></button>
+          </div>
+        </header>
+        <div id="decor-panel" class="panel-section" hidden></div>
+        <div id="orders-panel" class="panel-section"></div>
+        <div id="menu-inline" class="panel-section wide-only"></div>
+      </aside>
     </section>
+
+    <!-- Generic modal (menu on small screens) -->
+    <div id="modal" class="modal" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true">
+        <header>
+          <h2 id="modal-title"></h2>
+          <button id="modal-close" class="tool" type="button" aria-label="Đóng">✕</button>
+        </header>
+        <div id="modal-body"></div>
+      </div>
+    </div>
+
+    <!-- Shown on phones held in portrait while in game -->
+    <div id="rotate-hint" class="rotate-hint">
+      <div class="phone">📱</div>
+      <p>Xoay ngang điện thoại để chơi</p>
+    </div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

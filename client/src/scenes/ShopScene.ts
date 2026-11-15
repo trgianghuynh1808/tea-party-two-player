@@ -1,10 +1,10 @@
 import Phaser from "phaser";
 import { Callbacks, type Room } from "@colyseus/sdk";
 import {
-  DECORATION_CATALOG,
-  INTERACT_RANGE,
-  ITEM_LABELS,
-  Item,
+  EMPTY_HAND,
+  GENDERS,
+  GamePhase,
+  StationType,
   Messages,
   PLAYER_RADIUS,
   STATIONS,
@@ -12,21 +12,30 @@ import {
   WORLD_HEIGHT,
   WORLD_WIDTH,
   directionFromInput,
-  distanceToStation,
+  findNearestStationDef,
+  planInteraction,
   stepMovement,
+  cupColor,
+  describeItem,
+  type DeliveredEvent,
   type Direction,
   type StationDef,
 } from "@boba/shared";
 import { KeyboardState } from "../input/KeyboardState";
+import { TouchControls, isTouchDevice } from "../input/TouchControls";
+import { PALETTE_DRAG_START, type PaletteDragStart } from "../ui/DecorPanel";
+import { DecorController } from "./DecorController";
 
-import type { BobaShopState, Decoration, Player } from "@boba/shared/schema";
+import type { BobaShopState, Player } from "@boba/shared/schema";
 
 const PLAYER_COLORS = [0xe76f51, 0x457b9d];
-const ITEM_COLORS: Record<string, number> = {
-  [Item.Cup]: 0xffffff,
-  [Item.CupTea]: 0xc8915a,
-  [Item.CupTeaPearl]: 0x8d5b3c,
-};
+
+/** Phones render the 960×600 world at ~0.6× scale, so in-game text is enlarged on touch devices. */
+const FONT_SCALE = isTouchDevice() ? 1.3 : 1;
+const fs = (px: number) => `${Math.round(px * FONT_SCALE)}px`;
+
+/** game.events event from the DOM 🪑 button: payload = true (enter decorate mode) / false (leave). */
+export const DECORATE_MODE_EVENT = "decorate-mode";
 
 /** Higher = snappier interpolation toward the server position. */
 const REMOTE_LERP_RATE = 12;
@@ -40,15 +49,29 @@ export interface ShopSceneData {
 
 interface PlayerView {
   container: Phaser.GameObjects.Container;
-  body: Phaser.GameObjects.Arc;
-  facing: Phaser.GameObjects.Triangle;
+  sprite: Phaser.GameObjects.Sprite;
   heldCup: Phaser.GameObjects.Rectangle;
   heldLabel: Phaser.GameObjects.Text;
   // Latest authoritative position from the server.
   serverX: number;
   serverY: number;
   isLocal: boolean;
+  // Walk bob animation (sheets have one frame per direction).
+  lastX: number;
+  lastY: number;
+  walkPhase: number;
 }
+
+// ---------------------------------------------------------------- Character sprites
+// client/public/assets/characters/<gender>.png: 32×128 sheets, four 32×32 frames top→bottom:
+// down, left, right, up. The character occupies roughly rows 4–23 of each frame.
+const CHARACTER_FRAME = 32;
+const CHARACTER_SCALE = 3;
+const CHARACTER_FEET_ROW = 24; // anchor the sprite at its feet
+const FEET_Y = PLAYER_RADIUS - 2; // feet sit near the bottom of the collision circle
+const HEAD_Y = FEET_Y - 20 * CHARACTER_SCALE; // top of the hat
+const DIRECTION_FRAME: Record<string, number> = { down: 0, left: 1, right: 2, up: 3 };
+const characterKey = (gender: string) => `char-${gender === "female" ? "female" : "male"}`;
 
 interface StationView {
   def: StationDef;
@@ -56,19 +79,24 @@ interface StationView {
   itemCup: Phaser.GameObjects.Rectangle;
   progressBar: Phaser.GameObjects.Rectangle;
   highlight: Phaser.GameObjects.Rectangle;
+  readyLabel: Phaser.GameObjects.Text;
 }
 
 export class ShopScene extends Phaser.Scene {
   private room?: Room<BobaShopState>;
   private players = new Map<string, PlayerView>();
   private stations = new Map<string, StationView>();
-  private decorations = new Map<string, Phaser.GameObjects.Container>();
+  private decor?: DecorController;
 
   private keys!: KeyboardState;
+  private touch?: TouchControls;
+  private actionHint!: Phaser.GameObjects.Text;
+  private lastActionKey = "";
   private lastInput = { dx: 0, dy: 0 };
   private localDirection: Direction = "down";
 
   private moneyText!: Phaser.GameObjects.Text;
+  private shiftText!: Phaser.GameObjects.Text;
   private statusText!: Phaser.GameObjects.Text;
   private toastText!: Phaser.GameObjects.Text;
 
@@ -76,11 +104,23 @@ export class ShopScene extends Phaser.Scene {
     super("ShopScene");
   }
 
+  preload() {
+    for (const gender of GENDERS) {
+      this.load.spritesheet(characterKey(gender), `assets/characters/${gender}.png`, {
+        frameWidth: CHARACTER_FRAME,
+        frameHeight: CHARACTER_FRAME,
+      });
+    }
+  }
+
   init(data: ShopSceneData) {
     this.room = data.room;
   }
 
   create() {
+    // Pixel-art sprites: nearest-neighbour scaling for these textures only (text stays smooth).
+    for (const gender of GENDERS) this.textures.get(characterKey(gender)).setFilter(Phaser.Textures.FilterMode.NEAREST);
+
     this.drawFloor();
     this.createStations();
     this.createHud();
@@ -88,7 +128,27 @@ export class ShopScene extends Phaser.Scene {
     // Use physical key codes so Vietnamese IMEs (Telex: D/W/S...) don't swallow movement keys.
     // Space and arrows are prevented from scrolling the page.
     this.keys = new KeyboardState(["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]);
+    if (isTouchDevice()) {
+      this.touch = new TouchControls(this);
+      this.actionHint.setVisible(false); // the action button shows the label instead
+    }
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.touch?.destroy());
+
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.keys.destroy());
+
+    // Decorate mode is toggled from the DOM (🪑 button); catalog drags start in the DOM panel.
+    const onDecorateMode = (enabled: boolean) => {
+      this.decor?.setEnabled(enabled);
+      this.touch?.setEnabled(!enabled); // joystick would fight with dragging furniture
+    };
+    const onPaletteDrag = (e: PaletteDragStart) => this.decor?.startPaletteDrag(e);
+    this.game.events.on(DECORATE_MODE_EVENT, onDecorateMode);
+    this.game.events.on(PALETTE_DRAG_START, onPaletteDrag);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.game.events.off(DECORATE_MODE_EVENT, onDecorateMode);
+      this.game.events.off(PALETTE_DRAG_START, onPaletteDrag);
+      this.decor?.destroy();
+    });
 
     if (this.room) this.bindRoom(this.room);
   }
@@ -126,18 +186,25 @@ export class ShopScene extends Phaser.Scene {
     });
 
     $.listen("money", (money) => this.moneyText.setText(`💰 $${money}`));
+    $.listen("phase", () => this.updateShiftText(room.state));
+    $.listen("shiftTimeLeft", () => this.updateShiftText(room.state));
 
+    const decor = new DecorController(this, room, fs);
+    this.decor = decor;
     $.onAdd("decorations", (deco) => {
-      this.decorations.set(deco.id, this.createDecorationView(deco));
+      decor.add(deco);
+      $.listen(deco, "x", () => decor.syncPosition(deco.id));
+      $.listen(deco, "y", () => decor.syncPosition(deco.id));
     });
-    $.onRemove("decorations", (deco) => {
-      this.decorations.get(deco.id)?.destroy();
-      this.decorations.delete(deco.id);
-    });
+    $.onRemove("decorations", (deco) => decor.remove(deco.id));
 
-    room.onMessage(ServerEvents.Delivered, (msg: { by: string; amount: number }) => {
+    room.onMessage(ServerEvents.Delivered, (msg: DeliveredEvent) => {
       const who = msg.by === room.sessionId ? "Bạn" : "Đồng đội";
-      this.toast(`${who} giao 1 ly! +$${msg.amount}`, "#2a9d8f");
+      const tip = msg.tip > 0 ? ` (+$${msg.tip} tip giao nhanh)` : "";
+      this.toast(`${who} giao ${msg.drinkName}! +$${msg.amount}${tip}`, "#2a9d8f");
+    });
+    room.onMessage(ServerEvents.OrderExpired, (msg: { drinkName: string }) => {
+      this.toast(`Khách chờ lâu quá nên bỏ về (${msg.drinkName})`, "#e76f51");
     });
     room.onMessage(ServerEvents.InteractFailed, (msg: { reason: string }) => {
       this.toast(msg.reason, "#e63946");
@@ -168,6 +235,7 @@ export class ShopScene extends Phaser.Scene {
         c.y = Phaser.Math.Linear(c.y, view.serverY, remoteAlpha);
       }
       c.setDepth(c.y);
+      this.animateWalk(view, dt);
     }
 
     this.updateStationHighlight();
@@ -176,8 +244,13 @@ export class ShopScene extends Phaser.Scene {
   private handleInput(dt: number) {
     if (!this.room) return;
     const k = this.keys;
-    const dx = (k.isDown("KeyD", "ArrowRight") ? 1 : 0) - (k.isDown("KeyA", "ArrowLeft") ? 1 : 0);
-    const dy = (k.isDown("KeyS", "ArrowDown") ? 1 : 0) - (k.isDown("KeyW", "ArrowUp") ? 1 : 0);
+    let dx = (k.isDown("KeyD", "ArrowRight") ? 1 : 0) - (k.isDown("KeyA", "ArrowLeft") ? 1 : 0);
+    let dy = (k.isDown("KeyS", "ArrowDown") ? 1 : 0) - (k.isDown("KeyW", "ArrowUp") ? 1 : 0);
+    // Touch joystick is used when the keyboard isn't steering.
+    if (this.touch && dx === 0 && dy === 0) {
+      dx = this.touch.dx;
+      dy = this.touch.dy;
+    }
 
     // Only send when input changes — the server simulates continuously.
     if (dx !== this.lastInput.dx || dy !== this.lastInput.dy) {
@@ -193,25 +266,12 @@ export class ShopScene extends Phaser.Scene {
       this.applyFacing(local, this.localDirection);
     }
 
-    if (k.justPressed("Space")) {
+    // Always consume both so a stale tap doesn't fire later.
+    const pressedSpace = k.justPressed("Space");
+    const tappedAction = this.touch?.consumeAction() ?? false;
+    if (pressedSpace || tappedAction) {
       this.room.send(Messages.Interact);
     }
-
-    if (local) {
-      if (k.justPressed("Digit1") || k.justPressed("Numpad1")) this.buyDecoration(0, local);
-      if (k.justPressed("Digit2") || k.justPressed("Numpad2")) this.buyDecoration(1, local);
-    }
-  }
-
-  private buyDecoration(index: number, local: PlayerView) {
-    const def = DECORATION_CATALOG[index];
-    if (!def || !this.room) return;
-    // Place the decoration just below the player.
-    this.room.send(Messages.BuyDecoration, {
-      kind: def.kind,
-      x: local.container.x,
-      y: local.container.y + PLAYER_RADIUS + 16,
-    });
   }
 
   // ---------------------------------------------------------------- Views
@@ -235,16 +295,35 @@ export class ShopScene extends Phaser.Scene {
         .setStrokeStyle(3, 0xffd166)
         .setVisible(false);
       const rect = this.add.rectangle(def.x, def.y, def.width, def.height, def.color).setStrokeStyle(2, 0x3d2c29);
+      // Phones: icon only, the seconds would make neighbouring labels overlap at the larger font size.
+      const timed = def.processSeconds ? (FONT_SCALE > 1 ? " ⏱" : ` ⏱${def.processSeconds}s`) : "";
       this.add
-        .text(def.x, def.y - def.height / 2 - 12, def.label, { fontFamily: "sans-serif", fontSize: "14px", color: "#3d2c29" })
-        .setOrigin(0.5);
-      const itemCup = this.add.rectangle(def.x, def.y, 18, 24, 0xffffff).setStrokeStyle(2, 0x3d2c29).setVisible(false);
+        .text(def.x, def.y - def.height / 2 - 10, def.label + timed, {
+          fontFamily: "sans-serif",
+          fontSize: fs(12),
+          color: "#3d2c29",
+          fontStyle: "bold",
+        })
+        .setOrigin(0.5)
+        .setDepth(def.y + def.height / 2 + 1);
+      const itemCup = this.add.rectangle(def.x, def.y, 18, 24, 0xffffff).setStrokeStyle(2, 0xffffff).setVisible(false);
       const progressBar = this.add
         .rectangle(def.x - def.width / 2 + 6, def.y + def.height / 2 - 8, 0, 6, 0x2a9d8f)
         .setOrigin(0, 0.5);
+      const readyLabel = this.add
+        .text(def.x, def.y + def.height / 2 + 10, "Xong! Space để lấy", {
+          fontFamily: "sans-serif",
+          fontSize: fs(11),
+          color: "#ffffff",
+          backgroundColor: "#2a9d8f",
+          padding: { x: 4, y: 1 },
+        })
+        .setOrigin(0.5)
+        .setVisible(false);
 
       for (const o of [highlight, rect, itemCup, progressBar]) o.setDepth(def.y + def.height / 2);
-      this.stations.set(def.id, { def, rect, itemCup, progressBar, highlight });
+      readyLabel.setDepth(9000); // above players standing in front of the machine
+      this.stations.set(def.id, { def, rect, itemCup, progressBar, highlight, readyLabel });
     }
   }
 
@@ -253,98 +332,166 @@ export class ShopScene extends Phaser.Scene {
       .text(16, 12, "💰 $0", { fontFamily: "sans-serif", fontSize: "22px", color: "#3d2c29", fontStyle: "bold" })
       .setDepth(10000);
     this.statusText = this.add
-      .text(16, WORLD_HEIGHT - 52, "Đang kết nối...", { fontFamily: "sans-serif", fontSize: "14px", color: "#3d2c29" })
+      .text(16, WORLD_HEIGHT - 52, "Đang kết nối...", { fontFamily: "sans-serif", fontSize: fs(14), color: "#3d2c29" })
       .setDepth(10000);
     this.add
       .text(
         16,
         WORLD_HEIGHT - 28,
-        "WASD/mũi tên: di chuyển · Space: tương tác · 1: mua chậu cây ($50) · 2: mua đèn lồng ($75)",
-        { fontFamily: "sans-serif", fontSize: "13px", color: "#6b5b57" },
+        isTouchDevice()
+          ? "Chạm nửa trái để di chuyển · nút tròn bên phải để tương tác"
+          : "WASD/mũi tên: di chuyển · Space: tương tác · 🪑 Trang trí: kéo thả đồ (ngoài giờ ca)",
+        { fontFamily: "sans-serif", fontSize: fs(13), color: "#6b5b57" },
       )
       .setDepth(10000);
+    // Desktop: previews what Space does at the highlighted station.
+    this.actionHint = this.add
+      .text(WORLD_WIDTH - 16, WORLD_HEIGHT - 84, "", {
+        fontFamily: "sans-serif",
+        fontSize: fs(15),
+        fontStyle: "bold",
+        color: "#2a9d8f",
+        backgroundColor: "#f6efe6dd",
+        padding: { x: 6, y: 2 },
+      })
+      .setOrigin(1, 0)
+      .setDepth(10000);
+    this.shiftText = this.add
+      .text(WORLD_WIDTH - 16, 12, "", { fontFamily: "sans-serif", fontSize: "22px", color: "#3d2c29", fontStyle: "bold" })
+      .setOrigin(1, 0)
+      .setDepth(10000);
     this.toastText = this.add
-      .text(WORLD_WIDTH / 2, 20, "", { fontFamily: "sans-serif", fontSize: "18px", color: "#2a9d8f", fontStyle: "bold" })
+      .text(WORLD_WIDTH / 2, 20, "", { fontFamily: "sans-serif", fontSize: fs(18), color: "#2a9d8f", fontStyle: "bold" })
       .setOrigin(0.5, 0)
       .setDepth(10000)
       .setAlpha(0);
   }
 
   private createPlayerView(state: Player, isLocal: boolean): PlayerView {
+    // Colored ring at the feet tells the two players apart (both may pick the same character).
     const color = PLAYER_COLORS[state.colorIndex % PLAYER_COLORS.length];
-    const body = this.add.circle(0, 0, PLAYER_RADIUS, color).setStrokeStyle(3, isLocal ? 0xffd166 : 0x3d2c29);
-    const facing = this.add.triangle(0, 0, 0, -6, 12, 0, 0, 6, 0x3d2c29);
+    const shadow = this.add
+      .ellipse(0, FEET_Y, 44, 16, color, 0.45)
+      .setStrokeStyle(isLocal ? 3 : 2, isLocal ? 0xffd166 : color, 1);
+    const sprite = this.add
+      .sprite(0, FEET_Y, characterKey(state.gender), DIRECTION_FRAME.down)
+      .setOrigin(0.5, CHARACTER_FEET_ROW / CHARACTER_FRAME)
+      .setScale(CHARACTER_SCALE);
     const name = this.add
-      .text(0, -PLAYER_RADIUS - 14, isLocal ? "Bạn" : "P2", { fontFamily: "sans-serif", fontSize: "12px", color: "#3d2c29" })
+      .text(0, HEAD_Y - 8, isLocal ? "Bạn" : "P2", {
+        fontFamily: "sans-serif",
+        fontSize: fs(12),
+        fontStyle: "bold",
+        color: isLocal ? "#3d2c29" : "#457b9d",
+      })
       .setOrigin(0.5);
-    const heldCup = this.add.rectangle(0, -PLAYER_RADIUS - 34, 16, 20, 0xffffff).setStrokeStyle(2, 0x3d2c29).setVisible(false);
+    const heldCup = this.add.rectangle(0, HEAD_Y - 30, 16, 20, 0xffffff).setStrokeStyle(2, 0x3d2c29).setVisible(false);
     const heldLabel = this.add
-      .text(0, -PLAYER_RADIUS - 52, "", { fontFamily: "sans-serif", fontSize: "11px", color: "#3d2c29", backgroundColor: "#ffffffcc" })
+      .text(0, HEAD_Y - 50, "", { fontFamily: "sans-serif", fontSize: fs(11), color: "#3d2c29", backgroundColor: "#ffffffcc" })
       .setOrigin(0.5)
       .setVisible(false);
 
-    const container = this.add.container(state.x, state.y, [body, facing, name, heldCup, heldLabel]);
-    const view: PlayerView = { container, body, facing, heldCup, heldLabel, serverX: state.x, serverY: state.y, isLocal };
+    const container = this.add.container(state.x, state.y, [shadow, sprite, name, heldCup, heldLabel]);
+    const view: PlayerView = {
+      container,
+      sprite,
+      heldCup,
+      heldLabel,
+      serverX: state.x,
+      serverY: state.y,
+      isLocal,
+      lastX: state.x,
+      lastY: state.y,
+      walkPhase: 0,
+    };
     this.applyFacing(view, state.direction);
     this.applyHeldItem(view, state.heldItem);
     return view;
   }
 
   private applyFacing(view: PlayerView, dir: string) {
-    const offsets: Record<string, [number, number, number]> = {
-      right: [PLAYER_RADIUS - 4, 0, 0],
-      left: [-(PLAYER_RADIUS - 4), 0, Math.PI],
-      down: [0, PLAYER_RADIUS - 4, Math.PI / 2],
-      up: [0, -(PLAYER_RADIUS - 4), -Math.PI / 2],
-    };
-    const [x, y, rot] = offsets[dir] ?? offsets.down;
-    view.facing.setPosition(x, y).setRotation(rot);
+    view.sprite.setFrame(DIRECTION_FRAME[dir] ?? DIRECTION_FRAME.down);
+  }
+
+  /** Small hop while moving, since the sheets only have one frame per direction. */
+  private animateWalk(view: PlayerView, dt: number) {
+    const { x, y } = view.container;
+    const moving = Math.hypot(x - view.lastX, y - view.lastY) > 0.3;
+    view.lastX = x;
+    view.lastY = y;
+    view.walkPhase = moving ? view.walkPhase + dt * 14 : 0;
+    view.sprite.y = FEET_Y - (moving ? Math.abs(Math.sin(view.walkPhase)) * 4 : 0);
   }
 
   private applyHeldItem(view: PlayerView, item: string) {
-    const has = item !== Item.None;
+    const has = item !== EMPTY_HAND;
     view.heldCup.setVisible(has);
     view.heldLabel.setVisible(has);
     if (has) {
-      view.heldCup.setFillStyle(ITEM_COLORS[item] ?? 0xffffff);
-      view.heldLabel.setText(ITEM_LABELS[item] ?? item);
+      view.heldCup.setFillStyle(cupColor(item));
+      view.heldLabel.setText(describeItem(item));
+    }
+  }
+
+  private updateShiftText(state: BobaShopState) {
+    if (state.phase === GamePhase.Playing) {
+      const t = Math.ceil(state.shiftTimeLeft);
+      const mmss = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
+      this.shiftText.setText(`⏱ ${mmss}`).setColor(t <= 30 ? "#e63946" : "#3d2c29");
+    } else {
+      this.shiftText.setText(state.phase === GamePhase.Ended ? "Hết ca" : "Chưa mở ca").setColor("#6b5b57");
     }
   }
 
   private applyStationItem(view: StationView, item: string, progress: number) {
-    view.itemCup.setVisible(item !== Item.None);
-    if (item !== Item.None) view.itemCup.setFillStyle(ITEM_COLORS[item] ?? 0xffffff);
+    view.itemCup.setVisible(item !== EMPTY_HAND);
+    if (item !== EMPTY_HAND) view.itemCup.setFillStyle(cupColor(item));
     const showProgress = progress > 0 && progress < 1;
     view.progressBar.width = showProgress ? (view.def.width - 12) * progress : 0;
-  }
-
-  private createDecorationView(deco: Decoration) {
-    const def = DECORATION_CATALOG.find((d) => d.kind === deco.kind);
-    const color = def?.color ?? 0x999999;
-    const shape =
-      deco.kind === "lamp"
-        ? this.add.circle(0, 0, 12, color).setStrokeStyle(2, 0x3d2c29)
-        : this.add.rectangle(0, 0, 22, 22, color).setStrokeStyle(2, 0x3d2c29);
-    const label = this.add
-      .text(0, 18, def?.label ?? deco.kind, { fontFamily: "sans-serif", fontSize: "10px", color: "#3d2c29" })
-      .setOrigin(0.5);
-    return this.add.container(deco.x, deco.y, [shape, label]).setDepth(deco.y);
-  }
-
-  private updateStationHighlight() {
-    const local = this.room ? this.players.get(this.room.sessionId) : undefined;
-    let nearestId: string | undefined;
-    if (local) {
-      let best = INTERACT_RANGE;
-      for (const def of STATIONS) {
-        const d = distanceToStation(local.container, def);
-        if (d <= best) {
-          best = d;
-          nearestId = def.id;
-        }
-      }
+    if (view.def.type === StationType.Counter) {
+      // Counters: show what's on it so the teammate knows what to pick up.
+      view.readyLabel.setVisible(item !== EMPTY_HAND);
+      if (item !== EMPTY_HAND) view.readyLabel.setText(describeItem(item)).setBackgroundColor("#6d4c41");
+      return;
     }
-    for (const [id, view] of this.stations) view.highlight.setVisible(id === nearestId);
+    // Timed machines: cup finished and waiting to be picked up.
+    view.readyLabel.setVisible(view.def.type === StationType.Machine && item !== EMPTY_HAND && progress >= 1);
+  }
+
+  /** Highlight the nearest station and preview what the action key/button would do there. */
+  private updateStationHighlight() {
+    const room = this.room;
+    const local = room ? this.players.get(room.sessionId) : undefined;
+    const def = local ? findNearestStationDef(local.container) : undefined;
+    for (const [id, view] of this.stations) view.highlight.setVisible(id === def?.id);
+
+    let label: string | null = null;
+    let reason = "";
+    // The first state patch may not have arrived yet during the first frames.
+    const state = room?.state;
+    const player = state?.players?.get(room!.sessionId);
+    const station = def && state?.stations?.get(def.id);
+    if (room && state?.orders && def && station && player) {
+      const plan = planInteraction(def, {
+        phase: room.state.phase,
+        held: player.heldItem,
+        stationItem: station.item,
+        stationProgress: station.progress,
+        orderedDrinkIds: room.state.orders.map((o) => o.drinkId),
+      });
+      if (plan.ok) label = plan.label;
+      else reason = plan.reason;
+    }
+
+    // Only touch the game objects when the preview actually changes.
+    const key = `${label}|${reason}`;
+    if (key === this.lastActionKey) return;
+    this.lastActionKey = key;
+
+    this.touch?.setAction(label);
+    if (label) this.actionHint.setText(`[Space] ${label}`).setColor("#2a9d8f");
+    else this.actionHint.setText(reason).setColor("#8a7a76");
+    this.actionHint.setVisible(!this.touch && this.actionHint.text !== "");
   }
 
   private updateStatus() {

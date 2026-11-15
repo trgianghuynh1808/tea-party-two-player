@@ -1,26 +1,52 @@
 import { Room, type Client } from "colyseus";
 import {
-  DECORATION_CATALOG,
-  DRINK_PRICE,
-  INTERACT_RANGE,
-  Item,
+  DRINKS,
+  EMPTY_CUP,
+  EMPTY_HAND,
+  FAST_SERVICE_TIP,
+  GamePhase,
+  SHIFT_SECONDS,
+  MAX_ACTIVE_ORDERS,
+  ORDER_DURATION_SECONDS,
+  ORDER_SPAWN_SECONDS,
   ROOM_CODE_ALPHABET,
   ROOM_CODE_LENGTH,
   STATIONS,
   ServerEvents,
   StationType,
-  WORLD_HEIGHT,
-  WORLD_WIDTH,
+  canPlaceDecoration,
   directionFromInput,
-  distanceToStation,
+  getDecorationDef,
+  isGender,
+  isValidShopId,
+  refundFor,
+  snapToGrid,
+  findNearestStationDef,
+  planInteraction,
   stepMovement,
+  cupContents,
+  getDrink,
+  makeCup,
+  type DeliveredEvent,
   type Direction,
+  type DrinkDef,
   type MoveMessage,
 } from "@boba/shared";
-import { BobaShopState, Decoration, Player, Station } from "@boba/shared/schema";
+import { BobaShopState, Decoration, Order, Player, Station } from "@boba/shared/schema";
+import { loadShop, saveShop } from "../persistence/ShopStore.js";
+
+/** Wait this long after the last change before writing the shop save (batches rapid edits). */
+const SAVE_DEBOUNCE_MS = 1000;
+
+interface CreateOptions {
+  /** Host's persistent shop id (from their browser). Without it the shop is not saved. */
+  shopId?: unknown;
+}
 
 const ROOM_CODES_CHANNEL = "$boba_room_codes";
-const TEA_FILL_SECONDS = 1.5;
+const FIRST_ORDER_DELAY_SECONDS = 2;
+/** Override shift length for quick testing, e.g. SHIFT_SECONDS=20 npm run dev. */
+const SHIFT_DURATION = Number(process.env.SHIFT_SECONDS) || SHIFT_SECONDS;
 const DELIVERY_CLEAR_SECONDS = 0.8;
 const SPAWN_POINTS = [
   { x: 300, y: 400 },
@@ -45,6 +71,10 @@ export class BobaShopRoom extends Room {
   private moveInputs = new Map<string, InputState>();
   private deliveryTimers = new Map<string, number>();
   private decorationSeq = 0;
+  private orderSeq = 0;
+  private orderSpawnTimer = FIRST_ORDER_DELAY_SECONDS;
+  private shopId?: string;
+  private saveTimer?: ReturnType<typeof setTimeout>;
 
   messages = {
     move: (client: Client, payload: MoveMessage) => {
@@ -56,12 +86,27 @@ export class BobaShopRoom extends Room {
     buy_decoration: (client: Client, payload: { kind: string; x: number; y: number }) => {
       this.handleBuyDecoration(client, payload);
     },
+    move_decoration: (client: Client, payload: { id: string; x: number; y: number }) => {
+      this.handleMoveDecoration(client, payload);
+    },
+    sell_decoration: (client: Client, payload: { id: string }) => {
+      this.handleSellDecoration(client, payload);
+    },
+    start_shift: () => {
+      if (this.state.phase !== GamePhase.Playing) this.startShift();
+    },
   };
 
-  async onCreate() {
+  async onCreate(options: CreateOptions = {}) {
     // Short shareable room code; private so it can only be joined by code (joinById).
     this.roomId = await this.generateRoomCode();
     this.setPrivate(true);
+
+    // Restore the host's shop (money + furniture) from a previous session.
+    if (isValidShopId(options.shopId)) {
+      this.shopId = options.shopId;
+      await this.restoreShop(options.shopId);
+    }
 
     for (const def of STATIONS) {
       const station = new Station();
@@ -76,7 +121,7 @@ export class BobaShopRoom extends Room {
     this.setSimulationInterval((deltaTime) => this.update(deltaTime / 1000), 1000 / 60);
   }
 
-  onJoin(client: Client) {
+  onJoin(client: Client, options: { gender?: unknown } = {}) {
     const usedColors = new Set([...this.state.players.values()].map((p) => p.colorIndex));
     const colorIndex = usedColors.has(0) ? 1 : 0;
     const spawn = SPAWN_POINTS[colorIndex];
@@ -85,6 +130,7 @@ export class BobaShopRoom extends Room {
     player.x = spawn.x;
     player.y = spawn.y;
     player.colorIndex = colorIndex;
+    player.gender = isGender(options.gender) ? options.gender : "male";
     this.state.players.set(client.sessionId, player);
     this.moveInputs.set(client.sessionId, { dx: 0, dy: 0 });
     console.log(`[BobaShopRoom] ${client.sessionId} joined (${this.clients.length}/${this.maxClients})`);
@@ -97,7 +143,48 @@ export class BobaShopRoom extends Room {
   }
 
   async onDispose() {
+    await this.flushSave();
     await this.presence.srem(ROOM_CODES_CHANNEL, this.roomId);
+  }
+
+  // ---------------------------------------------------------------- Persistence
+
+  private async restoreShop(shopId: string) {
+    try {
+      const save = await loadShop(shopId);
+      if (!save) return;
+      this.state.money = save.money;
+      for (const d of save.decorations) {
+        // Re-validate in case the layout or catalog changed since the save.
+        if (!canPlaceDecoration(d.kind, d.x, d.y, this.state.decorations)) continue;
+        this.addDecoration(d.kind, d.x, d.y);
+      }
+      console.log(`[BobaShopRoom] restored shop ${shopId}: $${save.money}, ${this.state.decorations.length} decorations`);
+    } catch (err) {
+      console.error(`[BobaShopRoom] failed to load shop ${shopId}`, err);
+    }
+  }
+
+  /** Save soon (debounced). Call after anything that changes money or furniture. */
+  private scheduleSave() {
+    if (!this.shopId) return;
+    clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => void this.flushSave(), SAVE_DEBOUNCE_MS);
+  }
+
+  private async flushSave() {
+    clearTimeout(this.saveTimer);
+    this.saveTimer = undefined;
+    if (!this.shopId) return;
+    try {
+      await saveShop(this.shopId, {
+        version: 1,
+        money: this.state.money,
+        decorations: this.state.decorations.map((d) => ({ kind: d.kind, x: d.x, y: d.y })),
+      });
+    } catch (err) {
+      console.error(`[BobaShopRoom] failed to save shop ${this.shopId}`, err);
+    }
   }
 
   /** Generate a code not used by any other live room, and register it via the Presence API. */
@@ -125,13 +212,13 @@ export class BobaShopRoom extends Room {
       player.direction = directionFromInput(input.dx, input.dy, player.direction as Direction);
     });
 
-    // Tea dispenser fills a cup placed on it over time.
-    this.state.stations.forEach((station) => {
-      if (station.type === StationType.TeaDispenser && station.item === Item.Cup) {
-        station.progress = Math.min(1, station.progress + dt / TEA_FILL_SECONDS);
-        if (station.progress >= 1) station.item = Item.CupTea;
-      }
-    });
+    this.updateMachines(dt);
+
+    if (this.state.phase === GamePhase.Playing) {
+      this.updateOrders(dt);
+      this.state.shiftTimeLeft = Math.max(0, this.state.shiftTimeLeft - dt);
+      if (this.state.shiftTimeLeft <= 0) this.endShift();
+    }
 
     // Delivered drinks disappear from the counter after a short delay.
     for (const [stationId, remaining] of this.deliveryTimers) {
@@ -142,24 +229,83 @@ export class BobaShopRoom extends Room {
       }
       const station = this.state.stations.get(stationId);
       if (station) {
-        station.item = Item.None;
+        station.item = EMPTY_HAND;
         station.progress = 0;
       }
       this.deliveryTimers.delete(stationId);
     }
   }
 
-  private findNearestStation(player: Player): Station | undefined {
-    let best: Station | undefined;
-    let bestDist = Infinity;
+  /** Reset the kitchen and start a new timed shift. Total shop money is kept. */
+  private startShift() {
+    this.state.orders.clear();
+    this.state.stations.forEach((station) => {
+      station.item = EMPTY_HAND;
+      station.progress = 0;
+    });
+    this.deliveryTimers.clear();
+
+    this.state.players.forEach((player) => {
+      const spawn = SPAWN_POINTS[player.colorIndex] ?? SPAWN_POINTS[0];
+      player.x = spawn.x;
+      player.y = spawn.y;
+      player.heldItem = EMPTY_HAND;
+    });
+
+    this.state.shiftEarnings = 0;
+    this.state.servedCount = 0;
+    this.state.missedCount = 0;
+    this.state.shiftTimeLeft = SHIFT_DURATION;
+    this.orderSpawnTimer = FIRST_ORDER_DELAY_SECONDS;
+    this.state.phase = GamePhase.Playing;
+  }
+
+  private endShift() {
+    this.state.phase = GamePhase.Ended;
+    this.state.shiftTimeLeft = 0;
+    // Customers still waiting at closing time are not counted as missed.
+    this.state.orders.clear();
+  }
+
+  /** Timed machines: advance progress; when done, the ingredient is added to the placed cup. */
+  private updateMachines(dt: number) {
     for (const def of STATIONS) {
-      const d = distanceToStation(player, def);
-      if (d <= INTERACT_RANGE && d < bestDist) {
-        bestDist = d;
-        best = this.state.stations.get(def.id);
+      if (def.type !== StationType.Machine || !def.ingredient || !def.processSeconds) continue;
+      const station = this.state.stations.get(def.id);
+      if (!station || station.item === EMPTY_HAND || station.progress >= 1) continue;
+
+      station.progress = Math.min(1, station.progress + dt / def.processSeconds);
+      if (station.progress >= 1) {
+        station.item = makeCup([...cupContents(station.item), def.ingredient]);
       }
     }
-    return best;
+  }
+
+  private updateOrders(dt: number) {
+    // Customers walk out when their order times out.
+    for (let i = this.state.orders.length - 1; i >= 0; i--) {
+      const order = this.state.orders[i];
+      order.timeLeft = Math.max(0, order.timeLeft - dt);
+      if (order.timeLeft <= 0) {
+        this.state.orders.splice(i, 1);
+        this.state.missedCount++;
+        this.broadcast(ServerEvents.OrderExpired, { drinkName: getDrink(order.drinkId)?.name ?? order.drinkId });
+      }
+    }
+
+    if (this.state.players.size === 0) return;
+    this.orderSpawnTimer -= dt;
+    if (this.orderSpawnTimer <= 0) {
+      this.orderSpawnTimer = ORDER_SPAWN_SECONDS;
+      if (this.state.orders.length < MAX_ACTIVE_ORDERS) {
+        const order = new Order();
+        order.id = "order_" + ++this.orderSeq;
+        order.drinkId = DRINKS[Math.floor(Math.random() * DRINKS.length)].id;
+        order.duration = ORDER_DURATION_SECONDS;
+        order.timeLeft = ORDER_DURATION_SECONDS;
+        this.state.orders.push(order);
+      }
+    }
   }
 
   private handleInteract(client: Client) {
@@ -167,72 +313,130 @@ export class BobaShopRoom extends Room {
     if (!player) return;
 
     const fail = (reason: string) => client.send(ServerEvents.InteractFailed, { reason });
-    const station = this.findNearestStation(player);
-    if (!station) return fail("Không có quầy nào gần đây");
+    const def = findNearestStationDef(player);
+    const station = def && this.state.stations.get(def.id);
+    if (!def || !station) return fail("Không có quầy nào gần đây");
 
-    const held = player.heldItem;
+    // Same rules the client uses to preview the action (see shared/src/interaction.ts).
+    const plan = planInteraction(def, {
+      phase: this.state.phase,
+      held: player.heldItem,
+      stationItem: station.item,
+      stationProgress: station.progress,
+      orderedDrinkIds: this.state.orders.map((o) => o.drinkId),
+    });
+    if (!plan.ok) return fail(plan.reason);
 
-    switch (station.type) {
-      case StationType.CupShelf: {
-        if (held !== Item.None) return fail("Tay đang cầm đồ rồi");
-        player.heldItem = Item.Cup;
+    switch (plan.kind) {
+      case "take_cup":
+        player.heldItem = EMPTY_CUP;
         return;
-      }
-
-      case StationType.TeaDispenser: {
-        // Place an empty cup to start filling, or pick up the filled cup.
-        if (held === Item.Cup && station.item === Item.None) {
-          station.item = Item.Cup;
-          station.progress = 0;
-          player.heldItem = Item.None;
-          return;
-        }
-        if (held === Item.None && station.item === Item.CupTea) {
-          player.heldItem = Item.CupTea;
-          station.item = Item.None;
-          station.progress = 0;
-          return;
-        }
-        if (held === Item.None && station.item === Item.Cup) return fail("Trà đang chảy, chờ chút...");
-        return fail("Cần ly rỗng để hứng trà");
-      }
-
-      case StationType.PearlPot: {
-        if (held !== Item.CupTea) return fail("Cần ly trà để thêm trân châu");
-        player.heldItem = Item.CupTeaPearl;
+      case "add_ingredient":
+        player.heldItem = plan.nextItem;
         return;
-      }
-
-      case StationType.DeliveryCounter: {
-        if (held !== Item.CupTeaPearl) return fail("Cần ly trà sữa trân châu hoàn chỉnh");
-        if (station.item !== Item.None) return fail("Quầy đang bận, chờ chút");
-        player.heldItem = Item.None;
-        station.item = Item.CupTeaPearl;
-        this.state.money += DRINK_PRICE;
-        this.deliveryTimers.set(station.id, DELIVERY_CLEAR_SECONDS);
-        this.broadcast(ServerEvents.Delivered, { by: client.sessionId, amount: DRINK_PRICE });
+      case "start_machine":
+      case "put_down":
+        // Timed machines: updateMachines() adds the ingredient when progress reaches 1.
+        station.item = player.heldItem;
+        station.progress = 0;
+        player.heldItem = EMPTY_HAND;
         return;
-      }
+      case "pick_up":
+        player.heldItem = station.item;
+        station.item = EMPTY_HAND;
+        station.progress = 0;
+        return;
+      case "trash":
+        player.heldItem = EMPTY_HAND;
+        return;
+      case "deliver":
+        return this.deliver(client, player, station, plan.drink);
     }
   }
 
-  private handleBuyDecoration(client: Client, payload: { kind: string; x: number; y: number }) {
-    const def = DECORATION_CATALOG.find((d) => d.kind === payload?.kind);
-    if (!def) return;
-    const x = Number(payload.x);
-    const y = Number(payload.y);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-    if (this.state.money < def.price) {
-      client.send(ServerEvents.InteractFailed, { reason: "Không đủ tiền (cần $" + def.price + ")" });
-      return;
-    }
+  private deliver(client: Client, player: Player, station: Station, drink: DrinkDef) {
+    // Serve the most urgent matching order (planInteraction already checked one exists).
+    let index = -1;
+    this.state.orders.forEach((o, i) => {
+      if (o.drinkId === drink.id && (index < 0 || o.timeLeft < this.state.orders[index].timeLeft)) index = i;
+    });
+    if (index < 0) return;
 
-    this.state.money -= def.price;
+    const order = this.state.orders[index];
+    const tip = order.timeLeft > order.duration / 2 ? FAST_SERVICE_TIP : 0;
+    this.state.orders.splice(index, 1);
+
+    station.item = player.heldItem;
+    player.heldItem = EMPTY_HAND;
+    this.state.money += drink.price + tip;
+    this.state.shiftEarnings += drink.price + tip;
+    this.state.servedCount++;
+    this.scheduleSave();
+    this.deliveryTimers.set(station.id, DELIVERY_CLEAR_SECONDS);
+
+    const event: DeliveredEvent = { by: client.sessionId, drinkName: drink.name, amount: drink.price, tip };
+    this.broadcast(ServerEvents.Delivered, event);
+  }
+
+  // ---------------------------------------------------------------- Decorations (furniture)
+
+  private addDecoration(kind: string, x: number, y: number): Decoration {
     const deco = new Decoration();
     deco.id = "deco_" + ++this.decorationSeq;
-    deco.kind = def.kind;
-    deco.x = Math.max(0, Math.min(WORLD_WIDTH, x));
-    deco.y = Math.max(0, Math.min(WORLD_HEIGHT, y));
+    deco.kind = kind;
+    deco.x = x;
+    deco.y = y;
     this.state.decorations.push(deco);
+    return deco;
+  }
+
+  /** Decorating is only allowed between shifts. Returns an error message, or undefined if allowed. */
+  private decorateBlockedReason(): string | undefined {
+    return this.state.phase === GamePhase.Playing ? "Đang trong ca, trang trí sau khi hết ca nhé" : undefined;
+  }
+
+  private handleBuyDecoration(client: Client, payload: { kind: string; x: number; y: number }) {
+    const fail = (reason: string) => client.send(ServerEvents.InteractFailed, { reason });
+    const blocked = this.decorateBlockedReason();
+    if (blocked) return fail(blocked);
+
+    const def = getDecorationDef(payload?.kind);
+    if (!def) return;
+    const x = snapToGrid(Number(payload.x));
+    const y = snapToGrid(Number(payload.y));
+    if (this.state.money < def.price) return fail(`Không đủ tiền (cần $${def.price})`);
+    if (!canPlaceDecoration(def.kind, x, y, this.state.decorations)) return fail("Không đặt được ở đây");
+
+    this.state.money -= def.price;
+    this.addDecoration(def.kind, x, y);
+    this.scheduleSave();
+  }
+
+  private handleMoveDecoration(client: Client, payload: { id: string; x: number; y: number }) {
+    const fail = (reason: string) => client.send(ServerEvents.InteractFailed, { reason });
+    const blocked = this.decorateBlockedReason();
+    if (blocked) return fail(blocked);
+
+    const deco = this.state.decorations.find((d) => d.id === payload?.id);
+    if (!deco) return;
+    const x = snapToGrid(Number(payload.x));
+    const y = snapToGrid(Number(payload.y));
+    if (!canPlaceDecoration(deco.kind, x, y, this.state.decorations, deco.id)) return fail("Không đặt được ở đây");
+
+    deco.x = x;
+    deco.y = y;
+    this.scheduleSave();
+  }
+
+  private handleSellDecoration(client: Client, payload: { id: string }) {
+    const blocked = this.decorateBlockedReason();
+    if (blocked) return client.send(ServerEvents.InteractFailed, { reason: blocked });
+
+    const index = this.state.decorations.findIndex((d) => d.id === payload?.id);
+    if (index < 0) return;
+    const def = getDecorationDef(this.state.decorations[index].kind);
+    this.state.decorations.splice(index, 1);
+    if (def) this.state.money += refundFor(def);
+    this.scheduleSave();
   }
 }
