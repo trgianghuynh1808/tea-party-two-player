@@ -241,6 +241,16 @@ export const isDrinkServed = (servedMask: number, index: number) => (servedMask 
 export const pendingDrinkIds = (drinks: string, servedMask: number): string[] =>
   orderDrinkIds(drinks).filter((_, i) => !isDrinkServed(servedMask, i));
 
+/**
+ * Drink ids still awaited by any of these orders.
+ * Iterates instead of using flatMap: Colyseus ArraySchema throws on flatMap() / flat().
+ */
+export function pendingOrderDrinkIds(orders: Iterable<{ drinks: string; servedMask: number }>): string[] {
+  const ids: string[] = [];
+  for (const o of orders) ids.push(...pendingDrinkIds(o.drinks, o.servedMask));
+  return ids;
+}
+
 // ---------------------------------------------------------------- Timed machines
 
 /** A finished cup left on a timed machine spills (and is lost) after this many seconds. */

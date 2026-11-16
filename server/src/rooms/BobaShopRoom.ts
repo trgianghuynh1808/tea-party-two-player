@@ -22,6 +22,7 @@ import {
   orderDrinkIds,
   orderSpawnInterval,
   pendingDrinkIds,
+  pendingOrderDrinkIds,
   pickCustomerKind,
   RECONNECT_GRACE_SECONDS,
   REPLACED_CLOSE_CODE,
@@ -557,7 +558,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
       held: player.heldItem,
       stationItem: station.item,
       stationProgress: station.progress,
-      orderedDrinkIds: this.state.orders.flatMap((o) => pendingDrinkIds(o.drinks, o.servedMask)),
+      orderedDrinkIds: pendingOrderDrinkIds(this.state.orders),
     });
     if (!plan.ok) return fail(plan.reason);
 

@@ -20,7 +20,7 @@ import {
   planInteraction,
   stepMovement,
   describeItem,
-  pendingDrinkIds,
+  pendingOrderDrinkIds,
   comboBonusRate,
   type DeliveredEvent,
   type MachineOverflowEvent,
@@ -717,7 +717,7 @@ export class ShopScene extends Phaser.Scene {
         held: player.heldItem,
         stationItem: station.item,
         stationProgress: station.progress,
-        orderedDrinkIds: room.state.orders.flatMap((o) => pendingDrinkIds(o.drinks, o.servedMask)),
+        orderedDrinkIds: pendingOrderDrinkIds(room.state.orders),
       });
       if (plan.ok) label = plan.label;
       else reason = plan.reason;
