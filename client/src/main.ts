@@ -455,11 +455,24 @@ function startGame(room: Room<BobaShopState>) {
   $state.onAdd("players", renderPlayerCount);
   $state.onRemove("players", renderPlayerCount);
 
-  // Decorating is only allowed between shifts: leave decorate mode when a shift starts.
-  $state.listen("phase", (phase) => {
-    const playing = phase === GamePhase.Playing;
-    decorateBtn.disabled = playing;
-    if (playing && decorating) setDecorating(false);
+  // Only the host decorates (the room shows their furniture), and only between shifts.
+  let amHost = false;
+  const updateDecorateBtn = () => {
+    const playing = room.state.phase === GamePhase.Playing;
+    decorateBtn.disabled = playing || !amHost;
+    decorateBtn.title = amHost
+      ? "Trang trí quán (ngoài giờ ca)"
+      : `Quán này dùng nội thất của ${room.state.hostName || "chủ phòng"}, chỉ chủ phòng mới trang trí được`;
+    if (decorateBtn.disabled && decorating) setDecorating(false);
+  };
+  $state.listen("phase", updateDecorateBtn);
+  $state.listen("hostName", updateDecorateBtn);
+  $state.onAdd("players", (player, sessionId) => {
+    if (sessionId !== room.sessionId) return;
+    $state.listen(player, "host", (host) => {
+      amHost = host;
+      updateDecorateBtn();
+    });
   });
 
   room.onLeave((code) => {
@@ -545,7 +558,7 @@ function setDecorating(on: boolean) {
 }
 
 decorateBtn.addEventListener("click", () => {
-  if (!currentRoom || currentRoom.state?.phase === GamePhase.Playing) return;
+  if (!currentRoom || decorateBtn.disabled) return;
   setDecorating(!decorating);
   decorateBtn.blur(); // keep Space for the game
 });

@@ -3,8 +3,6 @@
 export const ROOM_NAME = "boba_shop";
 export const SERVER_PORT = 2567;
 
-/** Save id of the shop (money + furniture) shared by every room. */
-export const SHARED_SHOP_ID = "shared-shop";
 
 /** Usernames, room list and join rules. */
 export * from "./lobby";

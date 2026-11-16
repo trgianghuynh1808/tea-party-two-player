@@ -105,7 +105,12 @@ export class DecorPanel {
     root.append(title, this.moneyLabel, help, rotateBtn, list);
 
     const $ = Callbacks.get(room);
-    this.unsubscribers.push($.listen("money", (money) => this.updateMoney(money)));
+    // Only the host can open this panel: furniture is bought from their own wallet.
+    this.unsubscribers.push(
+      $.onAdd("players", (player, sessionId) => {
+        if (sessionId === room.sessionId) this.unsubscribers.push($.listen(player, "money", (money) => this.updateMoney(money)));
+      }),
+    );
   }
 
   destroy() {
@@ -146,7 +151,7 @@ export class DecorPanel {
   }
 
   private updateMoney(money: number) {
-    this.moneyLabel.textContent = `💰 Quán đang có $${money}`;
+    this.moneyLabel.textContent = `💰 Ví của bạn có $${money}`;
     for (const { el, price } of this.items) el.classList.toggle("disabled", money < price);
   }
 }

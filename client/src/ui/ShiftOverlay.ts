@@ -26,7 +26,10 @@ export class ShiftOverlay {
         this.collapsed = false;
         render();
       }),
-      $.onAdd("players", render),
+      $.onAdd("players", (player) => {
+        render();
+        this.unsubscribers.push($.listen(player, "shiftShare", render));
+      }),
       $.onRemove("players", render),
     );
   }
@@ -70,6 +73,11 @@ export class ShiftOverlay {
         `Càng về cuối ca khách càng đông và ít kiên nhẫn. Khách bỏ về: −$${MISSED_ORDER_PENALTY} và mất combo. ` +
           "Ly để quên trên máy sẽ bị tràn. Coi chừng khách 👑 VIP, 🧐 khó tính và 👨‍👩‍👧 nhóm!",
       ),
+      el(
+        "p",
+        "hint",
+        `Quán dùng nội thất của ${state.hostName || "chủ phòng"}. Hết ca, doanh thu chia đều cho mọi người trong phòng (rời phòng giữa ca thì không được chia).`,
+      ),
       el("p", "hint", `Mục tiêu: ⭐ $${STAR_THRESHOLDS[0]} · ⭐⭐ $${STAR_THRESHOLDS[1]} · ⭐⭐⭐ $${STAR_THRESHOLDS[2]}`),
       el(
         "p",
@@ -94,10 +102,20 @@ export class ShiftOverlay {
       el("li", "", `🔥 Combo cao nhất: ${state.bestCombo}`),
     );
 
+    // Each player's part of the split (already added to their wallet by the server).
+    const shares = el("ul", "stats");
+    state.players.forEach((player, sessionId) => {
+      const me = sessionId === this.room.sessionId;
+      const amount = player.shiftShare >= 0 ? `+$${player.shiftShare}` : `−$${-player.shiftShare}`;
+      shares.append(el("li", "", `${me ? "🫵 Bạn" : `👤 ${player.name}`}: ${amount} → ví $${player.money}`));
+    });
+
     card.append(
       el("h2", "", stars === 3 ? "🎉 Ca làm tuyệt vời!" : stars > 0 ? "Hết ca rồi!" : "Hết ca... cố lên lần sau!"),
       starRow,
       stats,
+      el("p", "", `👥 Chia đều cho ${state.players.size} người:`),
+      shares,
       el("p", "hint", next ? `Cần $${next - state.shiftEarnings} nữa để lên ${stars + 1} sao` : "Đạt tối đa 3 sao!"),
       this.actions("Chơi ca mới"),
     );

@@ -21,7 +21,8 @@ Open http://localhost:5173:
 
 Rooms & usernames (`shared/src/lobby.ts`, `server/src/rooms/BobaShopRoom.ts`):
 
-- A room holds at most 2 players. Every room plays in the same shop (money + furniture).
+- A room holds at most 2 players. Each username has its own shop save (wallet + furniture). A room shows the
+  furniture of whoever opened it (the host); only the host can decorate it, paid from the host's wallet.
 - A name can only be used by one connected player. The same name from the same browser replaces a stale tab
   (closed but not detected yet, or open twice); from another browser it is refused while its owner is online.
 - Lost connection (closed tab, network): the player stays in the room (shown 💤) for 2 minutes
@@ -33,7 +34,9 @@ To play from another machine on the same LAN, open the **Network** URL printed b
 ## Gameplay
 
 - The shop starts closed: walk around and practice, then press **Bắt đầu ca** to open a 3-minute shift.
-- At the end of the shift you get 1–3 stars based on shift earnings ($100 / $220 / $350), plus served/missed stats. Total shop money carries over between shifts.
+- At the end of the shift you get 1–3 stars based on shift earnings ($100 / $220 / $350), plus served/missed stats. The shift's earnings (minus penalties) are split equally between the players in the room
+  and added to each player's wallet; leftover dollars go one each to the first players, and no wallet goes below $0.
+  Leaving mid-shift forfeits your share. Wallets carry over between shifts and rooms.
 - The counters (**Bàn**) in the middle hold one cup each: put a cup down / pick it up with Space to pass it to your teammate.
 - Customers order drinks (see the **Đơn hàng** panel). Each order has a timer; serve it before it runs out.
 - Every drink has its own recipe (ordered steps), shown in the **Menu** panel.
@@ -75,12 +78,12 @@ WebSocket from the same origin. Then either:
 
 ## Decorating & saving
 
-- Press **🪑 Trang trí** between shifts (not during a shift) to enter decorate mode.
+- The host presses **🪑 Trang trí** between shifts (not during a shift) to enter decorate mode.
 - Drag furniture from the side panel into the shop to buy it; drag placed furniture to move it, or drop it on
   **🗑** to sell it back for 50%. Red outline = can't place there (machines, counters, other furniture).
   Rugs lie on the floor, so furniture can go on top of them.
-- Everyone shares one shop, across all rooms (`server/src/shop/SharedShop.ts`): furniture bought in one room shows
-  up right away in the others. Money + furniture are saved (debounced ~1 s after each change, and when a room
+- One shop per username (`server/src/shop/SharedShop.ts`, save id = hash of the name), one instance per server so
+  every room using it (as host's furniture or as a player's wallet) sees the same state. Money + furniture are saved (debounced ~1 s after each change, and when a room
   closes) and restored when the server starts its first room. (Kept in memory: assumes one server process.)
 - Where saves go:
   - **Upstash Redis** when `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are set. Use this in the

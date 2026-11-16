@@ -51,7 +51,7 @@ import {
   type RoomMetadata,
 } from "@boba/shared";
 import { BobaShopState, Decoration, Order, Player, Station } from "@boba/shared/schema";
-import { sharedShop, type Piece, type ShopEvent } from "../shop/SharedShop.js";
+import { shopOf, type Piece, type SharedShop, type ShopEvent } from "../shop/SharedShop.js";
 
 const FIRST_ORDER_DELAY_SECONDS = 2;
 /** Override shift length for quick testing, e.g. SHIFT_SECONDS=20 npm run dev. */
@@ -107,7 +107,14 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
   private reconnections = new Map<string, Deferred<Client>>();
   /** Sessions whose player was handed over to a newer session (or moved to another room): leaving must not remove it. */
   private replaced = new Set<string>();
+  /** Username key of whoever opened the room, and their shop (the furniture shown here). */
+  private hostKey = "";
+  private hostShop?: SharedShop;
   private unsubscribeShop?: () => void;
+  /** Username key -> stop mirroring that player's wallet into their Player.money. */
+  private walletSubs = new Map<string, () => void>();
+  /** Every shop this room changed (flushed when the room closes). */
+  private touchedShops = new Set<SharedShop>();
 
   private moveBudgets = new Map<string, MoveBudget>();
   private deliveryTimers = new Map<string, number>();
@@ -136,18 +143,19 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
   };
 
   async onCreate(options: Partial<JoinOptions> = {}) {
-    // Every room plays in the same shop: load it (once per server) before anyone joins.
-    try {
-      await sharedShop.load();
-    } catch (err) {
-      console.error("[BobaShopRoom] can't load the shared shop", err);
-      throw new ServerError(JoinError.SHOP_UNAVAILABLE, "Không tải được quán, thử lại sau nhé");
-    }
-    this.mirrorShop();
-    this.unsubscribeShop = sharedShop.subscribe((event) => this.onShopEvent(event));
-
+    // The room shows the furniture of whoever opens it: load their shop before anyone joins.
     const host = normalizeUsername(options.username);
-    this.state.roomName = normalizeRoomTitle(options.roomName, host ? `Phòng của ${host}` : "Phòng mới");
+    if (!host) throw new ServerError(JoinError.BAD_NAME, "Tên không hợp lệ");
+    this.hostKey = usernameKey(host);
+    const hostShop = shopOf(this.hostKey);
+    await this.loadShop(hostShop);
+    this.hostShop = hostShop;
+    this.touchedShops.add(hostShop);
+    this.mirrorShop();
+    this.unsubscribeShop = hostShop.subscribe((event) => this.onShopEvent(event));
+
+    this.state.hostName = host;
+    this.state.roomName = normalizeRoomTitle(options.roomName, `Phòng của ${host}`);
     this.updateListing();
 
     for (const def of STATIONS) {
@@ -166,7 +174,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
   // ---------------------------------------------------------------- Players: join / drop / come back / leave
 
   /** Check the username and that there's a seat (a returning player reuses their own). */
-  onAuth(_client: Client, options: Partial<JoinOptions> = {}): JoinAuth {
+  async onAuth(_client: Client, options: Partial<JoinOptions> = {}): Promise<JoinAuth> {
     const name = normalizeUsername(options.username);
     if (!name) throw new ServerError(JoinError.BAD_NAME, "Tên không hợp lệ");
     const key = usernameKey(name);
@@ -182,6 +190,8 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     if (this.state.players.size - (returning ? 1 : 0) >= MAX_PLAYERS) {
       throw new ServerError(JoinError.ROOM_FULL, "Phòng đã đủ người");
     }
+    // The player's own wallet: their share of each shift goes there.
+    await this.loadShop(shopOf(key));
     return { name, key, deviceId };
   }
 
@@ -199,8 +209,11 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     }
     player.name = name;
     player.online = true;
+    player.host = key === this.hostKey;
+    player.money = shopOf(key).money;
     this.state.players.set(client.sessionId, player);
     this.sessionNames.set(client.sessionId, key);
+    this.watchWallet(key);
     seats.set(key, { room: this, sessionId: client.sessionId, deviceId, online: true });
     this.resetMoveBudget(client.sessionId);
     this.updateListing();
@@ -240,14 +253,17 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     const name = this.state.players.get(sessionId)?.name;
     this.state.players.delete(sessionId);
     this.moveBudgets.delete(sessionId);
+    if (key) this.unwatchWallet(key);
     this.updateListing();
     console.log(`[BobaShopRoom] ${name ?? sessionId} left ${this.roomId}`);
   }
 
   async onDispose() {
     this.unsubscribeShop?.();
+    for (const off of this.walletSubs.values()) off();
+    this.walletSubs.clear();
     for (const [key, seat] of seats) if (seat.room === this) seats.delete(key);
-    await sharedShop.flush();
+    await Promise.all([...this.touchedShops].map((shop) => shop.flush()));
   }
 
   /** The name joined another room: drop its player here without waiting for a reconnection. */
@@ -259,6 +275,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
       this.sessionNames.delete(sessionId);
       this.disconnectSession(sessionId);
     }
+    this.unwatchWallet(key);
     this.updateListing();
   }
 
@@ -316,21 +333,51 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     });
   }
 
-  // ---------------------------------------------------------------- Shared shop (money + furniture)
+  // ---------------------------------------------------------------- Shops: host's furniture, players' wallets
 
-  /** Copy the shared shop into this room's synced state. */
+  /** Load a shop save (once per server); a storage outage refuses the join instead of starting empty. */
+  private async loadShop(shop: SharedShop) {
+    try {
+      await shop.load();
+    } catch (err) {
+      console.error("[BobaShopRoom] can't load a shop", err);
+      throw new ServerError(JoinError.SHOP_UNAVAILABLE, "Không tải được quán, thử lại sau nhé");
+    }
+  }
+
+  /** Keep Player.money in sync with the player's wallet (it may also change from another room). */
+  private watchWallet(key: string) {
+    if (this.walletSubs.has(key)) return;
+    const shop = shopOf(key);
+    this.touchedShops.add(shop);
+    const off = shop.subscribe((event) => {
+      if (event.type !== "money") return;
+      for (const [sessionId, k] of this.sessionNames) {
+        const player = k === key ? this.state.players.get(sessionId) : undefined;
+        if (player) player.money = event.money;
+      }
+    });
+    this.walletSubs.set(key, off);
+  }
+
+  /** Stop watching a wallet once no session of that name is left in the room. */
+  private unwatchWallet(key: string) {
+    if ([...this.sessionNames.values()].includes(key)) return;
+    this.walletSubs.get(key)?.();
+    this.walletSubs.delete(key);
+  }
+
+  /** Copy the host's furniture into this room's synced state. */
   private mirrorShop() {
-    this.state.money = sharedShop.money;
     this.state.decorations.clear();
-    for (const piece of sharedShop.pieces) this.state.decorations.push(this.toDecoration(piece));
+    for (const piece of this.hostShop?.pieces ?? []) this.state.decorations.push(this.toDecoration(piece));
   }
 
   private onShopEvent(event: ShopEvent) {
     const list = this.state.decorations;
     switch (event.type) {
       case "money":
-        this.state.money = event.money;
-        return;
+        return; // wallets are mirrored per player (watchWallet)
       case "added":
         list.push(this.toDecoration(event.piece));
         return;
@@ -382,7 +429,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     }
   }
 
-  /** Reset the kitchen and start a new timed shift. Total shop money is kept. */
+  /** Reset the kitchen and start a new timed shift. Players' wallets are kept. */
   private startShift() {
     this.state.orders.clear();
     this.state.stations.forEach((station) => this.clearStation(station));
@@ -394,6 +441,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
       player.y = spawn.y;
       player.teleportSeq++;
       player.heldItem = EMPTY_HAND;
+      player.shiftShare = 0;
       this.resetMoveBudget(sessionId);
     });
 
@@ -412,6 +460,26 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     this.state.shiftTimeLeft = 0;
     // Customers still waiting at closing time are not counted as missed.
     this.state.orders.clear();
+    this.splitEarnings();
+  }
+
+  /**
+   * Split the shift's earnings equally between the players still in the room (a dropped player whose seat
+   * is kept counts too). Leftover dollars go one each to the first players. A negative result (more
+   * penalties than sales) is split the same way, and no wallet goes below zero.
+   */
+  private splitEarnings() {
+    const team = [...this.state.players.entries()];
+    if (team.length === 0) return;
+    const total = this.state.shiftEarnings;
+    const base = Math.trunc(total / team.length);
+    const leftover = total - base * team.length;
+    team.forEach(([sessionId, player], i) => {
+      const share = base + (i < Math.abs(leftover) ? Math.sign(leftover) : 0);
+      const key = this.sessionNames.get(sessionId);
+      player.shiftShare = key ? shopOf(key).earn(share) : 0;
+    });
+    console.log(`[BobaShopRoom] ${this.roomId} shift ended: $${total} split between ${team.length} player(s)`);
   }
 
   /**
@@ -492,10 +560,8 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
   private missOrder(order: Order) {
     this.state.missedCount++;
     this.state.combo = 0;
+    // Settled when the shift ends (see splitEarnings).
     this.state.shiftEarnings -= MISSED_ORDER_PENALTY;
-    // The shop's total money never goes below zero.
-    const penalty = Math.min(MISSED_ORDER_PENALTY, Math.max(0, sharedShop.money));
-    if (penalty > 0) sharedShop.earn(-penalty);
 
     const drinks = orderDrinkIds(order.drinks);
     const customer = getCustomer(order.kind);
@@ -654,32 +720,35 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
       notes.push(`combo x${this.state.combo} +$${comboBonus}`);
     }
 
-    sharedShop.earn(amount);
+    // Paid out to the players when the shift ends (see splitEarnings).
     this.state.shiftEarnings += amount;
     return { amount, notes };
   }
 
-  // ---------------------------------------------------------------- Decorations (furniture, in the shared shop)
+  // ---------------------------------------------------------------- Decorations (the host's furniture, paid from the host's wallet)
 
-  /** Decorating is only allowed between shifts. Returns an error message, or undefined if allowed. */
-  private decorateBlockedReason(): string | undefined {
+  /** Only the host decorates, and only between shifts. Returns an error message, or undefined if allowed. */
+  private decorateBlockedReason(client: Client): string | undefined {
+    if (!this.hostShop || this.sessionNames.get(client.sessionId) !== this.hostKey) {
+      return `Chỉ chủ phòng (${this.state.hostName}) mới trang trí được`;
+    }
     return this.state.phase === GamePhase.Playing ? "Đang trong ca, trang trí sau khi hết ca nhé" : undefined;
   }
 
   private handleBuyDecoration(client: Client, payload: { kind: string; x: number; y: number; rotation?: number }) {
-    const error = this.decorateBlockedReason() ?? sharedShop.buy(payload?.kind, payload?.x, payload?.y, payload?.rotation);
+    const error = this.decorateBlockedReason(client) ?? this.hostShop!.buy(payload?.kind, payload?.x, payload?.y, payload?.rotation);
     if (error) client.send(ServerEvents.InteractFailed, { reason: error });
   }
 
   /** Move and/or turn a placed piece (rotation omitted = keep the current one). */
   private handleMoveDecoration(client: Client, payload: { id: string; x: number; y: number; rotation?: number }) {
-    const error = this.decorateBlockedReason() ?? sharedShop.move(payload?.id, payload?.x, payload?.y, payload?.rotation);
+    const error = this.decorateBlockedReason(client) ?? this.hostShop!.move(payload?.id, payload?.x, payload?.y, payload?.rotation);
     if (error) client.send(ServerEvents.InteractFailed, { reason: error });
   }
 
   private handleSellDecoration(client: Client, payload: { id: string }) {
-    const blocked = this.decorateBlockedReason();
+    const blocked = this.decorateBlockedReason(client);
     if (blocked) return client.send(ServerEvents.InteractFailed, { reason: blocked });
-    sharedShop.sell(payload?.id);
+    this.hostShop!.sell(payload?.id);
   }
 }

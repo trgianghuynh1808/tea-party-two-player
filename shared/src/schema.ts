@@ -12,6 +12,12 @@ export class Player extends Schema {
   @type("number") colorIndex: number = 0;
   @type("string") gender: string = "male"; // "male" | "female" (see Gender in @boba/shared)
   @type("string") character: string = "male"; // CharacterDef.id (see CHARACTERS in @boba/shared)
+  /** This player's own wallet (saved per username, carried across rooms). */
+  @type("number") money: number = 0;
+  /** true = opened this room: the shop uses their furniture and only they can decorate. */
+  @type("boolean") host: boolean = false;
+  /** What this player got (or lost) from the last shift's split earnings. */
+  @type("number") shiftShare: number = 0;
   /** Bumped when the server moves the player itself (spawn, shift start, rejected move): the client must snap. */
   @type("number") teleportSeq: number = 0;
 }
@@ -50,7 +56,8 @@ export class BobaShopState extends Schema {
   @type("string") roomName: string = "";
   @type({ map: Player }) players = new MapSchema<Player>();
   @type({ map: Station }) stations = new MapSchema<Station>();
-  @type("number") money: number = 0;
+  /** Username of whoever opened the room: the furniture shown is theirs. */
+  @type("string") hostName: string = "";
   @type([Decoration]) decorations = new ArraySchema<Decoration>();
   @type([Order]) orders = new ArraySchema<Order>();
 

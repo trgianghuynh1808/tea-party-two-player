@@ -2,7 +2,9 @@
 //
 // - Players pick a username (no password). Coming back with the same name takes over your player again
 //   (position, held cup), e.g. after closing the tab by accident.
-// - Anyone can open a room (max MAX_PLAYERS players). All rooms play in the same shop (money + furniture).
+// - Each username has its own shop save (money + furniture). Anyone can open a room (max MAX_PLAYERS players):
+//   the room shows the furniture of whoever opened it, and only they can decorate it.
+// - Earnings of a shift are split equally between the players in the room when the shift ends.
 // - A dropped player keeps their seat for RECONNECT_GRACE_SECONDS; a room with nobody left is removed.
 
 /** Players per room. */

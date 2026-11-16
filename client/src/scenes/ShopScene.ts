@@ -292,6 +292,8 @@ export class ShopScene extends Phaser.Scene {
       $.listen(player, "heldItem", (item) => this.applyHeldItem(view, item));
       $.listen(player, "name", () => this.applyName(view, player));
       $.listen(player, "online", () => this.applyName(view, player));
+      // HUD: my own wallet (shift earnings are split between players when the shift ends).
+      if (view.isLocal) $.listen(player, "money", (money) => this.moneyText.setText(`💰 $${money}`));
     });
 
     $.onRemove("players", (_player, sessionId) => {
@@ -309,7 +311,6 @@ export class ShopScene extends Phaser.Scene {
       $.listen(station, "overflow", apply);
     });
 
-    $.listen("money", (money) => this.moneyText.setText(`💰 $${money}`));
     $.listen("phase", () => this.updateShiftText(room.state));
     $.listen("shiftTimeLeft", () => this.updateShiftText(room.state));
     $.listen("combo", () => this.updateShiftText(room.state));
