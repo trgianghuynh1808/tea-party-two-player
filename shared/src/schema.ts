@@ -1,6 +1,10 @@
 import { ArraySchema, MapSchema, Schema, type } from "@colyseus/schema";
 
 export class Player extends Schema {
+  /** Username picked in the lobby (unique among connected players). */
+  @type("string") name: string = "";
+  /** false while the player's connection is lost (their seat is kept for a while, see RECONNECT_GRACE_SECONDS). */
+  @type("boolean") online: boolean = true;
   @type("number") x: number = 0;
   @type("number") y: number = 0;
   @type("string") direction: string = "down"; // "up" | "down" | "left" | "right"
@@ -38,6 +42,8 @@ export class Order extends Schema {
 }
 
 export class BobaShopState extends Schema {
+  /** Room title shown in the lobby and the side panel. */
+  @type("string") roomName: string = "";
   @type({ map: Player }) players = new MapSchema<Player>();
   @type({ map: Station }) stations = new MapSchema<Station>();
   @type("number") money: number = 0;

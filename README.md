@@ -2,7 +2,7 @@
 
 2-player online co-op boba tea shop game (npm workspaces monorepo).
 
-- `server/` — Node.js + TypeScript + Colyseus 0.18 (`BobaShopRoom`, maxClients = 2)
+- `server/` — Node.js + TypeScript + Colyseus 0.18 (`BobaShopRoom`: 2 players per room; `SharedShop`: money + furniture shared by all rooms)
 - `client/` — Vite + TypeScript + Phaser 3.90 (placeholder shapes, no assets yet)
 - `shared/` — constants, station layout, movement code and Colyseus Schema used by both sides
 
@@ -15,10 +15,19 @@ npm run dev   # server: ws://localhost:2567, client: http://localhost:5173
 
 Open http://localhost:5173:
 
-1. Player 1 clicks **Tạo phòng mới** → gets a 4-character room code (e.g. `XTM3`).
-2. Player 2 enters the code and clicks **Vào phòng**, or opens the invite link (`?room=XTM3`, button **Sao chép link mời**).
+1. Pick a username (no password; remembered by the browser).
+2. The lobby lists open rooms (title, who's inside, players/2). Click **Vào** to join one, or **Tạo phòng** to open a new one.
+3. In a room, **🔗 Mời** copies an invite link (`?room=<id>`) that opens that room directly.
 
-Rooms are private (join by code only) and hold at most 2 players.
+Rooms & usernames (`shared/src/lobby.ts`, `server/src/rooms/BobaShopRoom.ts`):
+
+- A room holds at most 2 players. Every room plays in the same shop (money + furniture).
+- A name can only be used by one connected player. The same name from the same browser replaces a stale tab
+  (closed but not detected yet, or open twice); from another browser it is refused while its owner is online.
+- Lost connection (closed tab, network): the player stays in the room (shown 💤) for 2 minutes
+  (`RECONNECT_GRACE_SECONDS`). Coming back with the same name (**Vào lại** in the lobby, or refreshing the page)
+  takes over the same character, position and held cup.
+- A room with nobody left (after the 2 minutes for dropped players) is removed.
 To play from another machine on the same LAN, open the **Network** URL printed by Vite (e.g. `http://192.168.x.x:5173`).
 
 ## Gameplay
@@ -66,15 +75,16 @@ WebSocket from the same origin. Then either:
 - Drag furniture from the side panel into the shop to buy it; drag placed furniture to move it, or drop it on
   **🗑** to sell it back for 50%. Red outline = can't place there (machines, counters, other furniture).
   Rugs lie on the floor, so furniture can go on top of them.
-- Everyone shares one shop. Its money + furniture are saved (debounced ~1 s after each change, and when the
-  shop closes) and restored when the shop opens again.
+- Everyone shares one shop, across all rooms (`server/src/shop/SharedShop.ts`): furniture bought in one room shows
+  up right away in the others. Money + furniture are saved (debounced ~1 s after each change, and when a room
+  closes) and restored when the server starts its first room. (Kept in memory: assumes one server process.)
 - Where saves go:
   - **Upstash Redis** when `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are set. Use this in the
     cloud: Render free wipes its disk on every restart, sleep and deploy.
   - Otherwise JSON files in `server/data/shops/` (`DATA_DIR` env to change the folder) — fine locally.
   - The server logs which one it uses at startup (`Saving shops to …`).
-- If the save can't be read when the shop opens (storage down), the shop still opens but saving is disabled
-  for that session, so an empty shop never overwrites the real save.
+- If the save can't be read (storage down), rooms can't be opened ("Không tải được quán") until it can, so an
+  empty shop never overwrites the real save.
 - Catalog and placement rules: `shared/src/decor.ts`.
 
 ### Setting up Upstash (free)

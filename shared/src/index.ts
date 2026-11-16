@@ -3,20 +3,11 @@
 export const ROOM_NAME = "boba_shop";
 export const SERVER_PORT = 2567;
 
-// One shared shop: the first player opens it (creates the single room), everyone else joins it.
-export const MAX_PLAYERS = 2;
-/** Save id of the shared shop (money + furniture). */
+/** Save id of the shop (money + furniture) shared by every room. */
 export const SHARED_SHOP_ID = "shared-shop";
-/** Matchmaking error code when the shop is already open and full (a second room is refused). */
-export const SHOP_FULL_ERROR_CODE = 4210;
 
-/** HTTP endpoint for the home screen: is the shop open, and how many players are inside. */
-export const LOBBY_PATH = "/lobby";
-export interface LobbyInfo {
-  open: boolean;
-  players: number;
-  maxPlayers: number;
-}
+/** Usernames, room list and join rules. */
+export * from "./lobby";
 
 export const WORLD_WIDTH = 960;
 export const WORLD_HEIGHT = 600;

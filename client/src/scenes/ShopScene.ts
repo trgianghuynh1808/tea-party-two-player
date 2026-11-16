@@ -63,6 +63,7 @@ interface PlayerView {
   sprite: Phaser.GameObjects.Sprite;
   heldCup: CupView;
   heldLabel: Phaser.GameObjects.Text;
+  nameLabel: Phaser.GameObjects.Text;
   // Remote players: timestamped server positions for buffered interpolation.
   samples: PositionSample[];
   // Last Player.teleportSeq applied to this view (a change means "snap, don't interpolate").
@@ -285,6 +286,8 @@ export class ShopScene extends Phaser.Scene {
         if (!view.isLocal) this.applyFacing(view, dir);
       });
       $.listen(player, "heldItem", (item) => this.applyHeldItem(view, item));
+      $.listen(player, "name", () => this.applyName(view, player));
+      $.listen(player, "online", () => this.applyName(view, player));
     });
 
     $.onRemove("players", (_player, sessionId) => {
@@ -315,7 +318,7 @@ export class ShopScene extends Phaser.Scene {
     $.onRemove("decorations", (deco) => decor.remove(deco.id));
 
     room.onMessage(ServerEvents.Delivered, (msg: DeliveredEvent) => {
-      const who = msg.by === room.sessionId ? "Bạn" : "Đồng đội";
+      const who = msg.by === room.sessionId ? "Bạn" : room.state.players.get(msg.by)?.name || "Đồng đội";
       const tip = msg.tip > 0 ? ` (+$${msg.tip} tip giao nhanh)` : "";
       this.toast(`${who} giao ${msg.drinkName}! +$${msg.amount}${tip}`, "#2a9d8f");
     });
@@ -525,7 +528,7 @@ export class ShopScene extends Phaser.Scene {
       .setOrigin(0.5, character.feetRow / character.frameHeight)
       .setScale(CHARACTER_BODY_PX / character.bodyHeight);
     const name = this.add
-      .text(0, HEAD_Y - 8, isLocal ? "Bạn" : "P2", {
+      .text(0, HEAD_Y - 8, "", {
         fontFamily: "sans-serif",
         fontSize: fs(12),
         fontStyle: "bold",
@@ -544,6 +547,7 @@ export class ShopScene extends Phaser.Scene {
       sprite,
       heldCup,
       heldLabel,
+      nameLabel: name,
       samples: [{ t: performance.now(), x: state.x, y: state.y }],
       teleportSeq: state.teleportSeq,
       isLocal,
@@ -555,7 +559,15 @@ export class ShopScene extends Phaser.Scene {
     };
     this.applyFacing(view, state.direction);
     this.applyHeldItem(view, state.heldItem);
+    this.applyName(view, state);
     return view;
+  }
+
+  /** Username over the head; a player who lost connection is faded out until they come back. */
+  private applyName(view: PlayerView, state: Player) {
+    const name = state.name || (view.isLocal ? "Bạn" : "P2");
+    view.nameLabel.setText(state.online ? name : `💤 ${name}`);
+    view.container.setAlpha(state.online ? 1 : 0.45);
   }
 
   private applyFacing(view: PlayerView, dir: string) {
@@ -702,7 +714,7 @@ export class ShopScene extends Phaser.Scene {
     this.statusText.setText(
       count >= 2
         ? "Đủ 2 người, cùng làm trà sữa nào!"
-        : "Chờ người chơi thứ 2... Bạn của bạn chỉ cần mở game và bấm Vào quán",
+        : "Chờ người chơi thứ 2... Bấm 🔗 Mời để gửi link vào thẳng phòng này",
     );
   }
 

@@ -7,26 +7,48 @@
     <title>Tiệm Trà Bé Ngọc Giang</title>
   </head>
   <body>
-    <!-- Lobby: create a room or join one by code -->
+    <!-- Lobby: pick a username, then join a room or open a new one -->
     <section id="lobby" class="card">
       <h1>🧋 Tiệm Trà Bé Ngọc Giang</h1>
-      <p class="subtitle">Một quán chung, ai vào trước mở quán — tối đa 2 người</p>
+      <p class="subtitle">Quán chung của cả nhóm · mỗi phòng tối đa 2 người</p>
 
-      <div class="char-stage" aria-hidden="true">
-        <span id="char-preview-big" class="char-sprite spin"></span>
-        <span class="char-shadow"></span>
+      <!-- Step 1: username (remembered by the browser) -->
+      <form id="name-form" class="name-form" novalidate>
+        <label for="username-input">Tên của bạn</label>
+        <input id="username-input" type="text" autocomplete="nickname" spellcheck="false" placeholder="vd: Giang" />
+        <button class="btn primary" type="submit">Tiếp tục</button>
+        <p class="hint">Lỡ thoát ra giữa chừng? Vào lại bằng đúng tên này để chơi tiếp.</p>
+      </form>
+
+      <!-- Step 2: character + rooms -->
+      <div id="lobby-main" hidden>
+        <p class="hello">
+          Xin chào, <strong id="hello-name"></strong>
+          <button id="change-name-btn" class="link-btn" type="button">Đổi tên</button>
+        </p>
+
+        <div class="char-stage" aria-hidden="true">
+          <span id="char-preview-big" class="char-sprite spin"></span>
+          <span class="char-shadow"></span>
+        </div>
+        <p id="char-name" class="char-name"></p>
+
+        <div id="gender-picker" class="gender-tabs" role="radiogroup" aria-label="Giới tính">
+          <button type="button" class="gender-tab" data-gender="female" role="radio" aria-checked="false">♀ Nữ</button>
+          <button type="button" class="gender-tab" data-gender="male" role="radio" aria-checked="false">♂ Nam</button>
+        </div>
+        <!-- Characters of the selected gender (filled by main.ts) -->
+        <div id="char-picker" class="char-picker" role="radiogroup" aria-label="Chọn nhân vật"></div>
+
+        <h2 class="rooms-title">Phòng đang mở</h2>
+        <p id="lobby-status" class="lobby-status" aria-live="polite">Đang tải danh sách phòng…</p>
+        <ul id="room-list" class="room-list"></ul>
+
+        <form id="create-form" class="create-form" novalidate>
+          <input id="room-name-input" type="text" spellcheck="false" aria-label="Tên phòng mới" />
+          <button id="create-btn" class="btn primary" type="submit">Tạo phòng</button>
+        </form>
       </div>
-      <p id="char-name" class="char-name"></p>
-
-      <div id="gender-picker" class="gender-tabs" role="radiogroup" aria-label="Giới tính">
-        <button type="button" class="gender-tab" data-gender="female" role="radio" aria-checked="false">♀ Nữ</button>
-        <button type="button" class="gender-tab" data-gender="male" role="radio" aria-checked="false">♂ Nam</button>
-      </div>
-      <!-- Characters of the selected gender (filled by main.ts) -->
-      <div id="char-picker" class="char-picker" role="radiogroup" aria-label="Chọn nhân vật"></div>
-
-      <p id="lobby-status" class="lobby-status" aria-live="polite">Đang kiểm tra quán…</p>
-      <button id="enter-btn" class="btn primary" type="button">Vào quán</button>
 
       <p id="lobby-error" class="error" role="alert"></p>
     </section>
@@ -40,9 +62,9 @@
 
       <aside class="side-panel">
         <header class="panel-header">
-          <div class="room-code">Tiệm Trà Bé Ngọc Giang <strong id="player-count"></strong></div>
+          <div class="room-code"><span id="room-title">Tiệm Trà Bé Ngọc Giang</span> <strong id="player-count"></strong></div>
           <div class="tool-row">
-            <button id="copy-link-btn" class="tool" type="button" title="Sao chép link game">🔗<span>Mời</span></button>
+            <button id="copy-link-btn" class="tool" type="button" title="Sao chép link mời vào phòng này">🔗<span>Mời</span></button>
             <button id="menu-btn" class="tool compact-only" type="button" title="Menu công thức">📋<span>Menu</span></button>
             <button id="decorate-btn" class="tool" type="button" title="Trang trí quán (ngoài giờ ca)">🪑<span>Trang trí</span></button>
             <button id="fullscreen-btn" class="tool" type="button" title="Toàn màn hình" hidden>⛶<span>Full</span></button>

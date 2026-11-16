@@ -3,20 +3,29 @@ import Phaser from "phaser";
 import { Callbacks, Client, CloseCode, ErrorCode, type Room } from "@colyseus/sdk";
 import {
   GamePhase,
-  LOBBY_PATH,
+  JoinError,
   MAX_PLAYERS,
+  REPLACED_CLOSE_CODE,
+  ROOMS_PATH,
+  ROOMS_POLL_MS,
   ROOM_NAME,
+  ROOM_TITLE_MAX,
   SERVER_PORT,
+  USERNAME_MAX,
+  USERNAME_MIN,
   WORLD_HEIGHT,
   WORLD_WIDTH,
-  SHOP_FULL_ERROR_CODE,
   charactersOf,
   defaultCharacterOf,
   getCharacter,
   isGender,
+  normalizeUsername,
+  usernameKey,
   type CharacterDef,
   type Gender,
-  type LobbyInfo,
+  type JoinOptions,
+  type RoomInfo,
+  type RoomsResponse,
 } from "@boba/shared";
 import type { BobaShopState } from "@boba/shared/schema";
 import { FORCE_TOUCH_PARAM, isTouchDevice } from "./input/TouchControls";
@@ -29,9 +38,18 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 
 const lobby = $<HTMLElement>("lobby");
 const gameScreen = $<HTMLElement>("game-screen");
-const enterBtn = $<HTMLButtonElement>("enter-btn");
+const nameForm = $<HTMLFormElement>("name-form");
+const usernameInput = $<HTMLInputElement>("username-input");
+const lobbyMain = $<HTMLElement>("lobby-main");
+const helloName = $<HTMLElement>("hello-name");
+const changeNameBtn = $<HTMLButtonElement>("change-name-btn");
+const roomList = $<HTMLUListElement>("room-list");
+const createForm = $<HTMLFormElement>("create-form");
+const roomNameInput = $<HTMLInputElement>("room-name-input");
+const createBtn = $<HTMLButtonElement>("create-btn");
 const lobbyStatus = $<HTMLParagraphElement>("lobby-status");
 const lobbyError = $<HTMLParagraphElement>("lobby-error");
+const roomTitle = $<HTMLElement>("room-title");
 const playerCountLabel = $<HTMLElement>("player-count");
 const copyLinkBtn = $<HTMLButtonElement>("copy-link-btn");
 const leaveBtn = $<HTMLButtonElement>("leave-btn");
@@ -65,78 +83,196 @@ let decorating = false;
 
 // Keep the ?touch=1 debug flag across URL rewrites so a refresh still forces touch controls.
 const forceTouch = new URLSearchParams(location.search).get(FORCE_TOUCH_PARAM) === "1";
+/** Invite links open a room directly: ?room=<roomId> (joined once the player has a name). */
+const ROOM_PARAM = "room";
+let invitedRoomId = new URLSearchParams(location.search).get(ROOM_PARAM) ?? undefined;
 
-/** Strip other query params (e.g. old ?room= invite links), preserving ?touch=1. */
-function cleanUrl() {
+/** Rewrite the URL: ?room=<id> while in a room (a refresh/share lands back in it), plus ?touch=1 if set. */
+function setUrl(roomId?: string) {
   const params = new URLSearchParams();
+  if (roomId) params.set(ROOM_PARAM, roomId);
   if (forceTouch) params.set(FORCE_TOUCH_PARAM, "1");
   const query = params.toString();
   history.replaceState(null, "", location.pathname + (query ? `?${query}` : ""));
 }
 
-// ---------------------------------------------------------------- Lobby
+// ---------------------------------------------------------------- Username
+
+const USERNAME_KEY = "boba.username";
+const DEVICE_KEY = "boba.deviceId";
+
+let username = normalizeUsername(localStorage.getItem(USERNAME_KEY));
+
+/** Random id for this browser: lets the same name from the same browser replace a stale tab. */
+const deviceId: string = (() => {
+  let id = localStorage.getItem(DEVICE_KEY);
+  if (!id) {
+    // crypto.randomUUID needs a secure context (not plain-http LAN): fall back to Math.random.
+    id = globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    localStorage.setItem(DEVICE_KEY, id);
+  }
+  return id;
+})();
+
+usernameInput.maxLength = USERNAME_MAX;
+roomNameInput.maxLength = ROOM_TITLE_MAX;
+
+nameForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const name = normalizeUsername(usernameInput.value);
+  if (!name) {
+    lobbyError.textContent = `Tên dài ${USERNAME_MIN}–${USERNAME_MAX} ký tự, chỉ gồm chữ, số, khoảng trắng và _ . -`;
+    return;
+  }
+  username = name;
+  localStorage.setItem(USERNAME_KEY, name);
+  showLobby();
+});
+
+changeNameBtn.addEventListener("click", () => {
+  usernameInput.value = username ?? "";
+  username = undefined;
+  showLobby();
+  usernameInput.focus();
+});
+
+// ---------------------------------------------------------------- Lobby (room list)
 
 let busy = false;
-let lobbyInfo: LobbyInfo | undefined;
+/** undefined = not loaded yet / server unreachable. */
+let rooms: RoomInfo[] | undefined;
+/** Server clock minus ours (ms), from the last room list: room ages use the server's time. */
+let clockOffset = 0;
 let lobbyPollTimer: ReturnType<typeof setTimeout> | undefined;
-const LOBBY_POLL_MS = 3000;
+/** What the room list currently shows: it is only rebuilt when this changes, so a click isn't lost mid-refresh. */
+let renderedRoomsKey = "";
+
+const timeFormat = new Intl.DateTimeFormat("vi-VN", { hour: "2-digit", minute: "2-digit" });
+
+/** "14:32 · 5 phút trước" (server clock). */
+function describeCreated(createdAt: number): string {
+  const minutes = Math.max(0, Math.floor((Date.now() + clockOffset - createdAt) / 60_000));
+  const ago =
+    minutes < 1 ? "vừa tạo" : minutes < 60 ? `${minutes} phút trước` : `${Math.floor(minutes / 60)} giờ ${minutes % 60} phút trước`;
+  return `${timeFormat.format(createdAt)} · ${ago}`;
+}
 
 function setBusy(on: boolean) {
   busy = on;
-  renderLobbyStatus();
+  renderRooms();
 }
 
-function renderLobbyStatus() {
-  const info = lobbyInfo;
-  const full = !!info && info.open && info.players >= info.maxPlayers;
-  lobbyStatus.classList.toggle("open", !!info?.open && !full);
-  lobbyStatus.classList.toggle("full", full);
-  if (!info) {
+const isMine = (p: { name: string }) => !!username && usernameKey(p.name) === usernameKey(username);
+
+function renderRooms() {
+  createBtn.disabled = busy;
+  roomNameInput.placeholder = username ? `Phòng của ${username}` : "Tên phòng";
+  if (!rooms) {
     lobbyStatus.textContent = "Đang kết nối server… (lần đầu có thể mất ~1 phút)";
-    enterBtn.textContent = "Vào quán";
-  } else if (!info.open) {
-    lobbyStatus.textContent = "Quán đang đóng cửa.";
-    enterBtn.textContent = "Mở quán";
-  } else if (full) {
-    lobbyStatus.textContent = `Quán đã đủ ${info.maxPlayers} người, chờ chút nhé.`;
-    enterBtn.textContent = "Quán đã đủ người";
-  } else {
-    lobbyStatus.textContent = `🟢 Quán đang mở · ${info.players}/${info.maxPlayers} người`;
-    enterBtn.textContent = "Vào quán";
+    roomList.replaceChildren();
+    renderedRoomsKey = "";
+    return;
   }
-  enterBtn.disabled = busy || full;
+  lobbyStatus.textContent = rooms.length ? "" : "Chưa có phòng nào, tạo phòng mới nhé!";
+  const key = JSON.stringify([busy, username, rooms.map((r) => [r.id, r.name, r.players, describeCreated(r.createdAt)])]);
+  if (key === renderedRoomsKey) return;
+  renderedRoomsKey = key;
+  roomList.replaceChildren(
+    ...rooms.map((room) => {
+      const li = document.createElement("li");
+      li.className = "room-item";
+      const mine = room.players.some(isMine);
+      const full = !mine && room.players.length >= room.maxPlayers;
+
+      const info = document.createElement("div");
+      info.className = "room-info";
+      const title = document.createElement("strong");
+      title.textContent = room.name;
+      const who = document.createElement("span");
+      who.className = "room-players";
+      who.textContent = room.players.length
+        ? room.players.map((p) => `${p.online ? "🟢" : "💤"} ${p.name}`).join("  ")
+        : "Trống";
+      const created = document.createElement("span");
+      created.className = "room-created";
+      created.textContent = `🕒 ${describeCreated(room.createdAt)}`;
+      info.append(title, who, created);
+
+      const count = document.createElement("span");
+      count.className = "room-count";
+      count.textContent = `${room.players.length}/${room.maxPlayers}`;
+
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn small" + (mine ? " primary" : "");
+      btn.textContent = mine ? "Vào lại" : full ? "Đầy" : "Vào";
+      btn.disabled = busy || full;
+      btn.addEventListener("click", () => void enter(() => client.joinById<BobaShopState>(room.id, joinOptions())));
+
+      li.classList.toggle("mine", mine);
+      li.append(info, count, btn);
+      return li;
+    }),
+  );
 }
 
-/** Poll the shop status while the home screen is visible (also wakes a sleeping free-tier server). */
+/** Poll the room list while the lobby is visible (also wakes a sleeping free-tier server). */
 async function pollLobby() {
   clearTimeout(lobbyPollTimer);
-  if (lobby.hidden) return;
+  if (lobby.hidden || !username) return;
   try {
-    const res = await fetch(`${endpoint}${LOBBY_PATH}`, { cache: "no-store" });
-    if (res.ok) lobbyInfo = (await res.json()) as LobbyInfo;
+    const res = await fetch(`${endpoint}${ROOMS_PATH}`, { cache: "no-store" });
+    if (res.ok) {
+      const body = (await res.json()) as RoomsResponse;
+      rooms = body.rooms;
+      if (Number.isFinite(body.now)) clockOffset = body.now - Date.now();
+    }
   } catch {
-    lobbyInfo = undefined; // server asleep or unreachable: keep trying
+    rooms = undefined; // server asleep or unreachable: keep trying
   }
-  if (lobby.hidden) return;
-  renderLobbyStatus();
-  lobbyPollTimer = setTimeout(() => void pollLobby(), LOBBY_POLL_MS);
+  if (lobby.hidden || !username) return;
+  renderRooms();
+  lobbyPollTimer = setTimeout(() => void pollLobby(), ROOMS_POLL_MS);
 }
 
+/** Show the lobby: the name form first if we don't have a username yet. */
 function showLobby(error = "") {
   document.body.classList.remove("in-game");
   closeModal();
   gameScreen.hidden = true;
   lobby.hidden = false;
   lobbyError.textContent = error;
+  nameForm.hidden = !!username;
+  lobbyMain.hidden = !username;
+  if (username) helloName.textContent = username;
   setBusy(false);
-  cleanUrl();
+  setUrl(invitedRoomId);
+  if (!username) {
+    clearTimeout(lobbyPollTimer);
+    return;
+  }
   void pollLobby();
+  // Opened from an invite link (or refreshed while in a room): join that room once.
+  const roomId = invitedRoomId;
+  invitedRoomId = undefined;
+  if (roomId) void enter(() => client.joinById<BobaShopState>(roomId, joinOptions()));
+}
+
+function joinOptions(roomName?: string): JoinOptions {
+  const { id: character, gender } = selectedCharacter;
+  return { username: username!, deviceId, character, gender, roomName };
 }
 
 function describeError(err: unknown): string {
   const e = err as { code?: number; message?: string };
-  if (e?.code === SHOP_FULL_ERROR_CODE || e?.code === ErrorCode.MATCHMAKE_INVALID_ROOM_ID) {
-    return "Quán đã đủ người, chờ chút rồi thử lại nhé.";
+  switch (e?.code) {
+    case JoinError.BAD_NAME:
+    case JoinError.NAME_TAKEN:
+    case JoinError.ROOM_FULL:
+    case JoinError.SHOP_UNAVAILABLE:
+      return e.message ?? "Không vào được phòng.";
+    case ErrorCode.MATCHMAKE_INVALID_ROOM_ID:
+      return "Phòng này không còn nữa.";
   }
   if (err instanceof TypeError || e?.message?.toLowerCase().includes("fetch")) {
     return `Không kết nối được server (${endpoint}). Server đã chạy chưa?`;
@@ -145,6 +281,7 @@ function describeError(err: unknown): string {
 }
 
 async function enter(action: () => Promise<Room<BobaShopState>>) {
+  if (busy) return;
   setBusy(true);
   lobbyError.textContent = "";
   try {
@@ -152,10 +289,23 @@ async function enter(action: () => Promise<Room<BobaShopState>>) {
   } catch (err) {
     console.error(err);
     lobbyError.textContent = describeError(err);
+    if ((err as { code?: number })?.code === JoinError.NAME_TAKEN) {
+      // Pick another name.
+      usernameInput.value = username ?? "";
+      username = undefined;
+      showLobby(lobbyError.textContent);
+      return;
+    }
+    setUrl();
     setBusy(false);
     void pollLobby();
   }
 }
+
+createForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  void enter(() => client.create<BobaShopState>(ROOM_NAME, joinOptions(roomNameInput.value)));
+});
 
 // ---------------------------------------------------------------- Character (gender) picker
 
@@ -262,18 +412,15 @@ for (const tab of genderTabs) {
   });
 }
 renderCharacterPicker();
-
-enterBtn.addEventListener("click", () => {
-  const { id: character, gender } = selectedCharacter;
-  // Joins the shared shop if it's open, otherwise opens it.
-  void enter(() => client.joinOrCreate<BobaShopState>(ROOM_NAME, { character, gender }));
-});
+usernameInput.value = username ?? "";
 
 // ---------------------------------------------------------------- Game
 
 function startGame(room: Room<BobaShopState>) {
   currentRoom = room;
   clearTimeout(lobbyPollTimer);
+  setUrl(room.roomId); // a refresh comes straight back into this room
+  roomNameInput.value = "";
   lobby.hidden = true;
   gameScreen.hidden = false;
   document.body.classList.add("in-game");
@@ -303,6 +450,7 @@ function startGame(room: Room<BobaShopState>) {
   );
 
   const $state = Callbacks.get(room);
+  $state.listen("roomName", (name) => (roomTitle.textContent = name || "Tiệm Trà Bé Ngọc Giang"));
   const renderPlayerCount = () => (playerCountLabel.textContent = `${room.state.players.size}/${MAX_PLAYERS}`);
   $state.onAdd("players", renderPlayerCount);
   $state.onRemove("players", renderPlayerCount);
@@ -316,8 +464,10 @@ function startGame(room: Room<BobaShopState>) {
 
   room.onLeave((code) => {
     stopGame();
-    // CONSENTED = we clicked "Rời phòng"; anything else is an unexpected disconnect.
-    showLobby(code === CloseCode.CONSENTED || code === CloseCode.NORMAL_CLOSURE ? "" : "Mất kết nối với quán.");
+    setUrl();
+    // CONSENTED = we clicked "Rời"; REPLACED = our name joined again from another tab / device.
+    if (code === REPLACED_CLOSE_CODE) return showLobby("Bạn đã vào lại từ tab hoặc thiết bị khác.");
+    showLobby(code === CloseCode.CONSENTED || code === CloseCode.NORMAL_CLOSURE ? "" : "Mất kết nối với phòng.");
   });
 }
 
@@ -342,7 +492,7 @@ leaveBtn.addEventListener("click", () => {
 
 copyLinkBtn.addEventListener("click", async () => {
   if (!currentRoom) return;
-  const link = `${location.origin}${location.pathname}`;
+  const link = `${location.origin}${location.pathname}?${ROOM_PARAM}=${encodeURIComponent(currentRoom.roomId)}`;
   const label = copyLinkBtn.querySelector("span")!;
   try {
     await navigator.clipboard.writeText(link);

@@ -1,29 +1,27 @@
-import { Room, ServerError, type Client } from "colyseus";
+import { Room, ServerError, type Client, type Deferred } from "colyseus";
 import {
   DRINKS,
   EMPTY_CUP,
   EMPTY_HAND,
   FAST_SERVICE_TIP,
   GamePhase,
+  JoinError,
   SHIFT_SECONDS,
   MAX_ACTIVE_ORDERS,
+  MAX_PLAYERS,
   ORDER_DURATION_SECONDS,
   ORDER_SPAWN_SECONDS,
-  MAX_PLAYERS,
-  SHARED_SHOP_ID,
-  SHOP_FULL_ERROR_CODE,
+  RECONNECT_GRACE_SECONDS,
+  REPLACED_CLOSE_CODE,
   STATIONS,
   ServerEvents,
   StationType,
-  canPlaceDecoration,
-  normalizeRotation,
-  getDecorationDef,
   defaultCharacterOf,
   getCharacter,
   isGender,
-  refundFor,
-  snapToGrid,
-  DECOR_GRID,
+  normalizeRoomTitle,
+  normalizeUsername,
+  usernameKey,
   findNearestStationDef,
   planInteraction,
   PLAYER_SPEED,
@@ -33,24 +31,17 @@ import {
   makeCup,
   type DeliveredEvent,
   type DrinkDef,
+  type JoinOptions,
   type PositionMessage,
+  type RoomMetadata,
 } from "@boba/shared";
 import { BobaShopState, Decoration, Order, Player, Station } from "@boba/shared/schema";
-import { loadShop, saveShop } from "../persistence/ShopStore.js";
-
-/** Wait this long after the last change before writing the shop save (batches rapid edits). */
-const SAVE_DEBOUNCE_MS = 1000;
-
-/** Only one shop room may exist per server process (see onCreate). */
-let shopRoomOpen = false;
+import { sharedShop, type Piece, type ShopEvent } from "../shop/SharedShop.js";
 
 const FIRST_ORDER_DELAY_SECONDS = 2;
 /** Override shift length for quick testing, e.g. SHIFT_SECONDS=20 npm run dev. */
 const SHIFT_DURATION = Number(process.env.SHIFT_SECONDS) || SHIFT_SECONDS;
 const DELIVERY_CLEAR_SECONDS = 0.8;
-/** Restoring a save: how many grid steps a piece may be pushed down to fit the current layout. */
-const RESTORE_NUDGE_STEPS = 12;
-
 const SPAWN_POINTS = [
   { x: 300, y: 400 },
   { x: 500, y: 400 },
@@ -71,21 +62,42 @@ interface MoveBudget {
   lastAt: number;
 }
 
-export class BobaShopRoom extends Room {
-  maxClients = MAX_PLAYERS;
+/** Validated join request (returned by onAuth, available as client.auth in onJoin). */
+interface JoinAuth {
+  name: string;
+  key: string;
+  deviceId: string;
+}
+
+/** Where each username currently plays, across all rooms (one seat per name). */
+interface Seat {
+  room: BobaShopRoom;
+  sessionId: string;
+  deviceId: string;
+  online: boolean;
+}
+const seats = new Map<string, Seat>();
+
+export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMetadata }> {
+  /**
+   * One spare connection: a player coming back (same name) joins as a new client while their old,
+   * dropped connection still holds its seat. The real limit (MAX_PLAYERS players) is checked in onAuth.
+   */
+  maxClients = MAX_PLAYERS + 1;
   state = new BobaShopState();
+
+  /** sessionId -> username key of the player on that session. */
+  private sessionNames = new Map<string, string>();
+  /** Dropped sessions waiting to reconnect (rejecting one ends its wait). */
+  private reconnections = new Map<string, Deferred<Client>>();
+  /** Sessions whose player was handed over to a newer session (or moved to another room): leaving must not remove it. */
+  private replaced = new Set<string>();
+  private unsubscribeShop?: () => void;
 
   private moveBudgets = new Map<string, MoveBudget>();
   private deliveryTimers = new Map<string, number>();
-  private decorationSeq = 0;
   private orderSeq = 0;
   private orderSpawnTimer = FIRST_ORDER_DELAY_SECONDS;
-  private saveTimer?: ReturnType<typeof setTimeout>;
-  /**
-   * False when the saved shop couldn't be read (storage down): we then never save, so an empty
-   * shop can't overwrite the real save. Players can still play; progress just isn't kept.
-   */
-  private canSave = true;
 
   messages = {
     position: (client: Client, payload: PositionMessage) => {
@@ -108,14 +120,20 @@ export class BobaShopRoom extends Room {
     },
   };
 
-  async onCreate() {
-    // Everyone shares one shop. joinOrCreate only lands here when no joinable room exists,
-    // so if one is already open it must be full: refuse instead of opening a second shop.
-    if (shopRoomOpen) throw new ServerError(SHOP_FULL_ERROR_CODE, "Shop is full");
-    shopRoomOpen = true;
+  async onCreate(options: Partial<JoinOptions> = {}) {
+    // Every room plays in the same shop: load it (once per server) before anyone joins.
+    try {
+      await sharedShop.load();
+    } catch (err) {
+      console.error("[BobaShopRoom] can't load the shared shop", err);
+      throw new ServerError(JoinError.SHOP_UNAVAILABLE, "Không tải được quán, thử lại sau nhé");
+    }
+    this.mirrorShop();
+    this.unsubscribeShop = sharedShop.subscribe((event) => this.onShopEvent(event));
 
-    // Restore the shared shop (money + furniture) from a previous session.
-    await this.restoreShop(SHARED_SHOP_ID);
+    const host = normalizeUsername(options.username);
+    this.state.roomName = normalizeRoomTitle(options.roomName, host ? `Phòng của ${host}` : "Phòng mới");
+    this.updateListing();
 
     for (const def of STATIONS) {
       const station = new Station();
@@ -130,82 +148,201 @@ export class BobaShopRoom extends Room {
     this.setSimulationInterval((deltaTime) => this.update(deltaTime / 1000), 1000 / 60);
   }
 
-  onJoin(client: Client, options: { gender?: unknown; character?: unknown } = {}) {
+  // ---------------------------------------------------------------- Players: join / drop / come back / leave
+
+  /** Check the username and that there's a seat (a returning player reuses their own). */
+  onAuth(_client: Client, options: Partial<JoinOptions> = {}): JoinAuth {
+    const name = normalizeUsername(options.username);
+    if (!name) throw new ServerError(JoinError.BAD_NAME, "Tên không hợp lệ");
+    const key = usernameKey(name);
+    const deviceId = typeof options.deviceId === "string" ? options.deviceId.slice(0, 64) : "";
+
+    const seat = seats.get(key);
+    // Same name still connected from another browser: someone else is using it. From the same browser
+    // it's our own stale tab (closed but not noticed yet, or still open): the new tab takes over.
+    if (seat?.online && seat.deviceId !== deviceId) {
+      throw new ServerError(JoinError.NAME_TAKEN, `Tên “${name}” đang có người dùng, chọn tên khác nhé`);
+    }
+    const returning = seat?.room === this;
+    if (this.state.players.size - (returning ? 1 : 0) >= MAX_PLAYERS) {
+      throw new ServerError(JoinError.ROOM_FULL, "Phòng đã đủ người");
+    }
+    return { name, key, deviceId };
+  }
+
+  onJoin(client: Client, options: Partial<JoinOptions> = {}) {
+    const { name, key, deviceId } = client.auth as JoinAuth;
+    const seat = seats.get(key);
+    let player: Player;
+    if (seat?.room === this) {
+      // Coming back under the same name: keep the same character, position and held cup.
+      player = this.takeOver(seat.sessionId, client.sessionId);
+    } else {
+      // A name can only sit in one room: leaving the old one (if any) for this one.
+      seat?.room.releaseName(key);
+      player = this.createPlayer(options);
+    }
+    player.name = name;
+    player.online = true;
+    this.state.players.set(client.sessionId, player);
+    this.sessionNames.set(client.sessionId, key);
+    seats.set(key, { room: this, sessionId: client.sessionId, deviceId, online: true });
+    this.resetMoveBudget(client.sessionId);
+    this.updateListing();
+    console.log(`[BobaShopRoom] ${name} joined ${this.roomId} (${this.state.players.size}/${MAX_PLAYERS})`);
+  }
+
+  /** Lost connection without leaving (tab closed, network): keep the seat for a while. */
+  onDrop(client: Client) {
+    if (this.replaced.has(client.sessionId)) return; // handed over already: onLeave cleans up
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+    player.online = false;
+    this.setSeatOnline(client.sessionId, false);
+    this.reconnections.set(client.sessionId, this.allowReconnection(client, RECONNECT_GRACE_SECONDS));
+    this.updateListing();
+    console.log(`[BobaShopRoom] ${player.name} dropped from ${this.roomId}, seat kept ${RECONNECT_GRACE_SECONDS}s`);
+  }
+
+  /** Same connection came back (the SDK reconnects by itself after short network drops). */
+  onReconnect(client: Client) {
+    this.reconnections.delete(client.sessionId);
+    const player = this.state.players.get(client.sessionId);
+    if (player) player.online = true;
+    this.setSeatOnline(client.sessionId, true);
+    this.updateListing();
+  }
+
+  /** Left for good: clicked "Rời", or didn't come back in time. */
+  onLeave(client: Client) {
+    const sessionId = client.sessionId;
+    this.reconnections.delete(sessionId);
+    if (this.replaced.delete(sessionId)) return; // the player lives on under another session (or room)
+
+    const key = this.sessionNames.get(sessionId);
+    this.sessionNames.delete(sessionId);
+    if (key && seats.get(key)?.sessionId === sessionId) seats.delete(key);
+    const name = this.state.players.get(sessionId)?.name;
+    this.state.players.delete(sessionId);
+    this.moveBudgets.delete(sessionId);
+    this.updateListing();
+    console.log(`[BobaShopRoom] ${name ?? sessionId} left ${this.roomId}`);
+  }
+
+  async onDispose() {
+    this.unsubscribeShop?.();
+    for (const [key, seat] of seats) if (seat.room === this) seats.delete(key);
+    await sharedShop.flush();
+  }
+
+  /** The name joined another room: drop its player here without waiting for a reconnection. */
+  releaseName(key: string) {
+    for (const [sessionId, k] of this.sessionNames) {
+      if (k !== key) continue;
+      this.state.players.delete(sessionId);
+      this.moveBudgets.delete(sessionId);
+      this.sessionNames.delete(sessionId);
+      this.disconnectSession(sessionId);
+    }
+    this.updateListing();
+  }
+
+  private createPlayer(options: Partial<JoinOptions>): Player {
     const usedColors = new Set([...this.state.players.values()].map((p) => p.colorIndex));
     const colorIndex = usedColors.has(0) ? 1 : 0;
     const spawn = SPAWN_POINTS[colorIndex];
-
     const player = new Player();
     player.x = spawn.x;
     player.y = spawn.y;
     player.colorIndex = colorIndex;
-    // Character picked on the home screen; fall back to the default one of the gender (older clients).
+    // Character picked in the lobby; fall back to the default one of the gender (older clients).
     const character = getCharacter(options.character) ?? defaultCharacterOf(isGender(options.gender) ? options.gender : "male");
     player.character = character.id;
     player.gender = character.gender;
-    this.state.players.set(client.sessionId, player);
-    this.resetMoveBudget(client.sessionId);
-    console.log(`[BobaShopRoom] ${client.sessionId} joined (${this.clients.length}/${this.maxClients})`);
+    return player;
   }
 
-  onLeave(client: Client) {
-    this.state.players.delete(client.sessionId);
-    this.moveBudgets.delete(client.sessionId);
-    console.log(`[BobaShopRoom] ${client.sessionId} left`);
+  /** Move the player of an old session to a new one, and disconnect the old session. */
+  private takeOver(oldSessionId: string, newSessionId: string): Player {
+    const old = this.state.players.get(oldSessionId);
+    const player = old ? old.clone() : this.createPlayer({});
+    player.teleportSeq++; // the new client starts exactly where the player was
+    this.state.players.delete(oldSessionId);
+    this.moveBudgets.delete(oldSessionId);
+    this.sessionNames.delete(oldSessionId);
+    this.disconnectSession(oldSessionId);
+    console.log(`[BobaShopRoom] ${player.name} came back to ${this.roomId} (${oldSessionId} -> ${newSessionId})`);
+    return player;
   }
 
-  async onDispose() {
-    shopRoomOpen = false;
-    await this.flushSave();
+  /** End an old session whose player was handed over: stop waiting for it, or close its tab. */
+  private disconnectSession(sessionId: string) {
+    this.replaced.add(sessionId);
+    const pending = this.reconnections.get(sessionId);
+    if (pending) {
+      this.reconnections.delete(sessionId);
+      pending.reject(new Error("replaced"));
+    } else {
+      this.clients.getById(sessionId)?.leave(REPLACED_CLOSE_CODE);
+    }
   }
 
-  // ---------------------------------------------------------------- Persistence
+  private setSeatOnline(sessionId: string, online: boolean) {
+    const key = this.sessionNames.get(sessionId);
+    const seat = key ? seats.get(key) : undefined;
+    if (seat?.sessionId === sessionId) seat.online = online;
+  }
 
-  private async restoreShop(shopId: string) {
-    try {
-      const save = await loadShop(shopId);
-      if (!save) return;
-      this.state.money = save.money;
-      for (const d of save.decorations) {
-        // Re-validate in case the layout or catalog changed since the save.
-        const def = getDecorationDef(d.kind);
-        const rotation = def ? normalizeRotation(def, d.rotation) : 0;
-        // Pieces that no longer fit (e.g. under the back wall / machines added later) are nudged down
-        // a few grid steps instead of being dropped.
-        let y = d.y;
-        for (let step = 0; step < RESTORE_NUDGE_STEPS && !canPlaceDecoration(d.kind, d.x, y, this.state.decorations, undefined, rotation); step++) {
-          y += DECOR_GRID;
-        }
-        if (!canPlaceDecoration(d.kind, d.x, y, this.state.decorations, undefined, rotation)) continue;
-        this.addDecoration(d.kind, d.x, y, rotation);
+  /** Lobby listing: room title + who's inside. */
+  private updateListing() {
+    void this.setMetadata({
+      name: this.state.roomName,
+      players: [...this.state.players.values()].map((p) => ({ name: p.name, online: p.online })),
+    });
+  }
+
+  // ---------------------------------------------------------------- Shared shop (money + furniture)
+
+  /** Copy the shared shop into this room's synced state. */
+  private mirrorShop() {
+    this.state.money = sharedShop.money;
+    this.state.decorations.clear();
+    for (const piece of sharedShop.pieces) this.state.decorations.push(this.toDecoration(piece));
+  }
+
+  private onShopEvent(event: ShopEvent) {
+    const list = this.state.decorations;
+    switch (event.type) {
+      case "money":
+        this.state.money = event.money;
+        return;
+      case "added":
+        list.push(this.toDecoration(event.piece));
+        return;
+      case "moved": {
+        const deco = list.find((d) => d.id === event.piece.id);
+        if (!deco) return;
+        deco.x = event.piece.x;
+        deco.y = event.piece.y;
+        deco.rotation = event.piece.rotation;
+        return;
       }
-      console.log(`[BobaShopRoom] restored shop ${shopId}: $${save.money}, ${this.state.decorations.length} decorations`);
-    } catch (err) {
-      this.canSave = false;
-      console.error(`[BobaShopRoom] failed to load shop ${shopId}; saving disabled for this room`, err);
+      case "removed": {
+        const index = list.findIndex((d) => d.id === event.id);
+        if (index >= 0) list.splice(index, 1);
+        return;
+      }
     }
   }
 
-  /** Save soon (debounced). Call after anything that changes money or furniture. */
-  private scheduleSave() {
-    if (!this.canSave) return;
-    clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => void this.flushSave(), SAVE_DEBOUNCE_MS);
-  }
-
-  private async flushSave() {
-    clearTimeout(this.saveTimer);
-    this.saveTimer = undefined;
-    if (!this.canSave) return;
-    try {
-      await saveShop(SHARED_SHOP_ID, {
-        version: 1,
-        money: this.state.money,
-        decorations: this.state.decorations.map((d) => ({ kind: d.kind, x: d.x, y: d.y, rotation: d.rotation })),
-      });
-    } catch (err) {
-      console.error(`[BobaShopRoom] failed to save shop ${SHARED_SHOP_ID}`, err);
-    }
+  private toDecoration(piece: Piece): Decoration {
+    const deco = new Decoration();
+    deco.id = piece.id;
+    deco.kind = piece.kind;
+    deco.x = piece.x;
+    deco.y = piece.y;
+    deco.rotation = piece.rotation;
+    return deco;
   }
 
   private update(dt: number) {
@@ -403,28 +540,16 @@ export class BobaShopRoom extends Room {
 
     station.item = player.heldItem;
     player.heldItem = EMPTY_HAND;
-    this.state.money += drink.price + tip;
+    sharedShop.earn(drink.price + tip);
     this.state.shiftEarnings += drink.price + tip;
     this.state.servedCount++;
-    this.scheduleSave();
     this.deliveryTimers.set(station.id, DELIVERY_CLEAR_SECONDS);
 
     const event: DeliveredEvent = { by: client.sessionId, drinkName: drink.name, amount: drink.price, tip };
     this.broadcast(ServerEvents.Delivered, event);
   }
 
-  // ---------------------------------------------------------------- Decorations (furniture)
-
-  private addDecoration(kind: string, x: number, y: number, rotation = 0): Decoration {
-    const deco = new Decoration();
-    deco.id = "deco_" + ++this.decorationSeq;
-    deco.kind = kind;
-    deco.x = x;
-    deco.y = y;
-    deco.rotation = rotation;
-    this.state.decorations.push(deco);
-    return deco;
-  }
+  // ---------------------------------------------------------------- Decorations (furniture, in the shared shop)
 
   /** Decorating is only allowed between shifts. Returns an error message, or undefined if allowed. */
   private decorateBlockedReason(): string | undefined {
@@ -432,52 +557,19 @@ export class BobaShopRoom extends Room {
   }
 
   private handleBuyDecoration(client: Client, payload: { kind: string; x: number; y: number; rotation?: number }) {
-    const fail = (reason: string) => client.send(ServerEvents.InteractFailed, { reason });
-    const blocked = this.decorateBlockedReason();
-    if (blocked) return fail(blocked);
-
-    const def = getDecorationDef(payload?.kind);
-    if (!def) return;
-    const x = snapToGrid(Number(payload.x));
-    const y = snapToGrid(Number(payload.y));
-    const rotation = normalizeRotation(def, payload.rotation);
-    if (this.state.money < def.price) return fail(`Không đủ tiền (cần $${def.price})`);
-    if (!canPlaceDecoration(def.kind, x, y, this.state.decorations, undefined, rotation)) return fail("Không đặt được ở đây");
-
-    this.state.money -= def.price;
-    this.addDecoration(def.kind, x, y, rotation);
-    this.scheduleSave();
+    const error = this.decorateBlockedReason() ?? sharedShop.buy(payload?.kind, payload?.x, payload?.y, payload?.rotation);
+    if (error) client.send(ServerEvents.InteractFailed, { reason: error });
   }
 
   /** Move and/or turn a placed piece (rotation omitted = keep the current one). */
   private handleMoveDecoration(client: Client, payload: { id: string; x: number; y: number; rotation?: number }) {
-    const fail = (reason: string) => client.send(ServerEvents.InteractFailed, { reason });
-    const blocked = this.decorateBlockedReason();
-    if (blocked) return fail(blocked);
-
-    const deco = this.state.decorations.find((d) => d.id === payload?.id);
-    const def = deco && getDecorationDef(deco.kind);
-    if (!deco || !def) return;
-    const x = snapToGrid(Number(payload.x));
-    const y = snapToGrid(Number(payload.y));
-    const rotation = payload.rotation === undefined ? deco.rotation : normalizeRotation(def, payload.rotation);
-    if (!canPlaceDecoration(deco.kind, x, y, this.state.decorations, deco.id, rotation)) return fail("Không đặt được ở đây");
-
-    deco.x = x;
-    deco.y = y;
-    deco.rotation = rotation;
-    this.scheduleSave();
+    const error = this.decorateBlockedReason() ?? sharedShop.move(payload?.id, payload?.x, payload?.y, payload?.rotation);
+    if (error) client.send(ServerEvents.InteractFailed, { reason: error });
   }
 
   private handleSellDecoration(client: Client, payload: { id: string }) {
     const blocked = this.decorateBlockedReason();
     if (blocked) return client.send(ServerEvents.InteractFailed, { reason: blocked });
-
-    const index = this.state.decorations.findIndex((d) => d.id === payload?.id);
-    if (index < 0) return;
-    const def = getDecorationDef(this.state.decorations[index].kind);
-    this.state.decorations.splice(index, 1);
-    if (def) this.state.money += refundFor(def);
-    this.scheduleSave();
+    sharedShop.sell(payload?.id);
   }
 }

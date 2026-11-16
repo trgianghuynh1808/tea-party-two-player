@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import { defineRoom, defineServer, matchMaker } from "colyseus";
-import { LOBBY_PATH, MAX_PLAYERS, ROOM_NAME, SERVER_PORT, type LobbyInfo } from "@boba/shared";
+import { MAX_PLAYERS, ROOMS_PATH, ROOM_NAME, SERVER_PORT, type RoomMetadata, type RoomsResponse } from "@boba/shared";
 import { BobaShopRoom } from "./rooms/BobaShopRoom.js";
 import { storageName } from "./persistence/ShopStore.js";
 
@@ -22,11 +22,27 @@ const server = defineServer({
     app.get("/health", (_req, res) => {
       res.json({ ok: true });
     });
-    // Home screen status. Public + CORS: the client may be hosted elsewhere (GitHub Pages).
-    app.get(LOBBY_PATH, async (_req, res) => {
-      const [room] = await matchMaker.query({ name: ROOM_NAME });
-      const info: LobbyInfo = { open: !!room, players: room?.clients ?? 0, maxPlayers: room?.maxClients ?? MAX_PLAYERS };
-      res.set("Access-Control-Allow-Origin", "*").set("Cache-Control", "no-store").json(info);
+    // Lobby: rooms currently open and who's inside. Public + CORS: the client may be hosted elsewhere (GitHub Pages).
+    app.get(ROOMS_PATH, async (_req, res) => {
+      const rooms = await matchMaker.query({ name: ROOM_NAME });
+      const now = Date.now();
+      const body: RoomsResponse = {
+        rooms: rooms
+          .map((room) => {
+            const meta = room.metadata as Partial<RoomMetadata> | undefined;
+            const createdAt = room.createdAt ? new Date(room.createdAt).getTime() : now;
+            return {
+              id: room.roomId,
+              name: meta?.name ?? "Phòng",
+              players: meta?.players ?? [],
+              maxPlayers: MAX_PLAYERS,
+              createdAt: Number.isFinite(createdAt) ? createdAt : now,
+            };
+          })
+          .sort((a, b) => b.createdAt - a.createdAt), // newest first
+        now,
+      };
+      res.set("Access-Control-Allow-Origin", "*").set("Cache-Control", "no-store").json(body);
     });
     if (serveClient) app.use(express.static(clientDist));
   },

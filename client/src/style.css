@@ -117,7 +117,7 @@ body.in-game {
 /* ---------------------------------------------------------------- Lobby */
 
 .card {
-  width: 360px;
+  width: 400px;
   max-width: calc(100vw - 24px);
   /* auto margins center the card but let it scroll (not clip) when the screen is short */
   margin: auto;
@@ -336,6 +336,142 @@ h1 {
 .lobby-status.full {
   color: #e76f51;
   font-weight: 600;
+}
+
+/* Step 1: username */
+.name-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+}
+
+.name-form label {
+  font-weight: 700;
+}
+
+.name-form .hint {
+  margin: 0;
+  color: #6b5b57;
+  font-size: 13px;
+}
+
+.name-form input,
+.create-form input {
+  width: 100%;
+  padding: 11px 12px;
+  border: 2px solid #d8cbb9;
+  border-radius: 10px;
+  background: #fff;
+  color: #3d2c29;
+  font: inherit;
+  font-size: 16px; /* 16px+ stops iOS from zooming into the field */
+}
+
+.name-form input:focus,
+.create-form input:focus {
+  outline: none;
+  border-color: #e76f51;
+}
+
+/* Step 2: greeting + rooms */
+.hello {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.link-btn {
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #457b9d;
+  font: inherit;
+  font-size: 13px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.rooms-title {
+  margin: 18px 0 6px;
+  font-size: 16px;
+  text-align: left;
+}
+
+.room-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  margin: 0 0 10px;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.room-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 2px solid #e3d5c6;
+  border-radius: 10px;
+  background: #fff;
+  text-align: left;
+}
+
+/* A room you're still seated in (lost connection): "Vào lại". */
+.room-item.mine {
+  border-color: #e76f51;
+}
+
+.room-info {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.room-info strong,
+.room-players {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room-players {
+  color: #6b5b57;
+  font-size: 12px;
+}
+
+.room-created {
+  color: #9a8a85;
+  font-size: 11px;
+}
+
+.room-count {
+  color: #6b5b57;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.room-item .btn.small {
+  min-width: 64px;
+}
+
+.create-form {
+  display: flex;
+  gap: 8px;
+}
+
+.create-form .btn {
+  width: auto;
+  white-space: nowrap;
+}
+
+.lobby-status:empty {
+  display: none;
 }
 
 .error {
