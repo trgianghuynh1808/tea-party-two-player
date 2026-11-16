@@ -39,6 +39,11 @@ export interface DecorationDef {
   category?: DecorationCategory;
   /** Small looping animation drawn with the piece (client only). "breeze" = cool air from an air conditioner. */
   effect?: "breeze";
+  /**
+   * Furniture with a job during shifts: customers sit on seats, and drinks are served at tables.
+   * A seat is only used when a table stands next to it (see seatTableMap in seating.ts).
+   */
+  role?: "seat" | "table";
 }
 
 /**
@@ -171,10 +176,11 @@ export const DECORATION_CATALOG: DecorationDef[] = [
         back: "assets/decor/woven_chair_back.png",
         right: "assets/decor/woven_chair_right.png",
       },
+      role: "seat",
     },
-    decor("stool", "Đôn gỗ", 35, "stool", 28, 24, 40, 0xa1887f, "flip"),
+    { ...decor("stool", "Đôn gỗ", 35, "stool", 28, 24, 40, 0xa1887f, "flip"), role: "seat" },
     // Built by client/assets-src/tools/build_table_view.py (front view only: the table is round, so it doesn't turn).
-    decor("table", "Bàn khách", 90, "wicker_table", 44, 26, 48, 0x8d6e63),
+    { ...decor("table", "Bàn khách", 90, "wicker_table", 44, 26, 48, 0x8d6e63), role: "table" },
   ]),
   ...inCategory("lighting", [
     decor("lamp", "Lồng đèn đỏ", 75, "red_lantern_lit", 30, 26, 56, 0xf4a261),

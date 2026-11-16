@@ -76,6 +76,9 @@ export interface MachineOverflowEvent {
 }
 
 export * from "./decor";
+export * from "./seating";
+import { distanceToBox, footprintBox } from "./seating";
+import type { PlacedDecoration } from "./decor";
 
 // ---- Shared movement (used by server simulation and client prediction) ----
 
@@ -157,6 +160,34 @@ export function findNearestStationDef(p: Vec2): StationDef | undefined {
     if (d <= bestDist) {
       bestDist = d;
       best = def;
+    }
+  }
+  return best;
+}
+
+/** What the action key would act on: a station, or a table where seated customers wait for drinks. */
+export type InteractTarget = { type: "station"; def: StationDef } | { type: "table"; table: PlacedDecoration };
+
+/**
+ * Nearest station or table within INTERACT_RANGE (same rule on server and client).
+ * `tables` = only the tables that can be served right now (see tablesWaiting).
+ */
+export function findInteractTarget(p: Vec2, tables: Iterable<PlacedDecoration>): InteractTarget | undefined {
+  let best: InteractTarget | undefined;
+  let bestDist = INTERACT_RANGE;
+  for (const def of STATIONS) {
+    const d = distanceToStation(p, def);
+    if (d <= bestDist) {
+      bestDist = d;
+      best = { type: "station", def };
+    }
+  }
+  for (const table of tables) {
+    const box = footprintBox(table);
+    const d = box ? distanceToBox(p, box) : Infinity;
+    if (d <= bestDist) {
+      bestDist = d;
+      best = { type: "table", table };
     }
   }
   return best;

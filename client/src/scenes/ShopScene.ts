@@ -3,11 +3,9 @@ import { Callbacks, type Room } from "@colyseus/sdk";
 import {
   EMPTY_HAND,
   CHARACTERS,
-  getCharacter,
   GamePhase,
   StationType,
   Messages,
-  PLAYER_RADIUS,
   POSITION_SEND_INTERVAL_MS,
   STATIONS,
   ServerEvents,
@@ -16,8 +14,12 @@ import {
   WORLD_HEIGHT,
   WORLD_WIDTH,
   directionFromInput,
-  findNearestStationDef,
+  findInteractTarget,
+  footprintBox,
+  pendingDrinksAt,
   planInteraction,
+  planServeTable,
+  tablesWaiting,
   stepMovement,
   describeItem,
   pendingOrderDrinkIds,
@@ -34,6 +36,8 @@ import { TouchControls, isTouchDevice } from "../input/TouchControls";
 import { DECOR_ROTATE, PALETTE_DRAG_START, type PaletteDragStart } from "../ui/DecorPanel";
 import { CupView, preloadCupTextures } from "./CupView";
 import { DecorController, preloadDecorTextures } from "./DecorController";
+import { CustomerController } from "./CustomerController";
+import { CHARACTER_BODY_PX, DIRECTION_ROW, FEET_Y, HEAD_Y, WALK_COLUMNS, WALK_FPS, characterKey, characterOf } from "./characterArt";
 
 import type { BobaShopState, Player } from "@boba/shared/schema";
 
@@ -81,18 +85,6 @@ interface PlayerView {
   walkPhase: number;
 }
 
-// ---------------------------------------------------------------- Character sprites
-// Sheets and their frame layout are described by CHARACTERS (shared/src/characters.ts).
-/** Every character is drawn with its body this tall on screen. */
-const CHARACTER_BODY_PX = 60;
-const FEET_Y = PLAYER_RADIUS - 2; // feet sit near the bottom of the collision circle
-const HEAD_Y = FEET_Y - CHARACTER_BODY_PX; // top of the head / hat
-const DIRECTION_ROW: Record<string, number> = { down: 0, left: 1, right: 2, up: 3 };
-/** Walk cycle over the sheet columns for multi-frame characters (step, stand, step, stand). */
-const WALK_COLUMNS = [0, 1, 2, 1];
-const WALK_FPS = 8;
-const characterKey = (id: string) => `char-${id}`;
-const characterOf = (id: string) => getCharacter(id) ?? CHARACTERS[0];
 
 /**
  * Stations drawn with an image instead of a coloured rectangle (client/public/assets/stations/).
@@ -192,6 +184,9 @@ export class ShopScene extends Phaser.Scene {
   private players = new Map<string, PlayerView>();
   private stations = new Map<string, StationView>();
   private decor?: DecorController;
+  private customers?: CustomerController;
+  /** Outline around the table the action key would serve. */
+  private tableHighlight!: Phaser.GameObjects.Rectangle;
 
   private keys!: KeyboardState;
   private touch?: TouchControls;
@@ -242,6 +237,7 @@ export class ShopScene extends Phaser.Scene {
     this.drawWall();
     this.createStations();
     this.createHud();
+    this.tableHighlight = this.add.rectangle(0, 0, 1, 1).setStrokeStyle(3, 0xffd166).setVisible(false);
 
     // Use physical key codes so Vietnamese IMEs (Telex: D/W/S...) don't swallow movement keys.
     // Space and arrows are prevented from scrolling the page.
@@ -269,6 +265,7 @@ export class ShopScene extends Phaser.Scene {
       this.game.events.off(PALETTE_DRAG_START, onPaletteDrag);
       this.game.events.off(DECOR_ROTATE, onRotate);
       this.decor?.destroy();
+      this.customers?.destroy();
     });
 
     if (this.room) this.bindRoom(this.room);
@@ -325,6 +322,15 @@ export class ShopScene extends Phaser.Scene {
     });
     $.onRemove("decorations", (deco) => decor.remove(deco.id));
 
+    // Customers sitting at the tables (take-away orders are only shown in the orders panel).
+    const customers = new CustomerController(this, room);
+    this.customers = customers;
+    $.onAdd("orders", (order) => {
+      customers.addOrder(order);
+      $.listen(order, "servedMask", () => customers.syncServed(order.id));
+    });
+    $.onRemove("orders", (order) => customers.removeOrder(order.id));
+
     room.onMessage(ServerEvents.Delivered, (msg: DeliveredEvent) => {
       const who = msg.by === room.sessionId ? "Bạn" : room.state.players.get(msg.by)?.name || "Đồng đội";
       if (msg.served < msg.total) {
@@ -359,6 +365,7 @@ export class ShopScene extends Phaser.Scene {
       c.setDepth(c.y);
       this.animateWalk(view, dt);
     }
+    this.customers?.update(dt);
 
     this.updateStationHighlight();
   }
@@ -699,26 +706,44 @@ export class ShopScene extends Phaser.Scene {
     else view.readyLabel.setText("Xong! Space để lấy").setBackgroundColor("#2a9d8f");
   }
 
-  /** Highlight the nearest station and preview what the action key/button would do there. */
+  /** Highlight the nearest station (or table with waiting customers) and preview what the action key/button would do there. */
   private updateStationHighlight() {
     const room = this.room;
     const local = room ? this.players.get(room.sessionId) : undefined;
-    const def = local ? findNearestStationDef(local.container) : undefined;
+    // The first state patch may not have arrived yet during the first frames.
+    const state = room?.state;
+    const tables = state?.orders && state.decorations ? tablesWaiting(state.decorations, state.orders) : [];
+    const target = local ? findInteractTarget(local.container, tables) : undefined;
+    const def = target?.type === "station" ? target.def : undefined;
     for (const [id, view] of this.stations) view.highlight.setVisible(id === def?.id);
+    const tableBox = target?.type === "table" ? footprintBox(target.table) : undefined;
+    this.tableHighlight.setVisible(!!tableBox);
+    if (tableBox) {
+      // The table art rises above its footprint: outline the whole piece.
+      const top = tableBox.bottom - 52;
+      this.tableHighlight
+        .setPosition((tableBox.left + tableBox.right) / 2, (top + tableBox.bottom) / 2)
+        .setSize(tableBox.right - tableBox.left + 12, tableBox.bottom - top + 8)
+        .setDepth(tableBox.bottom);
+      this.tableHighlight.updateDisplayOrigin();
+    }
 
     let label: string | null = null;
     let reason = "";
-    // The first state patch may not have arrived yet during the first frames.
-    const state = room?.state;
     const player = state?.players?.get(room!.sessionId);
     const station = def && state?.stations?.get(def.id);
-    if (room && state?.orders && def && station && player) {
+    if (room && state?.orders && player && target?.type === "table") {
+      const plan = planServeTable({ phase: state.phase, held: player.heldItem, orderedDrinkIds: pendingDrinksAt(state.orders, target.table.id) });
+      if (plan.ok) label = plan.label;
+      else reason = plan.reason;
+    } else if (room && state?.orders && def && station && player) {
       const plan = planInteraction(def, {
-        phase: room.state.phase,
+        phase: state.phase,
         held: player.heldItem,
         stationItem: station.item,
         stationProgress: station.progress,
-        orderedDrinkIds: pendingOrderDrinkIds(room.state.orders),
+        orderedDrinkIds: pendingDrinksAt(state.orders, ""),
+        seatedDrinkIds: pendingOrderDrinkIds(state.orders),
       });
       if (plan.ok) label = plan.label;
       else reason = plan.reason;

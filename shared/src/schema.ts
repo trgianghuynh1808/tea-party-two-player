@@ -49,6 +49,12 @@ export class Order extends Schema {
   @type("number") servedMask: number = 0; // bit i set = drink i already delivered
   @type("number") timeLeft: number = 0; // seconds
   @type("number") duration: number = 0; // seconds
+  /** Table (decoration id) the customers sit at; "" = take-away, served at the delivery counter. */
+  @type("string") tableId: string = "";
+  /** Comma-separated seat (decoration) ids: customer i sits on seat i and ordered drink i. */
+  @type("string") seats: string = "";
+  /** Comma-separated character ids: how each customer looks (picked by the server so everyone sees the same). */
+  @type("string") looks: string = "";
 }
 
 export class BobaShopState extends Schema {

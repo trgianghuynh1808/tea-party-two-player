@@ -60,7 +60,8 @@ export class DecorPanel {
     help.className = "hint";
     help.textContent =
       `Kéo đồ vào quán để mua. Kéo đồ trong quán để di chuyển, kéo vào 🗑 để bán lại ${DECORATION_REFUND_RATE * 100}%. ` +
-      "Bấm R (hoặc ⟳) để xoay món đang kéo / vừa chọn.";
+      "Bấm R (hoặc ⟳) để xoay món đang kéo / vừa chọn. " +
+      "Khách chỉ ngồi ghế/đôn đặt sát Bàn khách (để được mang nước ra bàn).";
 
     const rotateBtn = document.createElement("button");
     rotateBtn.type = "button";

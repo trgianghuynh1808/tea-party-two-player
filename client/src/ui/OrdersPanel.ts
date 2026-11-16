@@ -114,6 +114,14 @@ export class OrdersPanel {
       return item;
     });
 
+    // Where to bring it: seated customers are served at their table, take-away ones at the delivery counter.
+    card.append(
+      Object.assign(document.createElement("div"), {
+        className: "where",
+        textContent: order.tableId ? `🪑 Ngồi bàn${drinks.length > 1 ? ` (${drinks.length} người)` : ""} · mang ra bàn` : "🥡 Mang đi · giao ở quầy",
+      }),
+    );
+
     const timer = Object.assign(document.createElement("div"), { className: "timer" });
     const bar = document.createElement("div");
     timer.append(bar);

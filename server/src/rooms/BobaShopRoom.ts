@@ -22,8 +22,14 @@ import {
   orderDrinkIds,
   orderSpawnInterval,
   pendingDrinkIds,
+  pendingDrinksAt,
   pendingOrderDrinkIds,
   pickCustomerKind,
+  seatTableMap,
+  tablesWaiting,
+  SEAT_COOLDOWN_SECONDS,
+  SEAT_RETRY_SECONDS,
+  CHARACTERS,
   RECONNECT_GRACE_SECONDS,
   REPLACED_CLOSE_CODE,
   STATIONS,
@@ -35,8 +41,9 @@ import {
   normalizeRoomTitle,
   normalizeUsername,
   usernameKey,
-  findNearestStationDef,
+  findInteractTarget,
   planInteraction,
+  planServeTable,
   PLAYER_SPEED,
   resolveCollisions,
   cupContents,
@@ -71,6 +78,15 @@ const MOVE_BUDGET_CAP = PLAYER_SPEED * 1.5;
 /** Collision corrections smaller than this are accepted silently (float noise between client and server). */
 const COLLISION_TOLERANCE = 2;
 const DIRECTIONS = new Set<string>(["up", "down", "left", "right"]);
+
+function shuffle<T>(items: T[]): T[] {
+  const a = [...items];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
 
 interface MoveBudget {
   budget: number;
@@ -120,6 +136,8 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
   private deliveryTimers = new Map<string, number>();
   private orderSeq = 0;
   private orderSpawnTimer = FIRST_ORDER_DELAY_SECONDS;
+  /** Seat id -> seconds left before a new customer may sit there (the previous one is walking out). */
+  private seatCooldowns = new Map<string, number>();
 
   messages = {
     position: (client: Client, payload: PositionMessage) => {
@@ -431,6 +449,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
   /** Reset the kitchen and start a new timed shift. Players' wallets are kept. */
   private startShift() {
     this.state.orders.clear();
+    this.seatCooldowns.clear();
     this.state.stations.forEach((station) => this.clearStation(station));
     this.deliveryTimers.clear();
 
@@ -524,9 +543,14 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
       const order = this.state.orders[i];
       order.timeLeft = Math.max(0, order.timeLeft - dt);
       if (order.timeLeft <= 0) {
-        this.state.orders.splice(i, 1);
+        this.removeOrder(i);
         this.missOrder(order);
       }
+    }
+
+    for (const [seatId, left] of this.seatCooldowns) {
+      if (left - dt > 0) this.seatCooldowns.set(seatId, left - dt);
+      else this.seatCooldowns.delete(seatId);
     }
 
     if (this.state.players.size === 0) return;
@@ -534,14 +558,62 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     if (this.orderSpawnTimer <= 0) {
       const progress = this.shiftProgress();
       this.orderSpawnTimer = orderSpawnInterval(progress);
-      if (this.state.orders.length < MAX_ACTIVE_ORDERS) this.state.orders.push(this.createOrder(progress));
+      if (this.state.orders.length < MAX_ACTIVE_ORDERS) {
+        const order = this.createOrder(progress);
+        if (order) this.state.orders.push(order);
+        // Every seat is taken: the next customer comes as soon as one frees up.
+        else this.orderSpawnTimer = SEAT_RETRY_SECONDS;
+      }
     }
   }
 
-  private createOrder(progress: number): Order {
-    const kind = pickCustomerKind(progress);
+  /** The customers leave (served or walked out): their seats are free again after a short while. */
+  private removeOrder(index: number) {
+    const [order] = this.state.orders.splice(index, 1);
+    for (const seatId of order?.seats ? order.seats.split(",") : []) this.seatCooldowns.set(seatId, SEAT_COOLDOWN_SECONDS);
+  }
+
+  /**
+   * Free seats per table (seats next to a table, not taken by a customer or one just leaving).
+   * `hasSeating` = false when the shop has no seat next to a table at all: customers then order take-away at the counter.
+   */
+  private freeSeating(): { hasSeating: boolean; free: Map<string, string[]> } {
+    const seatTable = seatTableMap(this.state.decorations);
+    const taken = new Set(this.seatCooldowns.keys());
+    for (const o of this.state.orders) for (const id of o.seats ? o.seats.split(",") : []) taken.add(id);
+    const free = new Map<string, string[]>();
+    for (const [seatId, tableId] of seatTable) {
+      if (taken.has(seatId)) continue;
+      free.set(tableId, [...(free.get(tableId) ?? []), seatId]);
+    }
+    return { hasSeating: seatTable.size > 0, free };
+  }
+
+  /** A new customer (or group) walks in; undefined when there is no free seat for them. */
+  private createOrder(progress: number): Order | undefined {
+    let kind = pickCustomerKind(progress);
     const randomDrink = () => DRINKS[Math.floor(Math.random() * DRINKS.length)].id;
-    const count = kind === CustomerKind.Group ? (progress >= 0.6 && Math.random() < 0.5 ? 3 : 2) : 1;
+    let count = kind === CustomerKind.Group ? (progress >= 0.6 && Math.random() < 0.5 ? 3 : 2) : 1;
+
+    // A group sits together at one table: fewer friends come if no table has room for all of them.
+    let tableId = "";
+    let seats: string[] = [];
+    const seating = this.freeSeating();
+    if (seating.hasSeating) {
+      const pick = (n: number) => {
+        const options = [...seating.free].filter(([, free]) => free.length >= n);
+        if (!options.length) return undefined;
+        const [table, free] = options[Math.floor(Math.random() * options.length)];
+        return { table, seats: shuffle(free).slice(0, n) };
+      };
+      let spot = pick(count);
+      while (!spot && count > 1) spot = pick(--count);
+      if (!spot) return undefined;
+      if (count === 1 && kind === CustomerKind.Group) kind = CustomerKind.Normal;
+      tableId = spot.table;
+      seats = spot.seats;
+    }
+
     const base = baseOrderDuration(progress);
     const duration =
       kind === CustomerKind.Vip ? VIP_DURATION_SECONDS : Math.round(base * (1 + GROUP_EXTRA_TIME_PER_DRINK * (count - 1)));
@@ -552,6 +624,9 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     order.drinks = Array.from({ length: count }, randomDrink).join(",");
     order.duration = duration;
     order.timeLeft = duration;
+    order.tableId = tableId;
+    order.seats = seats.join(",");
+    order.looks = Array.from({ length: count }, () => CHARACTERS[Math.floor(Math.random() * CHARACTERS.length)].id).join(",");
     return order;
   }
 
@@ -613,9 +688,22 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     if (!player) return;
 
     const fail = (reason: string) => client.send(ServerEvents.InteractFailed, { reason });
-    const def = findNearestStationDef(player);
-    const station = def && this.state.stations.get(def.id);
-    if (!def || !station) return fail("Không có quầy nào gần đây");
+    const orders = this.state.orders;
+    const target = findInteractTarget(player, tablesWaiting(this.state.decorations, orders));
+    if (!target) return fail("Không có quầy nào gần đây");
+
+    // Serving customers seated at a table.
+    if (target.type === "table") {
+      const tableId = target.table.id;
+      const plan = planServeTable({ phase: this.state.phase, held: player.heldItem, orderedDrinkIds: pendingDrinksAt(orders, tableId) });
+      if (!plan.ok) return fail(plan.reason);
+      if (plan.kind === "deliver") this.deliver(client, player, plan.drink, tableId);
+      return;
+    }
+
+    const def = target.def;
+    const station = this.state.stations.get(def.id);
+    if (!station) return fail("Không có quầy nào gần đây");
 
     // Same rules the client uses to preview the action (see shared/src/interaction.ts).
     const plan = planInteraction(def, {
@@ -623,7 +711,9 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
       held: player.heldItem,
       stationItem: station.item,
       stationProgress: station.progress,
-      orderedDrinkIds: pendingOrderDrinkIds(this.state.orders),
+      // The delivery counter only serves take-away orders; seated customers are served at their table.
+      orderedDrinkIds: pendingDrinksAt(orders, ""),
+      seatedDrinkIds: pendingOrderDrinkIds(orders),
     });
     if (!plan.ok) return fail(plan.reason);
 
@@ -650,15 +740,19 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
         player.heldItem = EMPTY_HAND;
         return;
       case "deliver":
-        return this.deliver(client, player, station, plan.drink);
+        // The cup stays on the counter for a moment (take-away).
+        station.item = player.heldItem;
+        this.deliveryTimers.set(station.id, DELIVERY_CLEAR_SECONDS);
+        return this.deliver(client, player, plan.drink, "");
     }
   }
 
-  private deliver(client: Client, player: Player, station: Station, drink: DrinkDef) {
-    // Serve the most urgent order still waiting for this drink (planInteraction already checked one exists).
+  /** Serve a drink to an order at `tableId` ("" = take-away at the counter). */
+  private deliver(client: Client, player: Player, drink: DrinkDef, tableId: string) {
+    // Serve the most urgent order there still waiting for this drink (the plan already checked one exists).
     let index = -1;
     this.state.orders.forEach((o, i) => {
-      if (!pendingDrinkIds(o.drinks, o.servedMask).includes(drink.id)) return;
+      if (o.tableId !== tableId || !pendingDrinkIds(o.drinks, o.servedMask).includes(drink.id)) return;
       if (index < 0 || o.timeLeft < this.state.orders[index].timeLeft) index = i;
     });
     if (index < 0) return;
@@ -669,15 +763,13 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     const slot = drinks.findIndex((id, i) => id === drink.id && !(order.servedMask & (1 << i)));
     order.servedMask |= 1 << slot;
 
-    station.item = player.heldItem;
     player.heldItem = EMPTY_HAND;
-    this.deliveryTimers.set(station.id, DELIVERY_CLEAR_SECONDS);
     this.state.servedCount++;
 
     const served = drinks.filter((_, i) => order.servedMask & (1 << i)).length;
     const event: DeliveredEvent = { by: client.sessionId, drinkName: drink.name, served, total: drinks.length, amount: 0, notes: [] };
     if (served === drinks.length) {
-      this.state.orders.splice(index, 1);
+      this.removeOrder(index);
       Object.assign(event, this.payOrder(order, drinks));
     }
     this.broadcast(ServerEvents.Delivered, event);

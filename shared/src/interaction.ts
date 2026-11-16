@@ -22,8 +22,10 @@ export interface InteractionContext {
   /** Current item / progress on the station. */
   stationItem: string;
   stationProgress: number;
-  /** Drink ids currently ordered by customers. */
+  /** Drink ids currently ordered by customers served here (delivery counter: take-away orders only). */
   orderedDrinkIds: string[];
+  /** Delivery counter: drinks awaited by seated customers (to tell the player to take them to the table). */
+  seatedDrinkIds?: string[];
 }
 
 export type InteractionPlan =
@@ -90,8 +92,21 @@ export function planInteraction(def: StationDef, ctx: InteractionContext): Inter
       if (!drink) return fail("Món chưa pha xong");
       if (stationItem !== EMPTY_HAND) return fail("Quầy đang bận, chờ chút");
       if (ctx.phase !== GamePhase.Playing) return fail("Chưa mở ca, bấm Bắt đầu ca để đón khách");
-      if (!ctx.orderedDrinkIds.includes(drink.id)) return fail(`Không có khách gọi ${drink.name}`);
+      if (!ctx.orderedDrinkIds.includes(drink.id)) {
+        return fail(ctx.seatedDrinkIds?.includes(drink.id) ? "Khách đang ngồi bàn, mang tới tận bàn nhé" : `Không có khách gọi ${drink.name}`);
+      }
       return { ok: true, kind: "deliver", drink, label: `Giao ${drink.name}` };
     }
   }
+}
+
+/** Serving a table: `orderedDrinkIds` = drinks still awaited by the customers sitting at it. */
+export function planServeTable(ctx: Pick<InteractionContext, "phase" | "held" | "orderedDrinkIds">): InteractionPlan {
+  if (ctx.phase === GamePhase.Ended) return fail("Ca đã kết thúc, bấm Chơi ca mới");
+  if (!isCup(ctx.held)) return fail("Cần cầm ly nước đã pha xong");
+  const drink = matchDrink(cupContents(ctx.held));
+  if (!drink) return fail("Món chưa pha xong");
+  if (ctx.phase !== GamePhase.Playing) return fail("Chưa mở ca");
+  if (!ctx.orderedDrinkIds.includes(drink.id)) return fail(`Bàn này không gọi ${drink.name}`);
+  return { ok: true, kind: "deliver", drink, label: `Mang ${drink.name} ra bàn` };
 }
