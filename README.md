@@ -90,6 +90,14 @@ WebSocket from the same origin. Then either:
     cloud: Render free wipes its disk on every restart, sleep and deploy.
   - Otherwise JSON files in `server/data/shops/` (`DATA_DIR` env to change the folder) — fine locally.
   - The server logs which one it uses at startup (`Saving shops to …`).
+- Database (`server/src/persistence/ShopStore.ts`): a **users** collection (name, createdAt, lastSeenAt, `shopId`)
+  and a **shops** collection (money + furniture). A user record is created the first time a name joins, and links
+  to that user's shop by `shopId`. Redis keys: `boba:user:<id>`, `boba:shop:<shopId>`; files: `data/users/`, `data/shops/`.
+- Admin API for backups / restores, enabled when `ADMIN_TOKEN` is set (header `Authorization: Bearer <token>`):
+  - `GET /admin/users/<name>`: user record + shop (money + furniture).
+  - `PUT /admin/users/<name>/shop` with a shop save as JSON body (`{"money": 100, "decorations": [...]}`): replaces
+    that user's shop, live (open rooms update right away). Example:
+    `curl -X PUT -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" --data @backup.json https://<host>/admin/users/Ng%E1%BB%8Dc/shop`
 - If the save can't be read (storage down), rooms can't be opened ("Không tải được quán") until it can, so an
   empty shop never overwrites the real save.
 - Catalog and placement rules: `shared/src/decor.ts`.

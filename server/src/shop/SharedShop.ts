@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   DECOR_GRID,
   canPlaceDecoration,
@@ -6,10 +5,10 @@ import {
   normalizeRotation,
   refundFor,
   snapToGrid,
-  usernameKey,
   type PlacedDecoration,
+  type ShopSave,
 } from "@boba/shared";
-import { loadShop, saveShop } from "../persistence/ShopStore.js";
+import { loadShop, saveShop, upsertUser } from "../persistence/ShopStore.js";
 
 /** Wait this long after the last change before writing the save (batches rapid edits). */
 const SAVE_DEBOUNCE_MS = 1000;
@@ -26,9 +25,9 @@ export type ShopEvent =
   | { type: "removed"; id: string };
 
 /**
- * The one shop (money + furniture) shared by every room on this server.
- * Rooms call buy/move/sell/earn and subscribe to changes, so furniture bought in one room
- * shows up right away in the others and two rooms never overwrite each other's save.
+ * One player's shop (money + furniture), shared by every room that uses it: the room the player
+ * opened (its furniture) and any room the player plays in (their money).
+ * Rooms call buy/move/sell/earn and subscribe to changes, so two rooms never overwrite each other's save.
  * (In-process state: assumes a single server process, which is how the game is hosted.)
  */
 export class SharedShop {
@@ -40,14 +39,7 @@ export class SharedShop {
   private saveTimer?: ReturnType<typeof setTimeout>;
   private readonly listeners = new Set<(event: ShopEvent) => void>();
 
-  /**
-   * @param legacyShopId Save to start from when this shop has none yet (one-time migration of an old save).
-   *   The old save is only read, never changed or deleted.
-   */
-  constructor(
-    private readonly shopId: string,
-    private readonly legacyShopId?: string,
-  ) {}
+  constructor(readonly shopId: string) {}
 
   /**
    * Load the save once (later calls reuse it). Rejects when the storage can't be read; the next call
@@ -126,17 +118,37 @@ export class SharedShop {
     this.scheduleSave();
   }
 
+  /** Current money + furniture, in the save format (e.g. for a backup). */
+  snapshot(): ShopSave {
+    return {
+      version: 1,
+      money: this.money,
+      decorations: this.pieces.map(({ kind, x, y, rotation }) => ({ kind, x, y, rotation })),
+    };
+  }
+
+  /**
+   * Replace everything with a save (e.g. restoring a backup) and write it right away. Open rooms update live.
+   * Returns how many pieces were dropped because they no longer fit the layout.
+   */
+  async replace(save: ShopSave): Promise<number> {
+    await this.load(); // a load finishing later must not overwrite the restored state
+    for (const piece of this.pieces.splice(0)) this.emit({ type: "removed", id: piece.id });
+    const dropped = this.apply(save);
+    for (const piece of this.pieces) this.emit({ type: "added", piece });
+    this.emit({ type: "money", money: this.money });
+    this.scheduleSave();
+    await this.flush();
+    return dropped;
+  }
+
   /** Write pending changes now (e.g. when a room closes). */
   async flush() {
     if (!this.saveTimer) return;
     clearTimeout(this.saveTimer);
     this.saveTimer = undefined;
     try {
-      await saveShop(this.shopId, {
-        version: 1,
-        money: this.money,
-        decorations: this.pieces.map(({ kind, x, y, rotation }) => ({ kind, x, y, rotation })),
-      });
+      await saveShop(this.shopId, this.snapshot());
     } catch (err) {
       console.error(`[SharedShop] failed to save shop ${this.shopId}`, err);
     }
@@ -158,14 +170,16 @@ export class SharedShop {
   }
 
   private async restore() {
-    let save = await loadShop(this.shopId);
-    let migrated = false;
-    if (!save && this.legacyShopId) {
-      save = await loadShop(this.legacyShopId);
-      migrated = !!save;
-    }
+    const save = await loadShop(this.shopId);
     if (!save) return;
+    this.apply(save);
+    console.log(`[SharedShop] restored ${this.shopId}: $${this.money}, ${this.pieces.length} decorations`);
+  }
+
+  /** Load a save's money + furniture into memory (pieces must be empty). Returns how many pieces were dropped. */
+  private apply(save: ShopSave): number {
     this.money = save.money;
+    let dropped = 0;
     for (const d of save.decorations) {
       // Re-validate in case the layout or catalog changed since the save. Pieces that no longer fit
       // (e.g. under the back wall / machines added later) are nudged down a few grid steps instead of dropped.
@@ -176,33 +190,42 @@ export class SharedShop {
         y += DECOR_GRID;
       }
       if (canPlaceDecoration(d.kind, d.x, y, this.pieces, undefined, rotation)) this.place(d.kind, d.x, y, rotation);
+      else dropped++;
     }
-    console.log(`[SharedShop] restored ${this.shopId}: $${this.money}, ${this.pieces.length} decorations`);
-    if (migrated) {
-      console.log(`[SharedShop] migrated old save ${this.legacyShopId} -> ${this.shopId}`);
-      this.scheduleSave(); // write it under the new id right away
-    }
+    if (dropped) console.warn(`[SharedShop] ${this.shopId}: ${dropped} decoration(s) no longer fit and were dropped`);
+    return dropped;
   }
 }
 
-/** Save id of a username's shop: a hash, since names may contain any letter (save ids must be filename-safe). */
-export const shopIdOf = (usernameKey: string) => `u_${createHash("sha256").update(usernameKey).digest("hex").slice(0, 32)}`;
+/** Shops opened on this server, by username key: one instance each, so every room sees the same state. */
+const shops = new Map<string, SharedShop>();
+const opening = new Map<string, Promise<SharedShop>>();
 
 /**
- * Before shops were per player, every room shared one save ("shared-shop"). It belonged to this player:
- * their shop starts from it the first time it's loaded (only while they have no save of their own).
+ * Open the shop of a player: find or create their user record (users collection), then load the shop it
+ * links to. Rejects when the storage can't be read; the next call retries.
  */
-const LEGACY_SHOP_ID = "shared-shop";
-const LEGACY_SHOP_OWNER = usernameKey("Ngọc");
-
-const shops = new Map<string, SharedShop>();
-
-/** The shop of a username (usernameKey), one instance per server so every room sees the same state. */
-export function shopOf(usernameKey: string): SharedShop {
-  let shop = shops.get(usernameKey);
-  if (!shop) {
-    shop = new SharedShop(shopIdOf(usernameKey), usernameKey === LEGACY_SHOP_OWNER ? LEGACY_SHOP_ID : undefined);
-    shops.set(usernameKey, shop);
+export function openShop(name: string, key: string, seen = true): Promise<SharedShop> {
+  let pending = opening.get(key);
+  if (!pending) {
+    pending = (async () => {
+      const user = await upsertUser(name, key, seen);
+      let shop = shops.get(key);
+      if (!shop) {
+        shop = new SharedShop(user.shopId);
+        shops.set(key, shop);
+      }
+      await shop.load();
+      return shop;
+    })().finally(() => opening.delete(key));
+    opening.set(key, pending);
   }
+  return pending;
+}
+
+/** The shop of a player already opened with openShop (by username key). */
+export function shopOf(key: string): SharedShop {
+  const shop = shops.get(key);
+  if (!shop) throw new Error(`Shop of ${key} was not opened`);
   return shop;
 }

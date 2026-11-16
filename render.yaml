@@ -18,3 +18,6 @@ services:
         sync: false
       - key: UPSTASH_REDIS_REST_TOKEN
         sync: false
+      # Admin API (GET/PUT /admin/users/:name...) for backups and restores. Set a long random value; unset = disabled.
+      - key: ADMIN_TOKEN
+        sync: false

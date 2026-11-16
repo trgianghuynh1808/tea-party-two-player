@@ -51,7 +51,7 @@ import {
   type RoomMetadata,
 } from "@boba/shared";
 import { BobaShopState, Decoration, Order, Player, Station } from "@boba/shared/schema";
-import { shopOf, type Piece, type SharedShop, type ShopEvent } from "../shop/SharedShop.js";
+import { openShop, shopOf, type Piece, type SharedShop, type ShopEvent } from "../shop/SharedShop.js";
 
 const FIRST_ORDER_DELAY_SECONDS = 2;
 /** Override shift length for quick testing, e.g. SHIFT_SECONDS=20 npm run dev. */
@@ -147,8 +147,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     const host = normalizeUsername(options.username);
     if (!host) throw new ServerError(JoinError.BAD_NAME, "Tên không hợp lệ");
     this.hostKey = usernameKey(host);
-    const hostShop = shopOf(this.hostKey);
-    await this.loadShop(hostShop);
+    const hostShop = await this.openShop(host, this.hostKey);
     this.hostShop = hostShop;
     this.touchedShops.add(hostShop);
     this.mirrorShop();
@@ -191,7 +190,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
       throw new ServerError(JoinError.ROOM_FULL, "Phòng đã đủ người");
     }
     // The player's own wallet: their share of each shift goes there.
-    await this.loadShop(shopOf(key));
+    await this.openShop(name, key);
     return { name, key, deviceId };
   }
 
@@ -335,10 +334,10 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
 
   // ---------------------------------------------------------------- Shops: host's furniture, players' wallets
 
-  /** Load a shop save (once per server); a storage outage refuses the join instead of starting empty. */
-  private async loadShop(shop: SharedShop) {
+  /** Open a player's user record + shop; a storage outage refuses the join instead of starting empty. */
+  private async openShop(name: string, key: string): Promise<SharedShop> {
     try {
-      await shop.load();
+      return await openShop(name, key);
     } catch (err) {
       console.error("[BobaShopRoom] can't load a shop", err);
       throw new ServerError(JoinError.SHOP_UNAVAILABLE, "Không tải được quán, thử lại sau nhé");

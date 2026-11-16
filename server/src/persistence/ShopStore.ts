@@ -1,18 +1,27 @@
+import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getDecorationDef, isValidShopId, type ShopSave } from "@boba/shared";
 
 /**
- * Where shops (money + furniture) are saved. Two backends:
- * - Upstash Redis (REST API) when UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are set.
- *   Use this on hosts with an ephemeral disk (Render free wipes it on every restart/sleep/deploy).
- * - Otherwise JSON files: <DATA_DIR>/shops/<shopId>.json (DATA_DIR defaults to server/data).
+ * The game's database: two collections.
+ * - users: one record per username (display name, timestamps, and the id of the user's shop).
+ * - shops: money + furniture, linked from the user record by shopId.
+ *
+ * Two backends:
+ * - Upstash Redis (REST API) when UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are set
+ *   (keys boba:user:<id> and boba:shop:<shopId>). Use this on hosts with an ephemeral disk
+ *   (Render free wipes it on every restart/sleep/deploy).
+ * - Otherwise JSON files: <DATA_DIR>/users/<id>.json and <DATA_DIR>/shops/<shopId>.json
+ *   (DATA_DIR defaults to server/data).
  */
+type Collection = "users" | "shops";
+
 interface Backend {
   name: string;
-  read(shopId: string): Promise<string | undefined>;
-  write(shopId: string, json: string): Promise<void>;
+  read(collection: Collection, id: string): Promise<string | undefined>;
+  write(collection: Collection, id: string, json: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------- File backend (local dev / own machine)
@@ -20,22 +29,22 @@ interface Backend {
 const DATA_DIR = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../data");
-const SHOPS_DIR = path.join(DATA_DIR, "shops");
 
 const fileBackend: Backend = {
-  name: `files in ${SHOPS_DIR}`,
-  async read(shopId) {
+  name: `files in ${DATA_DIR}`,
+  async read(collection, id) {
     try {
-      return await readFile(path.join(SHOPS_DIR, `${shopId}.json`), "utf8");
+      return await readFile(path.join(DATA_DIR, collection, `${id}.json`), "utf8");
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
       throw err;
     }
   },
   /** Write atomically (temp file + rename) so a crash mid-write can't corrupt the save. */
-  async write(shopId, json) {
-    const file = path.join(SHOPS_DIR, `${shopId}.json`);
-    await mkdir(SHOPS_DIR, { recursive: true });
+  async write(collection, id, json) {
+    const dir = path.join(DATA_DIR, collection);
+    const file = path.join(dir, `${id}.json`);
+    await mkdir(dir, { recursive: true });
     const tmp = `${file}.${process.pid}.tmp`;
     await writeFile(tmp, json, "utf8");
     await rename(tmp, file);
@@ -45,9 +54,9 @@ const fileBackend: Backend = {
 // ---------------------------------------------------------------- Upstash Redis backend (cloud)
 
 const REDIS_TIMEOUT_MS = 10_000;
+const REDIS_PREFIX: Record<Collection, string> = { users: "boba:user:", shops: "boba:shop:" };
 
 function upstashBackend(url: string, token: string): Backend {
-  const key = (shopId: string) => `boba:shop:${shopId}`;
   /** Run one Redis command through the Upstash REST API: POST ["CMD", ...args]. */
   async function command(args: string[]): Promise<unknown> {
     const res = await fetch(url, {
@@ -62,12 +71,12 @@ function upstashBackend(url: string, token: string): Backend {
   }
   return {
     name: "Upstash Redis",
-    async read(shopId) {
-      const result = await command(["GET", key(shopId)]);
+    async read(collection, id) {
+      const result = await command(["GET", REDIS_PREFIX[collection] + id]);
       return typeof result === "string" ? result : undefined;
     },
-    async write(shopId, json) {
-      await command(["SET", key(shopId), json]);
+    async write(collection, id, json) {
+      await command(["SET", REDIS_PREFIX[collection] + id, json]);
     },
   };
 }
@@ -79,32 +88,83 @@ const backend: Backend =
 
 export const storageName = backend.name;
 
-// ---------------------------------------------------------------- API
+// ---------------------------------------------------------------- Users
+
+export interface UserRecord {
+  version: 1;
+  /** Display name as last typed (e.g. "Ngọc"). */
+  name: string;
+  /** usernameKey(name): names are unique ignoring case. */
+  key: string;
+  /** Link to the user's shop (money + furniture) in the shops collection. */
+  shopId: string;
+  createdAt: string;
+  lastSeenAt: string;
+}
+
+/** Record id of a username key: a hash, since names may contain any letter (ids must be filename-safe). */
+export const userIdOf = (usernameKey: string) => `u_${createHash("sha256").update(usernameKey).digest("hex").slice(0, 32)}`;
+
+/** The user record, or undefined if this name never played. Throws if the storage can't be read. */
+export async function loadUser(usernameKey: string): Promise<UserRecord | undefined> {
+  const raw = await backend.read("users", userIdOf(usernameKey));
+  if (raw === undefined) return undefined;
+  const data = JSON.parse(raw) as Partial<UserRecord>;
+  if (data.key !== usernameKey || !isValidShopId(data.shopId)) throw new Error(`Corrupt user record for ${usernameKey}`);
+  return data as UserRecord;
+}
+
+export async function saveUser(user: UserRecord): Promise<void> {
+  await backend.write("users", userIdOf(user.key), JSON.stringify(user, null, 2));
+}
+
+/**
+ * Find or create the user of a name. With seen = true (the player joins), the display name and lastSeenAt
+ * are updated; with seen = false (admin tools), an existing record is left as is.
+ * New users get the shop id derived from their name, which is also where shops were saved before user
+ * records existed, so those saves stay linked.
+ */
+export async function upsertUser(name: string, usernameKey: string, seen = true): Promise<UserRecord> {
+  const now = new Date().toISOString();
+  const existing = await loadUser(usernameKey);
+  if (existing && !seen) return existing;
+  const user: UserRecord = existing
+    ? { ...existing, name, lastSeenAt: now }
+    : { version: 1, name, key: usernameKey, shopId: userIdOf(usernameKey), createdAt: now, lastSeenAt: now };
+  await saveUser(user);
+  if (!existing) console.log(`[ShopStore] new user ${name} -> shop ${user.shopId}`);
+  return user;
+}
+
+// ---------------------------------------------------------------- Shops
 
 const checkId = (shopId: string) => {
   if (!isValidShopId(shopId)) throw new Error(`Invalid shop id: ${shopId}`);
 };
 
+/** Validate a save (from storage or an uploaded backup). Invalid entries are dropped. */
+export function parseShopSave(data: unknown): ShopSave {
+  const save = (data && typeof data === "object" ? data : {}) as Partial<ShopSave>;
+  return {
+    version: 1,
+    money: Number.isFinite(save.money) ? Math.max(0, Math.floor(save.money!)) : 0,
+    decorations: (Array.isArray(save.decorations) ? save.decorations : [])
+      .filter((d) => d && getDecorationDef(d.kind) && Number.isFinite(d.x) && Number.isFinite(d.y))
+      .map(({ kind, x, y, rotation }) => ({ kind, x, y, rotation: Number.isFinite(rotation) ? rotation : 0 })),
+  };
+}
+
 /**
- * Load a saved shop, or undefined if it doesn't exist yet. Invalid entries are dropped.
+ * Load a saved shop, or undefined if it doesn't exist yet.
  * Throws if the storage can't be read (callers must not overwrite the save in that case).
  */
 export async function loadShop(shopId: string): Promise<ShopSave | undefined> {
   checkId(shopId);
-  const raw = await backend.read(shopId);
-  if (raw === undefined) return undefined;
-
-  const data = JSON.parse(raw) as Partial<ShopSave>;
-  return {
-    version: 1,
-    money: Number.isFinite(data.money) ? Math.max(0, Math.floor(data.money!)) : 0,
-    decorations: (Array.isArray(data.decorations) ? data.decorations : []).filter(
-      (d) => d && getDecorationDef(d.kind) && Number.isFinite(d.x) && Number.isFinite(d.y),
-    ),
-  };
+  const raw = await backend.read("shops", shopId);
+  return raw === undefined ? undefined : parseShopSave(JSON.parse(raw));
 }
 
 export async function saveShop(shopId: string, save: ShopSave): Promise<void> {
   checkId(shopId);
-  await backend.write(shopId, JSON.stringify(save, null, 2));
+  await backend.write("shops", shopId, JSON.stringify(save, null, 2));
 }
