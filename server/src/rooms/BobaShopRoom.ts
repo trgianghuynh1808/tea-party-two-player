@@ -23,6 +23,7 @@ import {
   isGender,
   refundFor,
   snapToGrid,
+  DECOR_GRID,
   findNearestStationDef,
   planInteraction,
   PLAYER_SPEED,
@@ -47,6 +48,9 @@ const FIRST_ORDER_DELAY_SECONDS = 2;
 /** Override shift length for quick testing, e.g. SHIFT_SECONDS=20 npm run dev. */
 const SHIFT_DURATION = Number(process.env.SHIFT_SECONDS) || SHIFT_SECONDS;
 const DELIVERY_CLEAR_SECONDS = 0.8;
+/** Restoring a save: how many grid steps a piece may be pushed down to fit the current layout. */
+const RESTORE_NUDGE_STEPS = 12;
+
 const SPAWN_POINTS = [
   { x: 300, y: 400 },
   { x: 500, y: 400 },
@@ -166,8 +170,14 @@ export class BobaShopRoom extends Room {
         // Re-validate in case the layout or catalog changed since the save.
         const def = getDecorationDef(d.kind);
         const rotation = def ? normalizeRotation(def, d.rotation) : 0;
-        if (!canPlaceDecoration(d.kind, d.x, d.y, this.state.decorations, undefined, rotation)) continue;
-        this.addDecoration(d.kind, d.x, d.y, rotation);
+        // Pieces that no longer fit (e.g. under the back wall / machines added later) are nudged down
+        // a few grid steps instead of being dropped.
+        let y = d.y;
+        for (let step = 0; step < RESTORE_NUDGE_STEPS && !canPlaceDecoration(d.kind, d.x, y, this.state.decorations, undefined, rotation); step++) {
+          y += DECOR_GRID;
+        }
+        if (!canPlaceDecoration(d.kind, d.x, y, this.state.decorations, undefined, rotation)) continue;
+        this.addDecoration(d.kind, d.x, y, rotation);
       }
       console.log(`[BobaShopRoom] restored shop ${shopId}: $${save.money}, ${this.state.decorations.length} decorations`);
     } catch (err) {

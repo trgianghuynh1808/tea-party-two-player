@@ -71,7 +71,14 @@ export interface StationDef {
   processSeconds?: number;
 }
 
-const MACHINE_Y = 92;
+/**
+ * The shop's back wall is the strip y = 0..WALL_BOTTOM (seen face-on, top-down 3/4 view).
+ * Players and floor furniture stay below it; wall decorations (paintings) hang on it.
+ */
+export const WALL_BOTTOM = 120;
+
+/** Machines stand against the back wall (their top edge slightly overlaps the skirting board). */
+const MACHINE_Y = WALL_BOTTOM + 25;
 const MACHINE_W = 96;
 const MACHINE_H = 60;
 const machine = (id: IngredientId, x: number, label: string, processSeconds = 0): StationDef => ({

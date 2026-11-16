@@ -11,6 +11,8 @@ import {
   POSITION_SEND_INTERVAL_MS,
   STATIONS,
   ServerEvents,
+  WALL_BOTTOM,
+  WALL_SKIRTING,
   WORLD_HEIGHT,
   WORLD_WIDTH,
   directionFromInput,
@@ -148,6 +150,20 @@ const stationIconKey = (id: string) => `station-icon-${id}`;
 
 const FLOOR_TEXTURE = "floor-wood";
 
+/** Back wall look (drawn, no texture): striped wallpaper, crown moulding, skirting board, shadow on the floor. */
+const WALL_DEPTH = -900; // above the floor, below wall art (DecorController) and everything on the floor
+const WALL = {
+  paper: 0xf6e7d2,
+  stripe: 0xefdcc2,
+  stripeWidth: 14,
+  stripeGap: 34,
+  moulding: 0xb98b64,
+  mouldingHeight: 5,
+  skirting: 0x9c7457,
+  skirtingTop: 0xc29a78,
+  shadowHeight: 12,
+};
+
 /** On-screen cup heights: sitting on a station / carried above the head. */
 const STATION_CUP_HEIGHT = 32;
 const HELD_CUP_HEIGHT = 26;
@@ -218,6 +234,7 @@ export class ShopScene extends Phaser.Scene {
     for (const c of CHARACTERS) this.textures.get(characterKey(c.id)).setFilter(Phaser.Textures.FilterMode.NEAREST);
 
     this.drawFloor();
+    this.drawWall();
     this.createStations();
     this.createHud();
 
@@ -366,6 +383,21 @@ export class ShopScene extends Phaser.Scene {
     this.add.image(0, 0, FLOOR_TEXTURE).setOrigin(0).setDisplaySize(WORLD_WIDTH, WORLD_HEIGHT).setDepth(-1000);
   }
 
+  /** Back wall strip at the top of the shop (y 0..WALL_BOTTOM): paintings hang on it, machines stand against it. */
+  private drawWall() {
+    const g = this.add.graphics().setDepth(WALL_DEPTH);
+    const paperBottom = WALL_BOTTOM - WALL_SKIRTING;
+    g.fillStyle(WALL.paper).fillRect(0, 0, WORLD_WIDTH, paperBottom);
+    g.fillStyle(WALL.stripe);
+    for (let x = WALL.stripeGap / 2; x < WORLD_WIDTH; x += WALL.stripeGap) g.fillRect(x, 0, WALL.stripeWidth, paperBottom);
+    g.fillStyle(WALL.moulding).fillRect(0, 0, WORLD_WIDTH, WALL.mouldingHeight);
+    g.fillStyle(WALL.skirting).fillRect(0, paperBottom, WORLD_WIDTH, WALL_SKIRTING);
+    g.fillStyle(WALL.skirtingTop).fillRect(0, paperBottom, WORLD_WIDTH, 3);
+    // Soft contact shadow where the wall meets the floor.
+    g.fillGradientStyle(0x3d2c29, 0x3d2c29, 0x3d2c29, 0x3d2c29, 0.28, 0.28, 0, 0);
+    g.fillRect(0, WALL_BOTTOM, WORLD_WIDTH, WALL.shadowHeight);
+  }
+
   private createStations() {
     for (const def of STATIONS) {
       const highlight = this.add
@@ -387,6 +419,9 @@ export class ShopScene extends Phaser.Scene {
           fontSize: fs(12),
           color: "#3d2c29",
           fontStyle: "bold",
+          // Machine labels sit on the skirting board: a light tag keeps them readable.
+          backgroundColor: "#fdf6ecd9",
+          padding: { x: 3, y: 1 },
         })
         .setOrigin(0.5)
         .setDepth(def.y + def.height / 2 + 1);

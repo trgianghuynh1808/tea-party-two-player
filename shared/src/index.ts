@@ -30,7 +30,7 @@ export type Direction = "up" | "down" | "left" | "right";
 export * from "./characters";
 
 export * from "./menu";
-import { STATIONS, type StationDef } from "./menu";
+import { STATIONS, WALL_BOTTOM, type StationDef } from "./menu";
 
 // Message payloads (client -> server)
 /**
@@ -126,7 +126,8 @@ export function resolveCollisions(pos: Vec2): Vec2 {
   }
 
   x = Math.max(PLAYER_RADIUS, Math.min(WORLD_WIDTH - PLAYER_RADIUS, x));
-  y = Math.max(PLAYER_RADIUS, Math.min(WORLD_HEIGHT - PLAYER_RADIUS, y));
+  // Players can't walk up the back wall (their feet stay on the floor).
+  y = Math.max(WALL_BOTTOM, Math.min(WORLD_HEIGHT - PLAYER_RADIUS, y));
   return { x, y };
 }
 

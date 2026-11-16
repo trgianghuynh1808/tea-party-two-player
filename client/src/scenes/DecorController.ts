@@ -4,6 +4,8 @@ import {
   DECOR_GRID,
   Messages,
   VIEW_ORDER,
+  WALL_BOTTOM,
+  WALL_PLACE_AREA,
   WORLD_HEIGHT,
   WORLD_WIDTH,
   canPlaceDecoration,
@@ -22,9 +24,10 @@ const OK_COLOR = 0x2a9d8f;
 const BAD_COLOR = 0xe63946;
 const SELECT_COLOR = 0xffd166;
 const FLOOR_DEPTH = -500; // rugs: above the floor tiles, below everything else
+/** Wall art: above the wall itself (ShopScene WALL_DEPTH), below anything standing on the floor. */
+const WALL_DECOR_DEPTH = -800;
 const UI_DEPTH = 15000;
-/** Decorate-mode overlay: a light veil over the floor with a cell grid so positions are easy to read. */
-const PLACE_TOP = 40; // furniture can't go above this (HUD / machine labels)
+/** Decorate-mode overlay: a light veil over the floor and the wall with a cell grid so positions are easy to read. */
 const GRID_CELL = DECOR_GRID * 4;
 const VEIL_ALPHA = 0.35;
 const GRID_LINE_ALPHA = 0.35;
@@ -57,10 +60,11 @@ function buildDecorVisual(
   const key = viewKey && scene.textures.exists(viewKey) ? viewKey : decorTextureKey(def.kind);
   if (scene.textures.exists(key)) {
     const img = scene.add.image(0, 0, key).setAlpha(alpha);
-    if (def.layer === "floor") {
-      // Top-down art: size it unrotated, then turn it (a quarter turn swaps its on-screen width/height).
+    if (def.layer === "floor" || def.layer === "wall") {
+      // Flat art filling its box (wall art never turns). Top-down art: size it unrotated, then turn it (a quarter turn swaps its on-screen width/height).
       img.setDisplaySize(def.width, def.height).setAngle(def.rotation === "rotate" ? rotation * 90 : 0);
-      return { objects: [img], width: size.width, halfHeight: size.height / 2, hasArt: true };
+      const effect = def.effect === "breeze" ? buildBreeze(scene, def.width, def.height / 2, alpha) : [];
+      return { objects: [img, ...effect], width: size.width, halfHeight: size.height / 2, hasArt: true };
     }
     img.setOrigin(0.5, 1).setY(def.height / 2).setScale((def.imageHeight ?? def.height) / img.height);
     if (def.rotation === "flip") img.setFlipX(rotation === 1);
@@ -74,6 +78,34 @@ function buildDecorVisual(
   shape.setStrokeStyle(2, 0x3d2c29, def.layer === "floor" ? 0.35 : 1);
   if (def.layer === "floor") shape.setAlpha(0.75 * alpha);
   return { objects: [shape], width: size.width, halfHeight: size.height / 2, hasArt: false };
+}
+
+/** Breeze from an air conditioner: a few soft wavy strokes drifting down from its vent and fading out. */
+const BREEZE_STROKES = 3;
+const BREEZE_DRIFT = 22; // px travelled downwards per puff
+const BREEZE_MS = 1800;
+
+function buildBreeze(scene: Phaser.Scene, width: number, ventY: number, alpha: number): Phaser.GameObjects.GameObject[] {
+  const objects: Phaser.GameObjects.GameObject[] = [];
+  for (let i = 0; i < BREEZE_STROKES; i++) {
+    const x = (i - (BREEZE_STROKES - 1) / 2) * (width / (BREEZE_STROKES + 0.5));
+    const g = scene.add.graphics({ x, y: ventY });
+    g.lineStyle(2, 0x9fd8f5, 1);
+    const path = new Phaser.Curves.Spline([-8, 0, -3, 3, 3, -1, 8, 2]);
+    path.draw(g, 16);
+    g.setAlpha(0);
+    scene.tweens.add({
+      targets: g,
+      y: ventY + BREEZE_DRIFT,
+      alpha: { from: 0.8 * alpha, to: 0 },
+      duration: BREEZE_MS,
+      delay: (i * BREEZE_MS) / BREEZE_STROKES,
+      repeat: -1,
+    });
+    g.once(Phaser.GameObjects.Events.DESTROY, () => scene.tweens.killTweensOf(g));
+    objects.push(g);
+  }
+  return objects;
 }
 
 interface DecorView {
@@ -123,12 +155,10 @@ export class DecorController {
     private readonly room: Room<BobaShopState>,
     private readonly fontSize: (px: number) => string,
   ) {
-    // Above the floor and rugs, below stations, furniture and players.
+    // Above the floor, wall art and rugs, below stations, furniture and players.
     this.grid = scene.add.graphics().setDepth(FLOOR_DEPTH + 1).setVisible(false);
-    this.grid.fillStyle(0xffffff, VEIL_ALPHA).fillRect(0, PLACE_TOP, WORLD_WIDTH, WORLD_HEIGHT - PLACE_TOP);
-    this.grid.lineStyle(1, 0x3d2c29, GRID_LINE_ALPHA);
-    for (let x = 0; x <= WORLD_WIDTH; x += GRID_CELL) this.grid.lineBetween(x, PLACE_TOP, x, WORLD_HEIGHT);
-    for (let y = PLACE_TOP; y <= WORLD_HEIGHT; y += GRID_CELL) this.grid.lineBetween(0, y, WORLD_WIDTH, y);
+    this.drawGrid(WALL_BOTTOM, WORLD_HEIGHT); // floor
+    this.drawGrid(0, WALL_PLACE_AREA.maxY); // where wall art can hang
     this.footprint = scene.add.rectangle(0, 0, 1, 1, OK_COLOR, 0.3).setDepth(FLOOR_DEPTH + 2).setVisible(false);
 
     this.sellZoneBg = scene.add.rectangle(0, 0, 260, 56, 0xe63946, 0.18).setStrokeStyle(3, BAD_COLOR, 0.7);
@@ -474,6 +504,15 @@ export class DecorController {
   }
 
   private applyDepth(view: DecorView) {
-    view.container.setDepth(view.def.layer === "floor" ? FLOOR_DEPTH : view.container.y);
+    const { layer } = view.def;
+    view.container.setDepth(layer === "floor" ? FLOOR_DEPTH : layer === "wall" ? WALL_DECOR_DEPTH : view.container.y);
+  }
+
+  /** Veil + cell grid over the band top..bottom (floor or wall). */
+  private drawGrid(top: number, bottom: number) {
+    this.grid.fillStyle(0xffffff, VEIL_ALPHA).fillRect(0, top, WORLD_WIDTH, bottom - top);
+    this.grid.lineStyle(1, 0x3d2c29, GRID_LINE_ALPHA);
+    for (let x = 0; x <= WORLD_WIDTH; x += GRID_CELL) this.grid.lineBetween(x, top, x, bottom);
+    for (let y = top; y <= bottom; y += GRID_CELL) this.grid.lineBetween(0, y, WORLD_WIDTH, y);
   }
 }
