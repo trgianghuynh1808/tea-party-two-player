@@ -463,6 +463,7 @@ function startGame(room: Room<BobaShopState>) {
   });
 
   room.onLeave((code) => {
+    if (room !== currentRoom) return; // already left via the "Rời" button
     stopGame();
     setUrl();
     // CONSENTED = we clicked "Rời"; REPLACED = our name joined again from another tab / device.
@@ -485,9 +486,13 @@ function stopGame() {
 }
 
 leaveBtn.addEventListener("click", () => {
-  if (!currentRoom) return showLobby();
-  leaveBtn.disabled = true;
-  void currentRoom.leave().finally(() => (leaveBtn.disabled = false));
+  const room = currentRoom;
+  // Back to the lobby right away: the server's close handshake can take seconds behind a proxy
+  // (e.g. Render), so don't make the player wait for it. The leave finishes in the background.
+  stopGame();
+  setUrl();
+  showLobby();
+  void room?.leave().catch(() => {});
 });
 
 copyLinkBtn.addEventListener("click", async () => {
