@@ -9,8 +9,20 @@ import {
   SHIFT_SECONDS,
   MAX_ACTIVE_ORDERS,
   MAX_PLAYERS,
-  ORDER_DURATION_SECONDS,
-  ORDER_SPAWN_SECONDS,
+  CustomerKind,
+  GROUP_EXTRA_TIME_PER_DRINK,
+  MACHINE_OVERFLOW_SECONDS,
+  MISSED_ORDER_PENALTY,
+  PICKY_FAST_BONUS,
+  VIP_DURATION_SECONDS,
+  VIP_PRICE_MULTIPLIER,
+  baseOrderDuration,
+  comboBonusRate,
+  getCustomer,
+  orderDrinkIds,
+  orderSpawnInterval,
+  pendingDrinkIds,
+  pickCustomerKind,
   RECONNECT_GRACE_SECONDS,
   REPLACED_CLOSE_CODE,
   STATIONS,
@@ -31,6 +43,8 @@ import {
   makeCup,
   type DeliveredEvent,
   type DrinkDef,
+  type MachineOverflowEvent,
+  type OrderExpiredEvent,
   type JoinOptions,
   type PositionMessage,
   type RoomMetadata,
@@ -362,10 +376,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
         continue;
       }
       const station = this.state.stations.get(stationId);
-      if (station) {
-        station.item = EMPTY_HAND;
-        station.progress = 0;
-      }
+      if (station) this.clearStation(station);
       this.deliveryTimers.delete(stationId);
     }
   }
@@ -373,10 +384,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
   /** Reset the kitchen and start a new timed shift. Total shop money is kept. */
   private startShift() {
     this.state.orders.clear();
-    this.state.stations.forEach((station) => {
-      station.item = EMPTY_HAND;
-      station.progress = 0;
-    });
+    this.state.stations.forEach((station) => this.clearStation(station));
     this.deliveryTimers.clear();
 
     this.state.players.forEach((player, sessionId) => {
@@ -391,6 +399,8 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     this.state.shiftEarnings = 0;
     this.state.servedCount = 0;
     this.state.missedCount = 0;
+    this.state.combo = 0;
+    this.state.bestCombo = 0;
     this.state.shiftTimeLeft = SHIFT_DURATION;
     this.orderSpawnTimer = FIRST_ORDER_DELAY_SECONDS;
     this.state.phase = GamePhase.Playing;
@@ -403,18 +413,41 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     this.state.orders.clear();
   }
 
-  /** Timed machines: advance progress; when done, the ingredient is added to the placed cup. */
+  /**
+   * Timed machines: advance progress; when done, the ingredient is added to the placed cup.
+   * During a shift, a finished cup left on the machine spills after MACHINE_OVERFLOW_SECONDS.
+   */
   private updateMachines(dt: number) {
     for (const def of STATIONS) {
       if (def.type !== StationType.Machine || !def.ingredient || !def.processSeconds) continue;
       const station = this.state.stations.get(def.id);
-      if (!station || station.item === EMPTY_HAND || station.progress >= 1) continue;
+      if (!station || station.item === EMPTY_HAND) continue;
 
-      station.progress = Math.min(1, station.progress + dt / def.processSeconds);
-      if (station.progress >= 1) {
-        station.item = makeCup([...cupContents(station.item), def.ingredient]);
+      if (station.progress < 1) {
+        station.progress = Math.min(1, station.progress + dt / def.processSeconds);
+        if (station.progress >= 1) station.item = makeCup([...cupContents(station.item), def.ingredient]);
+        continue;
+      }
+
+      if (this.state.phase !== GamePhase.Playing) continue;
+      station.overflow = Math.min(1, station.overflow + dt / MACHINE_OVERFLOW_SECONDS);
+      if (station.overflow >= 1) {
+        this.clearStation(station);
+        const event: MachineOverflowEvent = { machine: def.label };
+        this.broadcast(ServerEvents.MachineOverflow, event);
       }
     }
+  }
+
+  private clearStation(station: Station) {
+    station.item = EMPTY_HAND;
+    station.progress = 0;
+    station.overflow = 0;
+  }
+
+  /** Fraction of the current shift already played (0..1). */
+  private shiftProgress() {
+    return 1 - this.state.shiftTimeLeft / SHIFT_DURATION;
   }
 
   private updateOrders(dt: number) {
@@ -424,24 +457,53 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
       order.timeLeft = Math.max(0, order.timeLeft - dt);
       if (order.timeLeft <= 0) {
         this.state.orders.splice(i, 1);
-        this.state.missedCount++;
-        this.broadcast(ServerEvents.OrderExpired, { drinkName: getDrink(order.drinkId)?.name ?? order.drinkId });
+        this.missOrder(order);
       }
     }
 
     if (this.state.players.size === 0) return;
     this.orderSpawnTimer -= dt;
     if (this.orderSpawnTimer <= 0) {
-      this.orderSpawnTimer = ORDER_SPAWN_SECONDS;
-      if (this.state.orders.length < MAX_ACTIVE_ORDERS) {
-        const order = new Order();
-        order.id = "order_" + ++this.orderSeq;
-        order.drinkId = DRINKS[Math.floor(Math.random() * DRINKS.length)].id;
-        order.duration = ORDER_DURATION_SECONDS;
-        order.timeLeft = ORDER_DURATION_SECONDS;
-        this.state.orders.push(order);
-      }
+      const progress = this.shiftProgress();
+      this.orderSpawnTimer = orderSpawnInterval(progress);
+      if (this.state.orders.length < MAX_ACTIVE_ORDERS) this.state.orders.push(this.createOrder(progress));
     }
+  }
+
+  private createOrder(progress: number): Order {
+    const kind = pickCustomerKind(progress);
+    const randomDrink = () => DRINKS[Math.floor(Math.random() * DRINKS.length)].id;
+    const count = kind === CustomerKind.Group ? (progress >= 0.6 && Math.random() < 0.5 ? 3 : 2) : 1;
+    const base = baseOrderDuration(progress);
+    const duration =
+      kind === CustomerKind.Vip ? VIP_DURATION_SECONDS : Math.round(base * (1 + GROUP_EXTRA_TIME_PER_DRINK * (count - 1)));
+
+    const order = new Order();
+    order.id = "order_" + ++this.orderSeq;
+    order.kind = kind;
+    order.drinks = Array.from({ length: count }, randomDrink).join(",");
+    order.duration = duration;
+    order.timeLeft = duration;
+    return order;
+  }
+
+  /** A customer walked out: penalty, and the combo is lost. */
+  private missOrder(order: Order) {
+    this.state.missedCount++;
+    this.state.combo = 0;
+    this.state.shiftEarnings -= MISSED_ORDER_PENALTY;
+    // The shop's total money never goes below zero.
+    const penalty = Math.min(MISSED_ORDER_PENALTY, Math.max(0, sharedShop.money));
+    if (penalty > 0) sharedShop.earn(-penalty);
+
+    const drinks = orderDrinkIds(order.drinks);
+    const customer = getCustomer(order.kind);
+    const drinkLabel = drinks.length === 1 ? (getDrink(drinks[0])?.name ?? drinks[0]) : `${drinks.length} món`;
+    const event: OrderExpiredEvent = {
+      label: order.kind === CustomerKind.Normal ? drinkLabel : `${customer.label}: ${drinkLabel}`,
+      penalty: MISSED_ORDER_PENALTY,
+    };
+    this.broadcast(ServerEvents.OrderExpired, event);
   }
 
   // ---------------------------------------------------------------- Movement
@@ -495,7 +557,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
       held: player.heldItem,
       stationItem: station.item,
       stationProgress: station.progress,
-      orderedDrinkIds: this.state.orders.map((o) => o.drinkId),
+      orderedDrinkIds: this.state.orders.flatMap((o) => pendingDrinkIds(o.drinks, o.servedMask)),
     });
     if (!plan.ok) return fail(plan.reason);
 
@@ -511,12 +573,12 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
         // Timed machines: updateMachines() adds the ingredient when progress reaches 1.
         station.item = player.heldItem;
         station.progress = 0;
+        station.overflow = 0;
         player.heldItem = EMPTY_HAND;
         return;
       case "pick_up":
         player.heldItem = station.item;
-        station.item = EMPTY_HAND;
-        station.progress = 0;
+        this.clearStation(station);
         return;
       case "trash":
         player.heldItem = EMPTY_HAND;
@@ -527,26 +589,73 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
   }
 
   private deliver(client: Client, player: Player, station: Station, drink: DrinkDef) {
-    // Serve the most urgent matching order (planInteraction already checked one exists).
+    // Serve the most urgent order still waiting for this drink (planInteraction already checked one exists).
     let index = -1;
     this.state.orders.forEach((o, i) => {
-      if (o.drinkId === drink.id && (index < 0 || o.timeLeft < this.state.orders[index].timeLeft)) index = i;
+      if (!pendingDrinkIds(o.drinks, o.servedMask).includes(drink.id)) return;
+      if (index < 0 || o.timeLeft < this.state.orders[index].timeLeft) index = i;
     });
     if (index < 0) return;
-
     const order = this.state.orders[index];
-    const tip = order.timeLeft > order.duration / 2 ? FAST_SERVICE_TIP : 0;
-    this.state.orders.splice(index, 1);
+
+    // Mark the first matching undelivered slot of the order.
+    const drinks = orderDrinkIds(order.drinks);
+    const slot = drinks.findIndex((id, i) => id === drink.id && !(order.servedMask & (1 << i)));
+    order.servedMask |= 1 << slot;
 
     station.item = player.heldItem;
     player.heldItem = EMPTY_HAND;
-    sharedShop.earn(drink.price + tip);
-    this.state.shiftEarnings += drink.price + tip;
-    this.state.servedCount++;
     this.deliveryTimers.set(station.id, DELIVERY_CLEAR_SECONDS);
+    this.state.servedCount++;
 
-    const event: DeliveredEvent = { by: client.sessionId, drinkName: drink.name, amount: drink.price, tip };
+    const served = drinks.filter((_, i) => order.servedMask & (1 << i)).length;
+    const event: DeliveredEvent = { by: client.sessionId, drinkName: drink.name, served, total: drinks.length, amount: 0, notes: [] };
+    if (served === drinks.length) {
+      this.state.orders.splice(index, 1);
+      Object.assign(event, this.payOrder(order, drinks));
+    }
     this.broadcast(ServerEvents.Delivered, event);
+  }
+
+  /** Whole order delivered: compute the pay (customer rules + fast tip + combo) and add it. */
+  private payOrder(order: Order, drinks: string[]): { amount: number; notes: string[] } {
+    const notes: string[] = [];
+    const base = drinks.reduce((sum, id) => sum + (getDrink(id)?.price ?? 0), 0);
+    const fast = order.timeLeft > order.duration / 2;
+    let amount = base;
+
+    switch (order.kind as CustomerKind) {
+      case CustomerKind.Vip:
+        amount = base * VIP_PRICE_MULTIPLIER;
+        notes.push(`VIP x${VIP_PRICE_MULTIPLIER}`);
+        break;
+      case CustomerKind.Picky:
+        if (fast) {
+          amount += PICKY_FAST_BONUS;
+          notes.push(`khách khó tính hài lòng +$${PICKY_FAST_BONUS}`);
+        } else {
+          amount = Math.ceil(base / 2);
+          notes.push("giao chậm, khách khó tính trả nửa giá");
+        }
+        break;
+    }
+    if (fast && order.kind !== CustomerKind.Picky) {
+      const tip = FAST_SERVICE_TIP * drinks.length;
+      amount += tip;
+      notes.push(`tip nhanh +$${tip}`);
+    }
+
+    this.state.combo++;
+    this.state.bestCombo = Math.max(this.state.bestCombo, this.state.combo);
+    const comboBonus = Math.round(amount * comboBonusRate(this.state.combo));
+    if (comboBonus > 0) {
+      amount += comboBonus;
+      notes.push(`combo x${this.state.combo} +$${comboBonus}`);
+    }
+
+    sharedShop.earn(amount);
+    this.state.shiftEarnings += amount;
+    return { amount, notes };
   }
 
   // ---------------------------------------------------------------- Decorations (furniture, in the shared shop)

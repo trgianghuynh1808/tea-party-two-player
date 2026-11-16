@@ -39,7 +39,11 @@ To play from another machine on the same LAN, open the **Network** URL printed b
 - Every drink has its own recipe (ordered steps), shown in the **Menu** panel.
 - Each machine adds one ingredient. Machines marked ⏱ take time: put the cup down, wait for "Xong!", press Space again to pick it up.
 - Machines refuse steps that don't lead to any drink on the menu. Throw a cup in the trash bin to start over.
-- Delivering pays the drink price, plus a $5 tip if served with more than half of the time left.
+- Delivering pays the drink price, plus a $5 tip per drink if served with more than half of the time left.
+- Difficulty ramps up during a shift: customers come every 9s → 5s and wait 60s → 35s.
+- A customer walking out costs $10 and resets the combo. Completing 3+ orders in a row gives +20%, 6+ gives +50% (🔥 combo in the HUD).
+- Special customers: 👑 VIP (double price, waits only 25s), 🧐 picky (+$10 if fast, half price if slow), 👨‍👩‍👧 group (2–3 drinks, pays once all are delivered).
+- A finished cup left on a timed machine spills after 6s (the bar turns red, "Sắp tràn!").
 
 Add or change drinks, ingredients, machines, shift length and star thresholds in `shared/src/menu.ts`.
 Interaction rules live in `shared/src/interaction.ts` (`planInteraction`), used by the server to apply actions and by the client to preview them.

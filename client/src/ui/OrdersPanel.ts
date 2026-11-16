@@ -1,5 +1,16 @@
 import { Callbacks, type Room } from "@colyseus/sdk";
-import { DRINKS, INGREDIENTS, getDrink, type DrinkDef, type IngredientId } from "@boba/shared";
+import {
+  CustomerKind,
+  DRINKS,
+  INGREDIENTS,
+  VIP_PRICE_MULTIPLIER,
+  getCustomer,
+  getDrink,
+  isDrinkServed,
+  orderDrinkIds,
+  type DrinkDef,
+  type IngredientId,
+} from "@boba/shared";
 import type { BobaShopState, Order } from "@boba/shared/schema";
 
 const hex = (color: number) => "#" + color.toString(16).padStart(6, "0");
@@ -72,19 +83,41 @@ export class OrdersPanel {
   }
 
   private addOrder($: ReturnType<typeof Callbacks.get<BobaShopState>>, order: Order) {
-    const drink = getDrink(order.drinkId);
-    if (!drink) return;
+    const drinks = orderDrinkIds(order.drinks)
+      .map((id) => getDrink(id))
+      .filter((d): d is DrinkDef => !!d);
+    if (!drinks.length) return;
+    const kind = order.kind as CustomerKind;
+    const customer = getCustomer(kind);
 
-    const card = Object.assign(document.createElement("div"), { className: "order" });
-    const title = Object.assign(document.createElement("div"), { className: "title" });
-    title.append(
-      Object.assign(document.createElement("span"), { textContent: drink.name }),
-      Object.assign(document.createElement("span"), { className: "price", textContent: `$${drink.price}` }),
-    );
+    const card = Object.assign(document.createElement("div"), { className: `order kind-${kind}` });
+    if (kind !== CustomerKind.Normal) {
+      const badge = Object.assign(document.createElement("div"), { className: "customer" });
+      badge.append(
+        Object.assign(document.createElement("span"), { className: "tag", textContent: `${customer.icon} ${customer.label}` }),
+        Object.assign(document.createElement("span"), { className: "rule", textContent: customer.rule }),
+      );
+      card.append(badge);
+    }
+
+    // One block per drink (group orders have several); delivered ones get crossed out.
+    const items = drinks.map((drink) => {
+      const item = Object.assign(document.createElement("div"), { className: "order-drink" });
+      const title = Object.assign(document.createElement("div"), { className: "title" });
+      const price = kind === CustomerKind.Vip ? drink.price * VIP_PRICE_MULTIPLIER : drink.price;
+      title.append(
+        Object.assign(document.createElement("span"), { textContent: drink.name }),
+        Object.assign(document.createElement("span"), { className: "price", textContent: `$${price}` }),
+      );
+      item.append(title, recipeSteps(drink));
+      card.append(item);
+      return item;
+    });
+
     const timer = Object.assign(document.createElement("div"), { className: "timer" });
     const bar = document.createElement("div");
     timer.append(bar);
-    card.append(title, recipeSteps(drink), timer);
+    card.append(timer);
 
     this.ordersList.append(card);
     this.cards.set(order.id, { card, bar });
@@ -95,6 +128,9 @@ export class OrdersPanel {
         const ratio = order.duration > 0 ? timeLeft / order.duration : 0;
         bar.style.width = `${Math.max(0, ratio) * 100}%`;
         bar.className = ratio > 0.5 ? "ok" : ratio > 0.25 ? "warn" : "danger";
+      }),
+      $.listen(order, "servedMask", (mask) => {
+        items.forEach((item, i) => item.classList.toggle("served", isDrinkServed(mask, i)));
       }),
     );
   }

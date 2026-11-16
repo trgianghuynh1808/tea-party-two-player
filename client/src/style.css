@@ -603,6 +603,48 @@ h1 {
   font-weight: 700;
 }
 
+/* Special customers (see CUSTOMERS in shared/src/menu.ts) */
+.order.kind-vip {
+  border-color: #c9a227;
+  background: #fff8e1;
+}
+
+.order.kind-picky {
+  border-color: #8e44ad;
+}
+
+.order.kind-group {
+  border-color: #457b9d;
+}
+
+.order .customer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: 11px;
+}
+
+.order .customer .tag {
+  font-weight: 700;
+}
+
+.order .customer .rule {
+  color: #6b5b57;
+}
+
+.order-drink + .order-drink {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed #d8cbb9;
+}
+
+.order-drink.served {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
 .price {
   color: #2a9d8f;
 }

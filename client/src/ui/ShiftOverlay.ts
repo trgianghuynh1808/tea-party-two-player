@@ -1,5 +1,5 @@
 import { Callbacks, type Room } from "@colyseus/sdk";
-import { GamePhase, Messages, SHIFT_SECONDS, STAR_THRESHOLDS, starsFor } from "@boba/shared";
+import { GamePhase, MISSED_ORDER_PENALTY, Messages, SHIFT_SECONDS, STAR_THRESHOLDS, starsFor } from "@boba/shared";
 import type { BobaShopState } from "@boba/shared/schema";
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text = "") =>
@@ -64,6 +64,12 @@ export class ShiftOverlay {
     card.append(
       el("h2", "", "☀️ Sẵn sàng mở quán?"),
       el("p", "", `Ca làm việc dài ${SHIFT_SECONDS / 60} phút. Pha đúng món khách gọi trước khi họ bỏ về.`),
+      el(
+        "p",
+        "hint",
+        `Càng về cuối ca khách càng đông và ít kiên nhẫn. Khách bỏ về: −$${MISSED_ORDER_PENALTY} và mất combo. ` +
+          "Ly để quên trên máy sẽ bị tràn. Coi chừng khách 👑 VIP, 🧐 khó tính và 👨‍👩‍👧 nhóm!",
+      ),
       el("p", "hint", `Mục tiêu: ⭐ $${STAR_THRESHOLDS[0]} · ⭐⭐ $${STAR_THRESHOLDS[1]} · ⭐⭐⭐ $${STAR_THRESHOLDS[2]}`),
       el(
         "p",
@@ -84,7 +90,8 @@ export class ShiftOverlay {
     stats.append(
       el("li", "", `💰 Doanh thu ca: $${state.shiftEarnings}`),
       el("li", "", `🧋 Đã giao: ${state.servedCount} ly`),
-      el("li", "", `😤 Khách bỏ về: ${state.missedCount}`),
+      el("li", "", `😤 Khách bỏ về: ${state.missedCount}${state.missedCount ? ` (−$${state.missedCount * MISSED_ORDER_PENALTY})` : ""}`),
+      el("li", "", `🔥 Combo cao nhất: ${state.bestCombo}`),
     );
 
     card.append(

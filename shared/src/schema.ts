@@ -23,6 +23,8 @@ export class Station extends Schema {
   @type("number") y: number = 0;
   @type("string") item: string = ""; // item currently placed on this station (see makeCup)
   @type("number") progress: number = 0; // 0..1 while a machine processes; 1 = ready to pick up
+  /** Timed machines: 0..1 once the cup is ready; the cup spills when it reaches 1 (see MACHINE_OVERFLOW_SECONDS). */
+  @type("number") overflow: number = 0;
 }
 
 export class Decoration extends Schema {
@@ -36,7 +38,9 @@ export class Decoration extends Schema {
 
 export class Order extends Schema {
   @type("string") id: string = "";
-  @type("string") drinkId: string = ""; // see DRINKS in @boba/shared
+  @type("string") kind: string = "normal"; // see CustomerKind in @boba/shared
+  @type("string") drinks: string = ""; // comma-separated drink ids (see DRINKS / orderDrinkIds)
+  @type("number") servedMask: number = 0; // bit i set = drink i already delivered
   @type("number") timeLeft: number = 0; // seconds
   @type("number") duration: number = 0; // seconds
 }
@@ -56,4 +60,7 @@ export class BobaShopState extends Schema {
   @type("number") shiftEarnings: number = 0;
   @type("number") servedCount: number = 0;
   @type("number") missedCount: number = 0;
+  /** Orders completed in a row without a customer walking out. */
+  @type("number") combo: number = 0;
+  @type("number") bestCombo: number = 0;
 }

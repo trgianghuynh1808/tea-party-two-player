@@ -53,13 +53,28 @@ export const ServerEvents = {
   Delivered: "delivered",
   InteractFailed: "interact_failed",
   OrderExpired: "order_expired",
+  MachineOverflow: "machine_overflow",
 } as const;
 
 export interface DeliveredEvent {
   by: string;
   drinkName: string;
+  /** Drinks delivered / total for this order (group orders have more than one). */
+  served: number;
+  total: number;
+  /** Money earned: 0 until the whole order is delivered. */
   amount: number;
-  tip: number;
+  /** Short explanations of bonuses / cuts, e.g. "tip nhanh +$5", "combo x3 +$7". */
+  notes: string[];
+}
+
+export interface OrderExpiredEvent {
+  label: string;
+  penalty: number;
+}
+
+export interface MachineOverflowEvent {
+  machine: string;
 }
 
 export * from "./decor";

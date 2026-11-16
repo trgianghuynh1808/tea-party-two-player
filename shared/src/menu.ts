@@ -166,11 +166,85 @@ export function cupColor(item: string): number {
 
 // ---------------------------------------------------------------- Orders
 
-export const ORDER_DURATION_SECONDS = 60;
-export const ORDER_SPAWN_SECONDS = 9;
+// Difficulty ramps up during a shift: customers come more often and wait less.
+// `progress` = fraction of the shift already played (0 at the start, 1 at closing time).
+export const ORDER_DURATION_START = 60;
+export const ORDER_DURATION_END = 35;
+export const ORDER_SPAWN_START = 9;
+export const ORDER_SPAWN_END = 5;
 export const MAX_ACTIVE_ORDERS = 4;
-/** Bonus when an order is served while more than half of its time is left. */
+/** Bonus per drink when an order is served while more than half of its time is left. */
 export const FAST_SERVICE_TIP = 5;
+/** Taken from shift earnings (and the shop's money) when a customer walks out. */
+export const MISSED_ORDER_PENALTY = 10;
+
+const lerp = (a: number, b: number, t: number) => a + (b - a) * Math.min(1, Math.max(0, t));
+export const orderSpawnInterval = (progress: number) => lerp(ORDER_SPAWN_START, ORDER_SPAWN_END, progress);
+export const baseOrderDuration = (progress: number) => lerp(ORDER_DURATION_START, ORDER_DURATION_END, progress);
+
+/** Combo = orders completed in a row without any customer walking out. Bonus = share of the order's pay. */
+export const COMBO_TIERS = [
+  { min: 6, bonus: 0.5 },
+  { min: 3, bonus: 0.2 },
+] as const;
+export const comboBonusRate = (combo: number) => COMBO_TIERS.find((t) => combo >= t.min)?.bonus ?? 0;
+
+export enum CustomerKind {
+  Normal = "normal",
+  /** Pays double, but only waits a short, fixed time. */
+  Vip = "vip",
+  /** Orders several drinks and pays only once all of them are delivered. */
+  Group = "group",
+  /** Big bonus if served fast, only half price if served late. */
+  Picky = "picky",
+}
+
+export interface CustomerDef {
+  label: string;
+  icon: string;
+  /** Short rule shown on the order card. */
+  rule: string;
+  /** Relative spawn chance. */
+  weight: number;
+  /** Shift progress (0..1) from which this customer starts to show up. */
+  fromProgress: number;
+}
+
+export const CUSTOMERS: Record<CustomerKind, CustomerDef> = {
+  [CustomerKind.Normal]: { label: "Khách", icon: "🙂", rule: "", weight: 6, fromProgress: 0 },
+  [CustomerKind.Picky]: { label: "Khó tính", icon: "🧐", rule: "Nhanh: +$10 · Chậm: nửa giá", weight: 1.5, fromProgress: 0.1 },
+  [CustomerKind.Vip]: { label: "VIP", icon: "👑", rule: "Trả gấp đôi, chờ rất ít", weight: 1.5, fromProgress: 0.2 },
+  [CustomerKind.Group]: { label: "Nhóm", icon: "👨‍👩‍👧", rule: "Trả tiền khi đủ món", weight: 2, fromProgress: 0.3 },
+};
+
+export const VIP_DURATION_SECONDS = 25;
+export const VIP_PRICE_MULTIPLIER = 2;
+export const PICKY_FAST_BONUS = 10;
+/** Group orders: extra waiting time per extra drink, as a share of the base duration. */
+export const GROUP_EXTRA_TIME_PER_DRINK = 0.6;
+
+export function pickCustomerKind(progress: number, random = Math.random): CustomerKind {
+  const kinds = (Object.keys(CUSTOMERS) as CustomerKind[]).filter((k) => progress >= CUSTOMERS[k].fromProgress);
+  let roll = random() * kinds.reduce((sum, k) => sum + CUSTOMERS[k].weight, 0);
+  for (const k of kinds) {
+    roll -= CUSTOMERS[k].weight;
+    if (roll < 0) return k;
+  }
+  return CustomerKind.Normal;
+}
+
+export const getCustomer = (kind: string): CustomerDef => CUSTOMERS[kind as CustomerKind] ?? CUSTOMERS[CustomerKind.Normal];
+
+/** Order drinks are synced as a comma-separated list of drink ids; `servedMask` bit i = drink i delivered. */
+export const orderDrinkIds = (drinks: string): string[] => (drinks ? drinks.split(",") : []);
+export const isDrinkServed = (servedMask: number, index: number) => (servedMask & (1 << index)) !== 0;
+export const pendingDrinkIds = (drinks: string, servedMask: number): string[] =>
+  orderDrinkIds(drinks).filter((_, i) => !isDrinkServed(servedMask, i));
+
+// ---------------------------------------------------------------- Timed machines
+
+/** A finished cup left on a timed machine spills (and is lost) after this many seconds. */
+export const MACHINE_OVERFLOW_SECONDS = 6;
 
 // ---------------------------------------------------------------- Shift (one round of play)
 

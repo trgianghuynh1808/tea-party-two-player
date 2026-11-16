@@ -20,7 +20,11 @@ import {
   planInteraction,
   stepMovement,
   describeItem,
+  pendingDrinkIds,
+  comboBonusRate,
   type DeliveredEvent,
+  type MachineOverflowEvent,
+  type OrderExpiredEvent,
   type CharacterDef,
   type Direction,
   type StationDef,
@@ -299,13 +303,16 @@ export class ShopScene extends Phaser.Scene {
     $.onAdd("stations", (station, id) => {
       const view = this.stations.get(id);
       if (!view) return;
-      $.listen(station, "item", (item) => this.applyStationItem(view, item, station.progress));
-      $.listen(station, "progress", (p) => this.applyStationItem(view, station.item, p));
+      const apply = () => this.applyStationItem(view, station.item, station.progress, station.overflow);
+      $.listen(station, "item", apply);
+      $.listen(station, "progress", apply);
+      $.listen(station, "overflow", apply);
     });
 
     $.listen("money", (money) => this.moneyText.setText(`💰 $${money}`));
     $.listen("phase", () => this.updateShiftText(room.state));
     $.listen("shiftTimeLeft", () => this.updateShiftText(room.state));
+    $.listen("combo", () => this.updateShiftText(room.state));
 
     const decor = new DecorController(this, room, fs);
     this.decor = decor;
@@ -319,11 +326,18 @@ export class ShopScene extends Phaser.Scene {
 
     room.onMessage(ServerEvents.Delivered, (msg: DeliveredEvent) => {
       const who = msg.by === room.sessionId ? "Bạn" : room.state.players.get(msg.by)?.name || "Đồng đội";
-      const tip = msg.tip > 0 ? ` (+$${msg.tip} tip giao nhanh)` : "";
-      this.toast(`${who} giao ${msg.drinkName}! +$${msg.amount}${tip}`, "#2a9d8f");
+      if (msg.served < msg.total) {
+        this.toast(`${who} giao ${msg.drinkName} (${msg.served}/${msg.total}) · nhóm khách chờ đủ món`, "#2a9d8f");
+        return;
+      }
+      const notes = msg.notes.length ? ` (${msg.notes.join(", ")})` : "";
+      this.toast(`${who} giao ${msg.drinkName}! +$${msg.amount}${notes}`, "#2a9d8f");
     });
-    room.onMessage(ServerEvents.OrderExpired, (msg: { drinkName: string }) => {
-      this.toast(`Khách chờ lâu quá nên bỏ về (${msg.drinkName})`, "#e76f51");
+    room.onMessage(ServerEvents.OrderExpired, (msg: OrderExpiredEvent) => {
+      this.toast(`Khách bỏ về (${msg.label}) −$${msg.penalty} · mất combo`, "#e76f51");
+    });
+    room.onMessage(ServerEvents.MachineOverflow, (msg: MachineOverflowEvent) => {
+      this.toast(`Máy ${msg.machine} bị tràn, mất ly!`, "#e63946");
     });
     room.onMessage(ServerEvents.InteractFailed, (msg: { reason: string }) => {
       this.toast(msg.reason, "#e63946");
@@ -652,16 +666,25 @@ export class ShopScene extends Phaser.Scene {
     if (state.phase === GamePhase.Playing) {
       const t = Math.ceil(state.shiftTimeLeft);
       const mmss = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
-      this.shiftText.setText(`⏱ ${mmss}`).setColor(t <= 30 ? "#e63946" : "#3d2c29");
+      const rate = comboBonusRate(state.combo);
+      const combo = state.combo >= 2 ? `  🔥x${state.combo}${rate > 0 ? ` +${Math.round(rate * 100)}%` : ""}` : "";
+      this.shiftText.setText(`⏱ ${mmss}${combo}`).setColor(t <= 30 ? "#e63946" : "#3d2c29");
     } else {
       this.shiftText.setText(state.phase === GamePhase.Ended ? "Hết ca" : "Chưa mở ca").setColor("#6b5b57");
     }
   }
 
-  private applyStationItem(view: StationView, item: string, progress: number) {
+  private applyStationItem(view: StationView, item: string, progress: number, overflow: number) {
     view.itemCup.setItem(item);
     const showProgress = progress > 0 && progress < 1;
-    view.progressBar.width = showProgress ? view.progressMaxWidth * progress : 0;
+    // Ready cup on a machine: the bar turns red and shrinks until the cup spills.
+    const spilling = item !== EMPTY_HAND && progress >= 1 && overflow > 0;
+    view.progressBar.width = showProgress
+      ? view.progressMaxWidth * progress
+      : spilling
+        ? view.progressMaxWidth * (1 - overflow)
+        : 0;
+    view.progressBar.setFillStyle(spilling ? 0xe63946 : 0x2a9d8f);
     if (view.def.type === StationType.Counter) {
       // Counters: show what's on it so the teammate knows what to pick up.
       view.readyLabel.setVisible(item !== EMPTY_HAND);
@@ -670,6 +693,9 @@ export class ShopScene extends Phaser.Scene {
     }
     // Timed machines: cup finished and waiting to be picked up.
     view.readyLabel.setVisible(view.def.type === StationType.Machine && item !== EMPTY_HAND && progress >= 1);
+    // It spills if left too long (see MACHINE_OVERFLOW_SECONDS).
+    if (overflow >= 0.5) view.readyLabel.setText("⚠ Sắp tràn! Lấy ngay").setBackgroundColor("#e63946");
+    else view.readyLabel.setText("Xong! Space để lấy").setBackgroundColor("#2a9d8f");
   }
 
   /** Highlight the nearest station and preview what the action key/button would do there. */
@@ -691,7 +717,7 @@ export class ShopScene extends Phaser.Scene {
         held: player.heldItem,
         stationItem: station.item,
         stationProgress: station.progress,
-        orderedDrinkIds: room.state.orders.map((o) => o.drinkId),
+        orderedDrinkIds: room.state.orders.flatMap((o) => pendingDrinkIds(o.drinks, o.servedMask)),
       });
       if (plan.ok) label = plan.label;
       else reason = plan.reason;
