@@ -940,6 +940,11 @@ h1 {
   color: inherit;
 }
 
+/* Pixel-art thumbnails (outdoor props) stay crisp when scaled up. */
+.swatch-img.pixel {
+  image-rendering: pixelated;
+}
+
 .build-item.selected {
   border-color: #e76f51;
   background: #fff1ea;

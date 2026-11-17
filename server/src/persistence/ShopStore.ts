@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { canBuildCell, getBuildTile, getDecorationDef, isValidShopId, layerOf, parseTileKey, type ShopSave } from "@boba/shared";
+import { canBuildCell, getBuildTile, getDecorationDef, isValidShopId, layerOf, parseTileKey, tileKey, type ShopSave } from "@boba/shared";
 
 /**
  * The game's database: two collections.
@@ -155,15 +155,27 @@ export function parseShopSave(data: unknown): ShopSave {
   };
 }
 
+/** Saves from the first yard version keyed cells as "12,7" (one tile per cell, no layers). */
+const LEGACY_TILE_KEY = /^(\d+),(\d+)$/;
+
 function parseTiles(data: unknown): Record<string, string> {
   const tiles: Record<string, string> = {};
   if (!data || typeof data !== "object") return tiles;
+  let dropped = 0;
   for (const [key, kind] of Object.entries(data)) {
-    const cell = parseTileKey(key);
     const def = typeof kind === "string" ? getBuildTile(kind) : undefined;
+    const legacy = LEGACY_TILE_KEY.exec(key);
+    // Old single-layer key: move the tile to the layer its kind belongs to (floor or structure).
+    const cell = legacy && def ? { cx: Number(legacy[1]), cy: Number(legacy[2]), layer: layerOf(def) } : parseTileKey(key);
     // The kind must belong on that layer (a wall saved under a floor key is dropped).
-    if (cell && def && layerOf(def) === cell.layer && canBuildCell(cell.cx, cell.cy)) tiles[key] = def.kind;
+    if (cell && def && layerOf(def) === cell.layer && canBuildCell(cell.cx, cell.cy)) {
+      tiles[tileKey(cell.cx, cell.cy, cell.layer)] ??= def.kind;
+    } else {
+      dropped++;
+    }
   }
+  // Never silent: a format change that doesn't read old saves would wipe them on the next save.
+  if (dropped) console.warn(`[ShopStore] dropped ${dropped} unreadable yard tile(s) from a save`);
   return tiles;
 }
 

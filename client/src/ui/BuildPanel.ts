@@ -1,13 +1,16 @@
 import { Callbacks, type Room } from "@colyseus/sdk";
-import { BUILD_REFUND_RATE, BUILD_TILES, ERASE_TOOL, type BuildShape } from "@boba/shared";
+import { BUILD_REFUND_RATE, BUILD_TILES, ERASE_TOOL, type BuildTileDef } from "@boba/shared";
+import { propUrl } from "../scenes/YardView";
 import type { BobaShopState } from "@boba/shared/schema";
 
 const hex = (color: number) => "#" + color.toString(16).padStart(6, "0");
 
-const SHAPE_GROUPS: { title: string; shapes: BuildShape[] }[] = [
-  { title: "🟫 Sàn (kéo để lát kín vùng)", shapes: ["floor"] },
-  { title: "🧱 Tường & rào (kéo để vẽ khung)", shapes: ["wall", "fence"] },
-  { title: "🚪 Cửa (đặt lên 1 ô)", shapes: ["door"] },
+const GROUPS: { title: string; has: (def: BuildTileDef) => boolean }[] = [
+  { title: "🟫 Sàn (kéo để lát kín vùng)", has: (d) => d.shape === "floor" },
+  { title: "🧱 Tường & rào (kéo để vẽ khung)", has: (d) => d.shape === "wall" || d.shape === "fence" },
+  { title: "🚪 Cửa (đặt lên 1 ô)", has: (d) => d.shape === "door" },
+  { title: "🌳 Cây cối (bấm vào 1 ô)", has: (d) => d.group === "tree" },
+  { title: "🪵 Đồ ngoài trời (bấm vào 1 ô)", has: (d) => d.group === "outdoor" },
 ];
 
 /** Build mode side panel: pick a material (or the eraser), then drag over the yard (BuildController). */
@@ -33,10 +36,11 @@ export class BuildPanel {
     });
     const list = Object.assign(document.createElement("div"), { className: "decor-list" });
 
-    for (const group of SHAPE_GROUPS) {
+    for (const group of GROUPS) {
       list.append(Object.assign(document.createElement("h3"), { className: "build-group", textContent: group.title }));
-      for (const def of BUILD_TILES.filter((t) => group.shapes.includes(t.shape))) {
-        list.append(this.makeButton(def.kind, def.label, `$${def.price}/ô`, hex(def.color), hex(def.accent)));
+      for (const def of BUILD_TILES.filter(group.has)) {
+        const price = def.shape === "prop" ? `$${def.price}` : `$${def.price}/ô`;
+        list.append(this.makeButton(def.kind, def.label, price, hex(def.color), hex(def.accent), def.image && propUrl(def.image)));
       }
     }
     list.append(Object.assign(document.createElement("h3"), { className: "build-group", textContent: "🧽 Dỡ bỏ" }));
@@ -58,10 +62,15 @@ export class BuildPanel {
     this.unsubscribers.forEach((off) => off());
   }
 
-  private makeButton(tool: string, label: string, price: string, color: string, accent: string): HTMLElement {
+  private makeButton(tool: string, label: string, price: string, color: string, accent: string, image?: string): HTMLElement {
     const el = Object.assign(document.createElement("button"), { type: "button", className: "decor-item build-item" });
-    const swatch = Object.assign(document.createElement("span"), { className: "swatch" });
-    swatch.style.background = `linear-gradient(135deg, ${color} 60%, ${accent} 60%)`;
+    let swatch: HTMLElement;
+    if (image) {
+      swatch = Object.assign(document.createElement("img"), { className: "swatch-img pixel", src: `${import.meta.env.BASE_URL}${image}`, alt: "" });
+    } else {
+      swatch = Object.assign(document.createElement("span"), { className: "swatch" });
+      swatch.style.background = `linear-gradient(135deg, ${color} 60%, ${accent} 60%)`;
+    }
     const name = Object.assign(document.createElement("span"), { className: "name", textContent: label });
     const cost = Object.assign(document.createElement("strong"), { textContent: price });
     el.append(swatch, name, cost);

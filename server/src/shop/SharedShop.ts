@@ -4,7 +4,7 @@ import {
   buildRefund,
   cellsForTool,
   getBuildTile,
-  isSolidShape,
+  isBlocking,
   planCellChange,
   canPlaceDecoration,
   getDecorationDef,
@@ -137,7 +137,7 @@ export class SharedShop {
     const kind = String(tool);
     const def = getBuildTile(kind);
     if (!def && kind !== ERASE_TOOL) return "Không có loại này";
-    const solid = !!def && isSolidShape(def.shape);
+    const solid = !!def && isBlocking(def);
     const changes: [string, string][] = [];
     let cost = 0;
     for (const { cx, cy } of cellsForTool(kind, Number(x0), Number(y0), Number(x1), Number(y1))) {

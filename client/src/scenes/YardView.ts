@@ -4,6 +4,7 @@ import {
   BUILD_TILE,
   BUILD_TILES,
   CONNECT,
+  PROP_SCALE,
   SHOP_BUILDING,
   SHOP_DOOR_X,
   SHOP_ENTER_ZONE,
@@ -14,6 +15,7 @@ import {
   connectMask,
   floorAt,
   parseTileKey,
+  propAnchor,
   structureAt,
   type BuildTileDef,
   type TileGetter,
@@ -27,6 +29,9 @@ const floorTextureKey = (kind: string) => `yard-floor-${kind}`;
 /** Art of walls / fences / doors: client/public/assets/build/ (client/assets-src/tools/draw_build_tiles.py). */
 const pieceKey = (name: string) => `build-${name}`;
 const pieceUrl = (name: string) => `assets/build/${name}.png`;
+/** Outdoor props (trees, bench...): client/public/assets/decor/yard/ (client/assets-src/tools/draw_yard_props.py). */
+export const propKey = (kind: string) => `build-prop-${kind}`;
+export const propUrl = (image: string) => `assets/decor/yard/${image}.png`;
 
 /** Load the wall / fence / door pieces (call from the scene's preload). */
 export function preloadBuildTextures(scene: Phaser.Scene) {
@@ -39,6 +44,7 @@ export function preloadBuildTextures(scene: Phaser.Scene) {
     }
   }
   for (const name of ["door_h", "door_v"]) scene.load.image(pieceKey(name), pieceUrl(name));
+  for (const def of BUILD_TILES) if (def.shape === "prop" && def.image) scene.load.image(propKey(def.kind), propUrl(def.image));
 }
 
 /** Which piece art shows a structure, given its neighbours. */
@@ -133,7 +139,7 @@ export class YardView {
     if (floor) {
       const img = this.scene.add.image(r.left, r.top, floorTextureKey(floor.kind)).setOrigin(0).setDepth(FLOOR_DEPTH);
       // Under a wall, the floor stops at the wall on the sides without floor next to it (nothing sticks out).
-      if (structure) {
+      if (structure && structure.shape !== "prop") {
         const a = (BUILD_TILE - WALL_THICKNESS) / 2;
         const b = (BUILD_TILE + WALL_THICKNESS) / 2;
         const x0 = floorAt(this.tiles, cx - 1, cy) ? 0 : a;
@@ -145,7 +151,14 @@ export class YardView {
       view.floor = img;
     }
 
-    if (structure) {
+    if (structure?.shape === "prop") {
+      // Props stand on the bottom of their cell, drawn at a whole-number scale so the pixels stay square.
+      const key = propKey(structure.kind);
+      if (this.scene.textures.exists(key)) {
+        const at = propAnchor(cx, cy);
+        view.structure = this.scene.add.image(at.x, at.y + 2, key).setOrigin(0.5, 1).setScale(PROP_SCALE).setDepth(at.y);
+      }
+    } else if (structure) {
       const key = pieceKey(pieceName(this.tiles, structure, cx, cy));
       if (this.scene.textures.exists(key)) {
         // The piece stands on a thin strip through the middle of the cell: sort it by the strip's front edge,

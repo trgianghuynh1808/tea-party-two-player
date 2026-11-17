@@ -40,7 +40,8 @@ export const inRect = (p: { x: number; y: number }, r: Rect, margin = 0) =>
 
 // ---------------------------------------------------------------- Building (yard tiles)
 
-export type BuildShape = "floor" | "wall" | "fence" | "door";
+/** "prop" = an outdoor object standing on one cell (tree, bench, lamp...). */
+export type BuildShape = "floor" | "wall" | "fence" | "door" | "prop";
 
 export interface BuildTileDef {
   kind: string;
@@ -51,6 +52,12 @@ export interface BuildTileDef {
   color: number;
   /** Second colour (planks, mortar, top of the wall...). */
   accent: number;
+  /** Props: artwork client/public/assets/decor/yard/<image>.png (client/assets-src/tools/draw_yard_props.py). */
+  image?: string;
+  /** Props: build panel group. */
+  group?: "tree" | "outdoor";
+  /** Props that block movement: size (world px) of the blocked box at the foot of the prop (trunk, base...). */
+  block?: { w: number; h: number };
 }
 
 /** Players can't walk through these. */
@@ -68,6 +75,45 @@ export const BUILD_TILES: BuildTileDef[] = [
   { kind: "wall_white", label: "Tường trắng", price: 8, shape: "wall", color: 0xf3ece2, accent: 0xd8cbb9 },
   { kind: "fence", label: "Hàng rào", price: 4, shape: "fence", color: 0xe3c49a, accent: 0x9c7457 },
   { kind: "door", label: "Cửa", price: 15, shape: "door", color: 0x8d5a3b, accent: 0xc29a78 },
+  // Outdoor props (one per cell; the art is bigger than the cell and stands on its bottom edge).
+  ...(
+    [
+      ["tree_round_s", "Cây tròn nhỏ", 20, "tree", { w: 12, h: 8 }],
+      ["tree_round_m", "Cây tròn vừa", 35, "tree", { w: 14, h: 10 }],
+      ["tree_round_l", "Cây tròn lớn", 60, "tree", { w: 18, h: 10 }],
+      ["pine_s", "Thông nhỏ", 20, "tree", { w: 10, h: 8 }],
+      ["pine_m", "Thông vừa", 35, "tree", { w: 12, h: 8 }],
+      ["pine_l", "Thông lớn", 60, "tree", { w: 16, h: 10 }],
+      ["palm", "Cây dừa", 60, "tree", { w: 14, h: 10 }],
+      ["tree_round_snow", "Cây phủ tuyết", 70, "tree", { w: 18, h: 10 }],
+      ["pine_snow", "Thông phủ tuyết", 70, "tree", { w: 16, h: 10 }],
+      ["stump", "Gốc cây", 10, "tree", { w: 36, h: 16 }],
+      ["flower_bush", "Bụi hoa", 15, "tree", undefined],
+      ["bench", "Ghế băng", 30, "outdoor", { w: 80, h: 14 }],
+      ["barrel", "Thùng gỗ", 15, "outdoor", { w: 30, h: 14 }],
+      ["crate", "Thùng thưa", 12, "outdoor", { w: 40, h: 16 }],
+      ["rock", "Tảng đá", 10, "outdoor", { w: 48, h: 16 }],
+      ["pumpkin", "Bí ngô", 8, "outdoor", undefined],
+      ["balloons", "Chùm bóng bay", 20, "outdoor", undefined],
+      ["parasol", "Dù lá", 40, "outdoor", { w: 10, h: 8 }],
+      ["signpost", "Biển chỉ đường", 15, "outdoor", { w: 10, h: 8 }],
+      ["mailbox", "Hộp thư", 20, "outdoor", { w: 10, h: 8 }],
+      ["lamp_post", "Đèn đường", 35, "outdoor", { w: 10, h: 8 }],
+      ["torch", "Đuốc", 10, "outdoor", { w: 8, h: 6 }],
+    ] as const
+  ).map(
+    ([kind, label, price, group, block]): BuildTileDef => ({
+      kind,
+      label,
+      price,
+      shape: "prop",
+      color: group === "tree" ? 0x4a9156 : 0x9c7457,
+      accent: 0x3d2c29,
+      image: kind,
+      group,
+      block,
+    }),
+  ),
 ];
 
 export const getBuildTile = (kind: string | undefined) => (kind ? BUILD_TILES.find((t) => t.kind === kind) : undefined);
@@ -82,8 +128,8 @@ export const MAX_BUILD_CELLS = 800;
 export const ERASE_TOOL = "erase";
 
 /**
- * A cell has two layers: a floor, and a structure standing on it (wall, fence or door).
- * Floor tools only touch the floor layer, wall/fence/door tools the structure layer.
+ * A cell has two layers: a floor, and a structure standing on it (wall, fence, door or an outdoor prop).
+ * Floor tools only touch the floor layer, the others the structure layer (so a cell has one wall or one prop).
  */
 export type TileLayer = "floor" | "structure";
 export const layerOf = (def: BuildTileDef): TileLayer => (def.shape === "floor" ? "floor" : "structure");
@@ -115,15 +161,33 @@ export const FENCE_THICKNESS = 6;
 /** Neighbour bits of a connection mask (also the art's file names: wall_brick_<mask>.png). */
 export const CONNECT = { N: 1, E: 2, S: 4, W: 8 } as const;
 
+/** Walls, fences and doors join up with each other; props stand alone. */
+const connectsAt = (tiles: TileGetter, cx: number, cy: number) => {
+  const def = structureAt(tiles, cx, cy);
+  return !!def && def.shape !== "prop";
+};
+
 /** Which neighbours a structure connects to (any wall, fence or door connects to any other). */
 export function connectMask(tiles: TileGetter, cx: number, cy: number): number {
   let mask = 0;
-  if (structureAt(tiles, cx, cy - 1)) mask |= CONNECT.N;
-  if (structureAt(tiles, cx + 1, cy)) mask |= CONNECT.E;
-  if (structureAt(tiles, cx, cy + 1)) mask |= CONNECT.S;
-  if (structureAt(tiles, cx - 1, cy)) mask |= CONNECT.W;
+  if (connectsAt(tiles, cx, cy - 1)) mask |= CONNECT.N;
+  if (connectsAt(tiles, cx + 1, cy)) mask |= CONNECT.E;
+  if (connectsAt(tiles, cx, cy + 1)) mask |= CONNECT.S;
+  if (connectsAt(tiles, cx - 1, cy)) mask |= CONNECT.W;
   return mask;
 }
+
+/** Props are drawn PROP_SCALE× their pixel-art size, standing PROP_BASE px above the cell's bottom edge. */
+export const PROP_SCALE = 2;
+export const PROP_BASE = 6;
+/** Where a prop stands in its cell (world px): the foot of the art. */
+export function propAnchor(cx: number, cy: number) {
+  const c = cellRect(cx, cy);
+  return { x: (c.left + c.right) / 2, y: c.bottom - PROP_BASE };
+}
+
+/** Does this tile block players (walls, fences, props with a blocked base)? */
+export const isBlocking = (def: BuildTileDef) => isSolidShape(def.shape) || !!def.block;
 
 /** Floor box (world px) of the strip a structure of `thickness` occupies in a cell, given its connections. */
 export function stripRects(cx: number, cy: number, mask: number, thickness: number): Rect[] {
@@ -138,9 +202,13 @@ export function stripRects(cx: number, cy: number, mask: number, thickness: numb
   return rects;
 }
 
-/** What blocks movement in a cell: the wall / fence strip (doors are walked through). */
+/** What blocks movement in a cell: the wall / fence strip or a prop's base (doors are walked through). */
 export function blockingRects(tiles: TileGetter, cx: number, cy: number): Rect[] {
   const def = structureAt(tiles, cx, cy);
+  if (def?.block) {
+    const { x, y } = propAnchor(cx, cy);
+    return [{ left: x - def.block.w / 2, top: y - def.block.h, right: x + def.block.w / 2, bottom: y }];
+  }
   if (!def || !isSolidShape(def.shape)) return [];
   const mask = connectMask(tiles, cx, cy);
   return stripRects(cx, cy, mask, def.shape === "fence" ? FENCE_THICKNESS : WALL_THICKNESS);
@@ -176,7 +244,7 @@ export function canBuildCell(cx: number, cy: number): boolean {
 export function cellsForTool(tool: string, x0: number, y0: number, x1: number, y1: number): { cx: number; cy: number }[] {
   const shape = tool === ERASE_TOOL ? "floor" : getBuildTile(tool)?.shape;
   if (!shape || ![x0, y0, x1, y1].every(Number.isInteger)) return [];
-  if (shape === "door") return canBuildCell(x1, y1) ? [{ cx: x1, cy: y1 }] : [];
+  if (shape === "door" || shape === "prop") return canBuildCell(x1, y1) ? [{ cx: x1, cy: y1 }] : [];
   const [left, right] = [Math.min(x0, x1), Math.max(x0, x1)];
   const [top, bottom] = [Math.min(y0, y1), Math.max(y0, y1)];
   if ((right - left + 1) * (bottom - top + 1) > MAX_BUILD_CELLS * 4) return [];

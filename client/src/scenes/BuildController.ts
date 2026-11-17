@@ -12,11 +12,14 @@ import {
   cellAt,
   cellRect,
   cellsForTool,
+  PROP_SCALE,
   getBuildTile,
+  propAnchor,
   planCellChange,
   type BuildTilesMessage,
 } from "@boba/shared";
 import type { BobaShopState } from "@boba/shared/schema";
+import { propKey } from "./YardView";
 
 const UI_DEPTH = 15000;
 const OK_COLOR = 0x2a9d8f;
@@ -35,6 +38,8 @@ export class BuildController {
   private readonly grid: Phaser.GameObjects.Graphics;
   private readonly preview: Phaser.GameObjects.Graphics;
   private readonly costLabel: Phaser.GameObjects.Text;
+  /** Props: see-through preview of the object where it would stand. */
+  private readonly ghost: Phaser.GameObjects.Image;
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -48,6 +53,7 @@ export class BuildController {
       .setOrigin(0, 1)
       .setDepth(UI_DEPTH - 1)
       .setVisible(false);
+    this.ghost = scene.add.image(0, 0, "__DEFAULT").setOrigin(0.5, 1).setScale(PROP_SCALE).setAlpha(0.65).setDepth(UI_DEPTH - 3).setVisible(false);
 
     scene.input.on(Phaser.Input.Events.POINTER_DOWN, this.onDown, this);
     scene.input.on(Phaser.Input.Events.POINTER_MOVE, this.onMove, this);
@@ -106,6 +112,7 @@ export class BuildController {
   /** Highlight the cells the drag would change and show the price (or the refund). */
   private showPreview(from: { cx: number; cy: number }, to: { cx: number; cy: number }) {
     const g = this.preview.clear();
+    this.ghost.setVisible(false);
     const erase = this.tool === ERASE_TOOL;
     const def = getBuildTile(this.tool);
     const tiles = this.room.state.tiles;
@@ -128,6 +135,10 @@ export class BuildController {
       this.costLabel.setVisible(false);
       return;
     }
+    if (def?.shape === "prop" && this.scene.textures.exists(propKey(def.kind))) {
+      const at = propAnchor(to.cx, to.cy);
+      this.ghost.setTexture(propKey(def.kind)).setPosition(at.x, at.y + 2).setVisible(true);
+    }
     const r = cellRect(to.cx, to.cy);
     const text = cost >= 0 ? `${count} ô · $${cost}` : `${count} ô · hoàn $${-cost}`;
     this.costLabel
@@ -139,6 +150,7 @@ export class BuildController {
 
   private clearPreview() {
     this.preview.clear();
+    this.ghost.setVisible(false);
     this.costLabel.setVisible(false);
   }
 
