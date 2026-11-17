@@ -13,7 +13,7 @@ import {
   cellRect,
   cellsForTool,
   getBuildTile,
-  tileKey,
+  planCellChange,
   type BuildTilesMessage,
 } from "@boba/shared";
 import type { BobaShopState } from "@boba/shared/schema";
@@ -112,9 +112,9 @@ export class BuildController {
     let cost = 0;
     let count = 0;
     for (const { cx, cy } of cellsForTool(this.tool, from.cx, from.cy, to.cx, to.cy)) {
-      const old = tiles?.get(tileKey(cx, cy));
-      if (def ? old === def.kind : !old) continue;
-      const oldDef = getBuildTile(old);
+      const change = tiles && planCellChange(tiles, this.tool, cx, cy);
+      if (!change) continue;
+      const oldDef = getBuildTile(change.old);
       cost += (def?.price ?? 0) - (oldDef ? buildRefund(oldDef) : 0);
       count++;
       const r = cellRect(cx, cy);

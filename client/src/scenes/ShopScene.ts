@@ -16,7 +16,6 @@ import {
   directionFromInput,
   inRect,
   isInYard,
-  solidLookup,
   SHOP_ENTER_ZONE,
   SHOP_EXIT_ZONE,
   YARD,
@@ -43,7 +42,7 @@ import { DECOR_ROTATE, PALETTE_DRAG_START, type PaletteDragStart } from "../ui/D
 import { CupView, preloadCupTextures } from "./CupView";
 import { DecorController, preloadDecorTextures } from "./DecorController";
 import { CustomerController } from "./CustomerController";
-import { YardView } from "./YardView";
+import { YardView, preloadBuildTextures } from "./YardView";
 import { BuildController } from "./BuildController";
 import { CHARACTER_BODY_PX, DIRECTION_ROW, FEET_Y, HEAD_Y, WALK_COLUMNS, WALK_FPS, characterKey, characterOf } from "./characterArt";
 
@@ -207,7 +206,7 @@ export class ShopScene extends Phaser.Scene {
   private inYard?: boolean;
   private lastDoorAt = 0;
   /** Walls in the yard for movement prediction (same rule as the server). */
-  private readonly solid = solidLookup({ get: (key: string) => this.room?.state.tiles?.get(key) });
+  private readonly tiles = { get: (key: string) => this.room?.state.tiles?.get(key) };
   /** Outline around the table the action key would serve. */
   private tableHighlight!: Phaser.GameObjects.Rectangle;
 
@@ -246,6 +245,7 @@ export class ShopScene extends Phaser.Scene {
     this.load.image(FLOOR_TEXTURE, "assets/floor/wood.jpg");
     preloadCupTextures(this);
     preloadDecorTextures(this);
+    preloadBuildTextures(this);
   }
 
   init(data: ShopSceneData) {
@@ -429,7 +429,7 @@ export class ShopScene extends Phaser.Scene {
     if (local) {
       const moving = dx !== 0 || dy !== 0;
       if (moving) {
-        const next = stepMovement(local.container, dx, dy, dt, this.solid);
+        const next = stepMovement(local.container, dx, dy, dt, this.tiles);
         local.container.setPosition(next.x, next.y);
         this.localDirection = directionFromInput(dx, dy, this.localDirection);
         this.applyFacing(local, this.localDirection);

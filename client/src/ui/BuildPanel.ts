@@ -27,7 +27,8 @@ export class BuildPanel {
     const help = Object.assign(document.createElement("p"), {
       className: "hint",
       textContent:
-        "Chọn vật liệu rồi kéo trên đất trống. Tường chặn đường đi, nhớ chừa một ô Cửa để vào nhà. " +
+        "Chọn vật liệu rồi kéo trên đất trống. Tường đứng trên sàn: lát sàn phủ cả các ô tường để sàn liền tới chân tường. " +
+        "Tường chặn đường đi, nhớ đặt một ô Cửa để vào nhà. " +
         `Xây đè hoặc dùng Tẩy được hoàn ${BUILD_REFUND_RATE * 100}% tiền ô cũ. Vẫn đi lại bằng WASD khi đang xây.`,
     });
     const list = Object.assign(document.createElement("div"), { className: "decor-list" });

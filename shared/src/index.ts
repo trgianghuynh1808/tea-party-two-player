@@ -91,7 +91,7 @@ export interface MachineOverflowEvent {
 
 export * from "./decor";
 export * from "./world";
-import { BUILD_TILE, SHOP_BUILDING, YARD, cellRect, isInYard, type SolidLookup } from "./world";
+import { BUILD_TILE, SHOP_BUILDING, YARD, blockingRects, isInYard, type TileGetter } from "./world";
 export * from "./seating";
 import { distanceToBox, footprintBox } from "./seating";
 import type { PlacedDecoration } from "./decor";
@@ -105,9 +105,9 @@ export interface Vec2 {
 
 /**
  * Advance a position by input direction over dt seconds, resolving collisions with stations / walls and world bounds.
- * `solid` = built walls in the yard (see solidLookup).
+ * `tiles` = the yard's synced tiles (walls and fences block).
  */
-export function stepMovement(pos: Vec2, dx: number, dy: number, dtSeconds: number, solid?: SolidLookup): Vec2 {
+export function stepMovement(pos: Vec2, dx: number, dy: number, dtSeconds: number, tiles?: TileGetter): Vec2 {
   let nx = dx;
   let ny = dy;
   const len = Math.hypot(nx, ny);
@@ -115,7 +115,7 @@ export function stepMovement(pos: Vec2, dx: number, dy: number, dtSeconds: numbe
     nx /= len;
     ny /= len;
   }
-  return resolveCollisions({ x: pos.x + nx * PLAYER_SPEED * dtSeconds, y: pos.y + ny * PLAYER_SPEED * dtSeconds }, solid);
+  return resolveCollisions({ x: pos.x + nx * PLAYER_SPEED * dtSeconds, y: pos.y + ny * PLAYER_SPEED * dtSeconds }, tiles);
 }
 
 /** Push a player circle at (x, y) out of a rectangle. */
@@ -143,8 +143,8 @@ function pushOutOfRect(x: number, y: number, rLeft: number, rTop: number, rRight
 }
 
 /** Push a player circle out of stations (inside) or the shop building and built walls (yard), and clamp it inside its area. */
-export function resolveCollisions(pos: Vec2, solid?: SolidLookup): Vec2 {
-  if (isInYard(pos)) return resolveYardCollisions(pos, solid);
+export function resolveCollisions(pos: Vec2, tiles?: TileGetter): Vec2 {
+  if (isInYard(pos)) return resolveYardCollisions(pos, tiles);
   let { x, y } = pos;
 
   for (const s of STATIONS) {
@@ -157,11 +157,11 @@ export function resolveCollisions(pos: Vec2, solid?: SolidLookup): Vec2 {
   return { x, y };
 }
 
-function resolveYardCollisions(pos: Vec2, solid?: SolidLookup): Vec2 {
+function resolveYardCollisions(pos: Vec2, tiles?: TileGetter): Vec2 {
   let { x, y } = pos;
   const b = SHOP_BUILDING;
   ({ x, y } = pushOutOfRect(x, y, b.left, b.top, b.right, b.bottom));
-  if (solid) {
+  if (tiles) {
     // Only the cells the player circle can touch.
     const c0 = Math.floor((x - PLAYER_RADIUS - YARD.x) / BUILD_TILE);
     const c1 = Math.floor((x + PLAYER_RADIUS - YARD.x) / BUILD_TILE);
@@ -169,9 +169,7 @@ function resolveYardCollisions(pos: Vec2, solid?: SolidLookup): Vec2 {
     const r1 = Math.floor((y + PLAYER_RADIUS - YARD.y) / BUILD_TILE);
     for (let cy = r0; cy <= r1; cy++) {
       for (let cx = c0; cx <= c1; cx++) {
-        if (!solid(cx, cy)) continue;
-        const r = cellRect(cx, cy);
-        ({ x, y } = pushOutOfRect(x, y, r.left, r.top, r.right, r.bottom));
+        for (const r of blockingRects(tiles, cx, cy)) ({ x, y } = pushOutOfRect(x, y, r.left, r.top, r.right, r.bottom));
       }
     }
   }

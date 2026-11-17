@@ -58,7 +58,6 @@ import {
   cellRect,
   inRect,
   isInYard,
-  solidLookup,
   type BuildTilesMessage,
   type DeliveredEvent,
   type DrinkDef,
@@ -144,8 +143,6 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
   private touchedShops = new Set<SharedShop>();
 
   private moveBudgets = new Map<string, MoveBudget>();
-  /** Walls in the yard, read from the synced tiles (same lookup the clients use to predict movement). */
-  private readonly solid = solidLookup(this.state.tiles);
   private deliveryTimers = new Map<string, number>();
   private orderSeq = 0;
   private orderSpawnTimer = FIRST_ORDER_DELAY_SECONDS;
@@ -709,7 +706,8 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
       player.teleportSeq++;
       return;
     }
-    const resolved = resolveCollisions({ x, y }, this.solid);
+    // Walls in the yard come from the synced tiles (the same data the clients use to predict movement).
+    const resolved = resolveCollisions({ x, y }, this.state.tiles);
     player.x = resolved.x;
     player.y = resolved.y;
     if (DIRECTIONS.has(payload.direction)) player.direction = payload.direction;

@@ -81,10 +81,69 @@ export const MAX_BUILD_CELLS = 800;
 /** Tool picked in build mode: a tile kind, or "erase". */
 export const ERASE_TOOL = "erase";
 
-export const tileKey = (cx: number, cy: number) => `${cx},${cy}`;
-export function parseTileKey(key: string): { cx: number; cy: number } | undefined {
-  const m = /^(\d+),(\d+)$/.exec(key);
-  return m ? { cx: Number(m[1]), cy: Number(m[2]) } : undefined;
+/**
+ * A cell has two layers: a floor, and a structure standing on it (wall, fence or door).
+ * Floor tools only touch the floor layer, wall/fence/door tools the structure layer.
+ */
+export type TileLayer = "floor" | "structure";
+export const layerOf = (def: BuildTileDef): TileLayer => (def.shape === "floor" ? "floor" : "structure");
+
+/** Synced / saved key of a cell's layer: "f:12,7" (floor) or "s:12,7" (structure). */
+export const tileKey = (cx: number, cy: number, layer: TileLayer) => `${layer === "floor" ? "f" : "s"}:${cx},${cy}`;
+export function parseTileKey(key: string): { cx: number; cy: number; layer: TileLayer } | undefined {
+  const m = /^([fs]):(\d+),(\d+)$/.exec(key);
+  return m ? { layer: m[1] === "f" ? "floor" : "structure", cx: Number(m[2]), cy: Number(m[3]) } : undefined;
+}
+
+/** Read access to the synced tiles map (MapSchema on both sides). */
+export interface TileGetter {
+  get(key: string): string | undefined;
+}
+
+export const floorAt = (tiles: TileGetter, cx: number, cy: number) => getBuildTile(tiles.get(tileKey(cx, cy, "floor")));
+export const structureAt = (tiles: TileGetter, cx: number, cy: number) => getBuildTile(tiles.get(tileKey(cx, cy, "structure")));
+
+// ---------------------------------------------------------------- Thin walls
+// Walls and fences are thin and connect to their neighbours: the footprint is a strip through the middle of the
+// cell (a centre post + an arm towards each connected neighbour). The art is drawn by
+// client/assets-src/tools/draw_build_tiles.py with the same numbers.
+
+/** How tall walls / doors stand above their footprint (px). */
+export const WALL_HEIGHT = 34;
+export const WALL_THICKNESS = 16;
+export const FENCE_THICKNESS = 6;
+/** Neighbour bits of a connection mask (also the art's file names: wall_brick_<mask>.png). */
+export const CONNECT = { N: 1, E: 2, S: 4, W: 8 } as const;
+
+/** Which neighbours a structure connects to (any wall, fence or door connects to any other). */
+export function connectMask(tiles: TileGetter, cx: number, cy: number): number {
+  let mask = 0;
+  if (structureAt(tiles, cx, cy - 1)) mask |= CONNECT.N;
+  if (structureAt(tiles, cx + 1, cy)) mask |= CONNECT.E;
+  if (structureAt(tiles, cx, cy + 1)) mask |= CONNECT.S;
+  if (structureAt(tiles, cx - 1, cy)) mask |= CONNECT.W;
+  return mask;
+}
+
+/** Floor box (world px) of the strip a structure of `thickness` occupies in a cell, given its connections. */
+export function stripRects(cx: number, cy: number, mask: number, thickness: number): Rect[] {
+  const c = cellRect(cx, cy);
+  const a = (BUILD_TILE - thickness) / 2;
+  const b = (BUILD_TILE + thickness) / 2;
+  const rects: Rect[] = [{ left: c.left + a, top: c.top + a, right: c.left + b, bottom: c.top + b }];
+  if (mask & CONNECT.N) rects.push({ left: c.left + a, top: c.top, right: c.left + b, bottom: c.top + a });
+  if (mask & CONNECT.S) rects.push({ left: c.left + a, top: c.top + b, right: c.left + b, bottom: c.bottom });
+  if (mask & CONNECT.E) rects.push({ left: c.left + b, top: c.top + a, right: c.right, bottom: c.top + b });
+  if (mask & CONNECT.W) rects.push({ left: c.left, top: c.top + a, right: c.left + a, bottom: c.top + b });
+  return rects;
+}
+
+/** What blocks movement in a cell: the wall / fence strip (doors are walked through). */
+export function blockingRects(tiles: TileGetter, cx: number, cy: number): Rect[] {
+  const def = structureAt(tiles, cx, cy);
+  if (!def || !isSolidShape(def.shape)) return [];
+  const mask = connectMask(tiles, cx, cy);
+  return stripRects(cx, cy, mask, def.shape === "fence" ? FENCE_THICKNESS : WALL_THICKNESS);
 }
 
 /** World box of a yard cell. */
@@ -132,11 +191,22 @@ export function cellsForTool(tool: string, x0: number, y0: number, x1: number, y
   return cells.length > MAX_BUILD_CELLS ? cells.slice(0, MAX_BUILD_CELLS) : cells;
 }
 
-/** Is the yard cell blocked (a wall or fence)? Built from the synced tiles map. */
-export type SolidLookup = (cx: number, cy: number) => boolean;
-export const solidLookup =
-  (tiles: { get(key: string): string | undefined }): SolidLookup =>
-  (cx, cy) => {
-    const def = getBuildTile(tiles.get(tileKey(cx, cy)));
-    return !!def && isSolidShape(def.shape);
-  };
+/**
+ * What a tool would do on one cell: the key it writes, the new kind ("" = removed) and the old kind.
+ * The eraser removes the structure if there is one, else the floor. undefined = nothing to do.
+ */
+export function planCellChange(tiles: TileGetter, tool: string, cx: number, cy: number): { key: string; kind: string; old?: string } | undefined {
+  const def = getBuildTile(tool);
+  if (def) {
+    const key = tileKey(cx, cy, layerOf(def));
+    const old = tiles.get(key);
+    return old === def.kind ? undefined : { key, kind: def.kind, old };
+  }
+  if (tool !== ERASE_TOOL) return undefined;
+  for (const layer of ["structure", "floor"] as const) {
+    const key = tileKey(cx, cy, layer);
+    const old = tiles.get(key);
+    if (old) return { key, kind: "", old };
+  }
+  return undefined;
+}

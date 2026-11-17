@@ -4,7 +4,8 @@ import {
   buildRefund,
   cellsForTool,
   getBuildTile,
-  tileKey,
+  isSolidShape,
+  planCellChange,
   canPlaceDecoration,
   getDecorationDef,
   normalizeRotation,
@@ -136,17 +137,15 @@ export class SharedShop {
     const kind = String(tool);
     const def = getBuildTile(kind);
     if (!def && kind !== ERASE_TOOL) return "Không có loại này";
-    const solid = def?.shape === "wall" || def?.shape === "fence";
+    const solid = !!def && isSolidShape(def.shape);
     const changes: [string, string][] = [];
     let cost = 0;
     for (const { cx, cy } of cellsForTool(kind, Number(x0), Number(y0), Number(x1), Number(y1))) {
-      const key = tileKey(cx, cy);
-      const old = this.tiles.get(key);
-      if (def ? old === def.kind : !old) continue;
-      if (solid && blocked(cx, cy)) continue;
-      const oldDef = getBuildTile(old);
+      const change = planCellChange(this.tiles, kind, cx, cy);
+      if (!change || (solid && blocked(cx, cy))) continue;
+      const oldDef = getBuildTile(change.old);
       cost += (def?.price ?? 0) - (oldDef ? buildRefund(oldDef) : 0);
-      changes.push([key, def?.kind ?? ""]);
+      changes.push([change.key, change.kind]);
     }
     if (!changes.length) return def ? "Không xây được ở đây" : undefined;
     if (cost > this.money) return `Không đủ tiền (cần $${cost})`;
