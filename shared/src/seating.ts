@@ -10,6 +10,8 @@ export const SEAT_TABLE_GAP = 24;
 export const SEAT_COOLDOWN_SECONDS = 4;
 /** No free seat for a new customer: try again after this long. */
 export const SEAT_RETRY_SECONDS = 2;
+/** Share of customers who order take-away (served at the delivery counter) even when the shop has seats. */
+export const TAKEAWAY_CHANCE = 0.3;
 
 export interface Box {
   left: number;

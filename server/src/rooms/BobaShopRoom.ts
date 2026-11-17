@@ -29,6 +29,7 @@ import {
   tablesWaiting,
   SEAT_COOLDOWN_SECONDS,
   SEAT_RETRY_SECONDS,
+  TAKEAWAY_CHANCE,
   CHARACTERS,
   RECONNECT_GRACE_SECONDS,
   REPLACED_CLOSE_CODE,
@@ -596,10 +597,11 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     let count = kind === CustomerKind.Group ? (progress >= 0.6 && Math.random() < 0.5 ? 3 : 2) : 1;
 
     // A group sits together at one table: fewer friends come if no table has room for all of them.
+    // Some customers order take-away at the counter even when there are seats.
     let tableId = "";
     let seats: string[] = [];
     const seating = this.freeSeating();
-    if (seating.hasSeating) {
+    if (seating.hasSeating && Math.random() >= TAKEAWAY_CHANCE) {
       const pick = (n: number) => {
         const options = [...seating.free].filter(([, free]) => free.length >= n);
         if (!options.length) return undefined;
@@ -767,7 +769,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     this.state.servedCount++;
 
     const served = drinks.filter((_, i) => order.servedMask & (1 << i)).length;
-    const event: DeliveredEvent = { by: client.sessionId, drinkName: drink.name, served, total: drinks.length, amount: 0, notes: [] };
+    const event: DeliveredEvent = { by: client.sessionId, orderId: order.id, drinkName: drink.name, served, total: drinks.length, amount: 0, notes: [] };
     if (served === drinks.length) {
       this.removeOrder(index);
       Object.assign(event, this.payOrder(order, drinks));

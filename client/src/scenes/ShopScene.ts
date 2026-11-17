@@ -332,6 +332,8 @@ export class ShopScene extends Phaser.Scene {
     $.onRemove("orders", (order) => customers.removeOrder(order.id));
 
     room.onMessage(ServerEvents.Delivered, (msg: DeliveredEvent) => {
+      // Arrives before the order's removal: the last servedMask change of a removed order isn't synced.
+      if (msg.served >= msg.total) this.customers?.markServed(msg.orderId);
       const who = msg.by === room.sessionId ? "Bạn" : room.state.players.get(msg.by)?.name || "Đồng đội";
       if (msg.served < msg.total) {
         this.toast(`${who} giao ${msg.drinkName} (${msg.served}/${msg.total}) · nhóm khách chờ đủ món`, "#2a9d8f");

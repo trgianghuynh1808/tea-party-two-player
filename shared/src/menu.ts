@@ -233,6 +233,9 @@ export function pickCustomerKind(progress: number, random = Math.random): Custom
   return CustomerKind.Normal;
 }
 
+/** Order timer bar turns red below this share of time left: customers leaving then are unhappy. */
+export const ORDER_DANGER_RATIO = 0.25;
+
 export const getCustomer = (kind: string): CustomerDef => CUSTOMERS[kind as CustomerKind] ?? CUSTOMERS[CustomerKind.Normal];
 
 /** Order drinks are synced as a comma-separated list of drink ids; `servedMask` bit i = drink i delivered. */

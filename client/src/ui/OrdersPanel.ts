@@ -3,6 +3,7 @@ import {
   CustomerKind,
   DRINKS,
   INGREDIENTS,
+  ORDER_DANGER_RATIO,
   VIP_PRICE_MULTIPLIER,
   getCustomer,
   getDrink,
@@ -135,7 +136,7 @@ export class OrdersPanel {
       $.listen(order, "timeLeft", (timeLeft) => {
         const ratio = order.duration > 0 ? timeLeft / order.duration : 0;
         bar.style.width = `${Math.max(0, ratio) * 100}%`;
-        bar.className = ratio > 0.5 ? "ok" : ratio > 0.25 ? "warn" : "danger";
+        bar.className = ratio > 0.5 ? "ok" : ratio > ORDER_DANGER_RATIO ? "warn" : "danger";
       }),
       $.listen(order, "servedMask", (mask) => {
         items.forEach((item, i) => item.classList.toggle("served", isDrinkServed(mask, i)));

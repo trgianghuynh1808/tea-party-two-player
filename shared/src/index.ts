@@ -56,6 +56,7 @@ export const ServerEvents = {
 
 export interface DeliveredEvent {
   by: string;
+  orderId: string;
   drinkName: string;
   /** Drinks delivered / total for this order (group orders have more than one). */
   served: number;

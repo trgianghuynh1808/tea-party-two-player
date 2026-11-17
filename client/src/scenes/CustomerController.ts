@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import type { Room } from "@colyseus/sdk";
 import {
   CustomerKind,
+  ORDER_DANGER_RATIO,
   WORLD_HEIGHT,
   directionFromInput,
   footprintBox,
@@ -56,6 +57,8 @@ interface Customer {
 interface Party {
   order: Order;
   customers: Customer[];
+  /** Every drink delivered (told by the Delivered event). */
+  served?: boolean;
 }
 
 /**
@@ -125,18 +128,34 @@ export class CustomerController {
     });
   }
 
-  /** The order is over: served customers leave happy after a moment, the others storm out. */
+  /** The whole order was delivered: every drink is on the table. */
+  markServed(orderId: string) {
+    const party = this.parties.get(orderId);
+    if (!party) return;
+    party.served = true;
+    for (const c of party.customers) {
+      c.tableCup.setItem(c.drinkItem);
+      c.bubble.setVisible(false);
+    }
+  }
+
+  /**
+   * The order is over and the customers leave: happy if served before the timer bar turned red,
+   * angry if served late (red bar) or not served at all.
+   */
   removeOrder(orderId: string) {
     const party = this.parties.get(orderId);
     if (!party) return;
     this.parties.delete(orderId);
-    const drinks = orderDrinkIds(party.order.drinks);
-    const served = drinks.every((_, i) => isDrinkServed(party.order.servedMask, i));
+    const { order } = party;
+    const served = party.served || orderDrinkIds(order.drinks).every((_, i) => isDrinkServed(order.servedMask, i));
+    const ratio = order.duration > 0 ? order.timeLeft / order.duration : 0;
+    const happy = served && ratio > ORDER_DANGER_RATIO;
 
     for (const c of party.customers) {
       c.bubble.setVisible(false);
       const mood = this.scene.add
-        .text(0, -BODY_PX - 14, served ? "💕" : "😠", { fontFamily: "sans-serif", fontSize: "18px" })
+        .text(0, -BODY_PX - 14, happy ? "💕" : "😠", { fontFamily: "sans-serif", fontSize: "18px" })
         .setOrigin(0.5);
       c.container.add(mood);
       this.scene.time.delayedCall(served ? LEAVE_DELAY_MS : 300, () => {
@@ -154,7 +173,7 @@ export class CustomerController {
       const ratio = order.duration > 0 ? Math.max(0, order.timeLeft / order.duration) : 0;
       for (const c of party.customers) {
         c.patienceBar.width = PATIENCE_BAR_WIDTH * ratio;
-        c.patienceBar.setFillStyle(ratio > 0.5 ? 0x2a9d8f : ratio > 0.25 ? 0xf4a261 : 0xe63946);
+        c.patienceBar.setFillStyle(ratio > 0.5 ? 0x2a9d8f : ratio > ORDER_DANGER_RATIO ? 0xf4a261 : 0xe63946);
       }
     }
     for (const party of this.parties.values()) for (const c of party.customers) this.animate(c, dt);
