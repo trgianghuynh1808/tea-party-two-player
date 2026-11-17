@@ -1,5 +1,10 @@
 import {
   DECOR_GRID,
+  ERASE_TOOL,
+  buildRefund,
+  cellsForTool,
+  getBuildTile,
+  tileKey,
   canPlaceDecoration,
   getDecorationDef,
   normalizeRotation,
@@ -22,7 +27,9 @@ export type ShopEvent =
   | { type: "money"; money: number }
   | { type: "added"; piece: Piece }
   | { type: "moved"; piece: Piece }
-  | { type: "removed"; id: string };
+  | { type: "removed"; id: string }
+  /** Yard tiles changed: [tileKey, kind] pairs, kind "" = removed. */
+  | { type: "tiles"; changes: [string, string][] };
 
 /**
  * One player's shop (money + furniture), shared by every room that uses it: the room the player
@@ -33,6 +40,8 @@ export type ShopEvent =
 export class SharedShop {
   money = 0;
   readonly pieces: Piece[] = [];
+  /** Yard buildings: tileKey -> tile kind. */
+  readonly tiles = new Map<string, string>();
 
   private seq = 0;
   private loading?: Promise<void>;
@@ -118,12 +127,48 @@ export class SharedShop {
     this.scheduleSave();
   }
 
+  /**
+   * Build (or erase) yard tiles over a dragged rectangle of cells (see cellsForTool). Cells already holding that
+   * tile are skipped; replacing or erasing a tile refunds part of its price. `blocked` cells (a player stands there)
+   * don't get walls. Returns an error message, or undefined on success.
+   */
+  build(tool: unknown, x0: unknown, y0: unknown, x1: unknown, y1: unknown, blocked: (cx: number, cy: number) => boolean): string | undefined {
+    const kind = String(tool);
+    const def = getBuildTile(kind);
+    if (!def && kind !== ERASE_TOOL) return "Không có loại này";
+    const solid = def?.shape === "wall" || def?.shape === "fence";
+    const changes: [string, string][] = [];
+    let cost = 0;
+    for (const { cx, cy } of cellsForTool(kind, Number(x0), Number(y0), Number(x1), Number(y1))) {
+      const key = tileKey(cx, cy);
+      const old = this.tiles.get(key);
+      if (def ? old === def.kind : !old) continue;
+      if (solid && blocked(cx, cy)) continue;
+      const oldDef = getBuildTile(old);
+      cost += (def?.price ?? 0) - (oldDef ? buildRefund(oldDef) : 0);
+      changes.push([key, def?.kind ?? ""]);
+    }
+    if (!changes.length) return def ? "Không xây được ở đây" : undefined;
+    if (cost > this.money) return `Không đủ tiền (cần $${cost})`;
+
+    for (const [key, k] of changes) {
+      if (k) this.tiles.set(key, k);
+      else this.tiles.delete(key);
+    }
+    this.money -= cost;
+    this.emit({ type: "tiles", changes });
+    this.emit({ type: "money", money: this.money });
+    this.scheduleSave();
+    return undefined;
+  }
+
   /** Current money + furniture, in the save format (e.g. for a backup). */
   snapshot(): ShopSave {
     return {
       version: 1,
       money: this.money,
       decorations: this.pieces.map(({ kind, x, y, rotation }) => ({ kind, x, y, rotation })),
+      tiles: Object.fromEntries(this.tiles),
     };
   }
 
@@ -134,8 +179,11 @@ export class SharedShop {
   async replace(save: ShopSave): Promise<number> {
     await this.load(); // a load finishing later must not overwrite the restored state
     for (const piece of this.pieces.splice(0)) this.emit({ type: "removed", id: piece.id });
+    const removedTiles = [...this.tiles.keys()].map((key): [string, string] => [key, ""]);
+    this.tiles.clear();
     const dropped = this.apply(save);
     for (const piece of this.pieces) this.emit({ type: "added", piece });
+    this.emit({ type: "tiles", changes: [...removedTiles, ...this.tiles] });
     this.emit({ type: "money", money: this.money });
     this.scheduleSave();
     await this.flush();
@@ -179,6 +227,7 @@ export class SharedShop {
   /** Load a save's money + furniture into memory (pieces must be empty). Returns how many pieces were dropped. */
   private apply(save: ShopSave): number {
     this.money = save.money;
+    for (const [key, kind] of Object.entries(save.tiles ?? {})) this.tiles.set(key, kind);
     let dropped = 0;
     for (const d of save.decorations) {
       // Re-validate in case the layout or catalog changed since the save. Pieces that no longer fit

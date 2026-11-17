@@ -14,6 +14,12 @@ import {
   WORLD_HEIGHT,
   WORLD_WIDTH,
   directionFromInput,
+  inRect,
+  isInYard,
+  solidLookup,
+  SHOP_ENTER_ZONE,
+  SHOP_EXIT_ZONE,
+  YARD,
   findInteractTarget,
   footprintBox,
   pendingDrinksAt,
@@ -37,6 +43,8 @@ import { DECOR_ROTATE, PALETTE_DRAG_START, type PaletteDragStart } from "../ui/D
 import { CupView, preloadCupTextures } from "./CupView";
 import { DecorController, preloadDecorTextures } from "./DecorController";
 import { CustomerController } from "./CustomerController";
+import { YardView } from "./YardView";
+import { BuildController } from "./BuildController";
 import { CHARACTER_BODY_PX, DIRECTION_ROW, FEET_Y, HEAD_Y, WALK_COLUMNS, WALK_FPS, characterKey, characterOf } from "./characterArt";
 
 import type { BobaShopState, Player } from "@boba/shared/schema";
@@ -49,6 +57,14 @@ const fs = (px: number) => `${Math.round(px * FONT_SCALE)}px`;
 
 /** game.events event from the DOM 🪑 button: payload = true (enter decorate mode) / false (leave). */
 export const DECORATE_MODE_EVENT = "decorate-mode";
+/** game.events event from the DOM 🔨 button: payload = true (enter build mode) / false (leave). */
+export const BUILD_MODE_EVENT = "build-mode";
+/** game.events event from the build panel: payload = tool (tile kind or ERASE_TOOL). */
+export const BUILD_TOOL_EVENT = "build-tool";
+/** game.events event from the scene: payload = true when the local player is in the yard, false inside the shop. */
+export const AREA_EVENT = "area-changed";
+/** Don't send UseDoor again while waiting for the server's teleport. */
+const DOOR_RESEND_MS = 700;
 
 /**
  * Remote players are drawn this far in the past so there are always two snapshots to interpolate between,
@@ -185,6 +201,13 @@ export class ShopScene extends Phaser.Scene {
   private stations = new Map<string, StationView>();
   private decor?: DecorController;
   private customers?: CustomerController;
+  private yard?: YardView;
+  private build?: BuildController;
+  /** Area the camera currently shows (undefined until the local player exists). */
+  private inYard?: boolean;
+  private lastDoorAt = 0;
+  /** Walls in the yard for movement prediction (same rule as the server). */
+  private readonly solid = solidLookup({ get: (key: string) => this.room?.state.tiles?.get(key) });
   /** Outline around the table the action key would serve. */
   private tableHighlight!: Phaser.GameObjects.Rectangle;
 
@@ -235,6 +258,7 @@ export class ShopScene extends Phaser.Scene {
 
     this.drawFloor();
     this.drawWall();
+    this.drawExit();
     this.createStations();
     this.createHud();
     this.tableHighlight = this.add.rectangle(0, 0, 1, 1).setStrokeStyle(3, 0xffd166).setVisible(false);
@@ -257,15 +281,26 @@ export class ShopScene extends Phaser.Scene {
     };
     const onPaletteDrag = (e: PaletteDragStart) => this.decor?.startPaletteDrag(e);
     const onRotate = () => this.decor?.rotate();
+    const onBuildMode = (enabled: boolean) => {
+      this.build?.setEnabled(enabled);
+      this.touch?.setEnabled(!enabled); // dragging builds instead of steering
+    };
+    const onBuildTool = (tool: string) => this.build?.setTool(tool);
     this.game.events.on(DECORATE_MODE_EVENT, onDecorateMode);
     this.game.events.on(PALETTE_DRAG_START, onPaletteDrag);
     this.game.events.on(DECOR_ROTATE, onRotate);
+    this.game.events.on(BUILD_MODE_EVENT, onBuildMode);
+    this.game.events.on(BUILD_TOOL_EVENT, onBuildTool);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.game.events.off(DECORATE_MODE_EVENT, onDecorateMode);
       this.game.events.off(PALETTE_DRAG_START, onPaletteDrag);
       this.game.events.off(DECOR_ROTATE, onRotate);
+      this.game.events.off(BUILD_MODE_EVENT, onBuildMode);
+      this.game.events.off(BUILD_TOOL_EVENT, onBuildTool);
       this.decor?.destroy();
       this.customers?.destroy();
+      this.yard?.destroy();
+      this.build?.destroy();
     });
 
     if (this.room) this.bindRoom(this.room);
@@ -277,9 +312,15 @@ export class ShopScene extends Phaser.Scene {
     this.updateStatus();
     const $ = Callbacks.get(room);
 
+    // The yard outside the shop and building on it.
+    this.yard = new YardView(this, room);
+    this.build = new BuildController(this, room);
+
     $.onAdd("players", (player, sessionId) => {
       const view = this.createPlayerView(player, sessionId === room.sessionId);
       this.players.set(sessionId, view);
+      // The camera follows us around the yard (inside the shop it can't scroll: the bounds equal the view).
+      if (view.isLocal) this.cameras.main.startFollow(view.container, true);
       this.updateStatus();
 
       $.onChange(player, () => this.onPlayerChanged(view, player));
@@ -368,6 +409,7 @@ export class ShopScene extends Phaser.Scene {
       this.animateWalk(view, dt);
     }
     this.customers?.update(dt);
+    this.updateArea();
 
     this.updateStationHighlight();
   }
@@ -387,12 +429,13 @@ export class ShopScene extends Phaser.Scene {
     if (local) {
       const moving = dx !== 0 || dy !== 0;
       if (moving) {
-        const next = stepMovement(local.container, dx, dy, dt);
+        const next = stepMovement(local.container, dx, dy, dt, this.solid);
         local.container.setPosition(next.x, next.y);
         this.localDirection = directionFromInput(dx, dy, this.localDirection);
         this.applyFacing(local, this.localDirection);
       }
       this.sendPosition(local, moving);
+      this.checkDoor(local);
     }
 
     // Always consume both so a stale tap doesn't fire later.
@@ -401,6 +444,31 @@ export class ShopScene extends Phaser.Scene {
     if (pressedSpace || tappedAction) {
       this.room.send(Messages.Interact);
     }
+  }
+
+  /** Standing on the doormat (outside) or at the exit (inside): ask the server to go through the door. */
+  private checkDoor(local: PlayerView) {
+    const pos = local.container;
+    const zone = isInYard(pos) ? SHOP_ENTER_ZONE : SHOP_EXIT_ZONE;
+    const now = performance.now();
+    if (!inRect(pos, zone) || now - this.lastDoorAt < DOOR_RESEND_MS) return;
+    this.lastDoorAt = now;
+    this.room!.send(Messages.UseDoor);
+  }
+
+  /** Point the camera at the area the local player is in (shop: fixed view; yard: scrolls with the player). */
+  private updateArea() {
+    const local = this.room ? this.players.get(this.room.sessionId) : undefined;
+    if (!local) return;
+    const inYard = isInYard(local.container);
+    if (inYard === this.inYard) return;
+    this.inYard = inYard;
+    const cam = this.cameras.main;
+    if (inYard) cam.setBounds(YARD.x, YARD.y, YARD.width, YARD.height);
+    else cam.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    cam.centerOn(local.container.x, local.container.y);
+    this.lastActionKey = ""; // refresh the action hint
+    this.game.events.emit(AREA_EVENT, inYard);
   }
 
   // ---------------------------------------------------------------- Views
@@ -423,6 +491,17 @@ export class ShopScene extends Phaser.Scene {
     // Soft contact shadow where the wall meets the floor.
     g.fillGradientStyle(0x3d2c29, 0x3d2c29, 0x3d2c29, 0x3d2c29, 0.28, 0.28, 0, 0);
     g.fillRect(0, WALL_BOTTOM, WORLD_WIDTH, WALL.shadowHeight);
+  }
+
+  /** Doormat at the bottom of the shop floor: stepping on it goes out to the yard. */
+  private drawExit() {
+    const z = SHOP_EXIT_ZONE;
+    const cx = (z.left + z.right) / 2;
+    this.add.rectangle(cx, WORLD_HEIGHT - 10, z.right - z.left, 20, 0xe76f51).setStrokeStyle(2, 0x9a4432).setDepth(-890);
+    this.add
+      .text(cx, WORLD_HEIGHT - 10, "⬇ Ra sân", { fontFamily: "sans-serif", fontSize: fs(11), fontStyle: "bold", color: "#fdf6ec" })
+      .setOrigin(0.5)
+      .setDepth(-889);
   }
 
   private createStations() {
@@ -503,20 +582,20 @@ export class ShopScene extends Phaser.Scene {
   private createHud() {
     this.moneyText = this.add
       .text(16, 12, "💰 $0", { fontFamily: "sans-serif", fontSize: "22px", color: "#3d2c29", fontStyle: "bold" })
-      .setDepth(10000);
+      .setDepth(10000).setScrollFactor(0);
     this.statusText = this.add
       .text(16, WORLD_HEIGHT - 52, "Đang kết nối...", { fontFamily: "sans-serif", fontSize: fs(14), color: "#3d2c29" })
-      .setDepth(10000);
+      .setDepth(10000).setScrollFactor(0);
     this.add
       .text(
         16,
         WORLD_HEIGHT - 28,
         isTouchDevice()
           ? "Chạm nửa trái để di chuyển · nút tròn bên phải để tương tác"
-          : "WASD/mũi tên: di chuyển · Space: tương tác · 🪑 Trang trí: kéo thả đồ (ngoài giờ ca)",
+          : "WASD/mũi tên: đi · Space: tương tác · thảm đỏ: ra sân",
         { fontFamily: "sans-serif", fontSize: fs(13), color: "#6b5b57" },
       )
-      .setDepth(10000);
+      .setDepth(10000).setScrollFactor(0);
     // Desktop: previews what Space does at the highlighted station.
     this.actionHint = this.add
       .text(WORLD_WIDTH - 16, WORLD_HEIGHT - 84, "", {
@@ -528,15 +607,15 @@ export class ShopScene extends Phaser.Scene {
         padding: { x: 6, y: 2 },
       })
       .setOrigin(1, 0)
-      .setDepth(10000);
+      .setDepth(10000).setScrollFactor(0);
     this.shiftText = this.add
       .text(WORLD_WIDTH - 16, 12, "", { fontFamily: "sans-serif", fontSize: "22px", color: "#3d2c29", fontStyle: "bold" })
       .setOrigin(1, 0)
-      .setDepth(10000);
+      .setDepth(10000).setScrollFactor(0);
     this.toastText = this.add
       .text(WORLD_WIDTH / 2, 20, "", { fontFamily: "sans-serif", fontSize: fs(18), color: "#2a9d8f", fontStyle: "bold" })
       .setOrigin(0.5, 0)
-      .setDepth(10000)
+      .setDepth(10000).setScrollFactor(0)
       .setAlpha(0);
   }
 

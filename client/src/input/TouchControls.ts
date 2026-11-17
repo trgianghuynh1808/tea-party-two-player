@@ -67,7 +67,8 @@ export class TouchControls {
       })
       .setOrigin(0.5);
 
-    for (const o of [this.base, this.knob, this.button, this.buttonLabel]) o.setDepth(UI_DEPTH);
+    // Screen-space UI: stays put while the camera scrolls around the yard.
+    for (const o of [this.base, this.knob, this.button, this.buttonLabel]) o.setDepth(UI_DEPTH).setScrollFactor(0);
 
     this.button.on(Phaser.Input.Events.GAMEOBJECT_POINTER_DOWN, () => {
       this.actionQueued = true;

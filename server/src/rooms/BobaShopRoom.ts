@@ -50,6 +50,16 @@ import {
   cupContents,
   getDrink,
   makeCup,
+  PLAYER_RADIUS,
+  SHOP_ENTER_ZONE,
+  SHOP_ENTRY_SPAWN,
+  SHOP_EXIT_ZONE,
+  YARD_SPAWN,
+  cellRect,
+  inRect,
+  isInYard,
+  solidLookup,
+  type BuildTilesMessage,
   type DeliveredEvent,
   type DrinkDef,
   type MachineOverflowEvent,
@@ -134,6 +144,8 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
   private touchedShops = new Set<SharedShop>();
 
   private moveBudgets = new Map<string, MoveBudget>();
+  /** Walls in the yard, read from the synced tiles (same lookup the clients use to predict movement). */
+  private readonly solid = solidLookup(this.state.tiles);
   private deliveryTimers = new Map<string, number>();
   private orderSeq = 0;
   private orderSpawnTimer = FIRST_ORDER_DELAY_SECONDS;
@@ -155,6 +167,12 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     },
     sell_decoration: (client: Client, payload: { id: string }) => {
       this.handleSellDecoration(client, payload);
+    },
+    use_door: (client: Client) => {
+      this.handleUseDoor(client);
+    },
+    build_tiles: (client: Client, payload: BuildTilesMessage) => {
+      this.handleBuildTiles(client, payload);
     },
     start_shift: () => {
       if (this.state.phase !== GamePhase.Playing) this.startShift();
@@ -389,6 +407,8 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
   private mirrorShop() {
     this.state.decorations.clear();
     for (const piece of this.hostShop?.pieces ?? []) this.state.decorations.push(this.toDecoration(piece));
+    this.state.tiles.clear();
+    for (const [key, kind] of this.hostShop?.tiles ?? []) this.state.tiles.set(key, kind);
   }
 
   private onShopEvent(event: ShopEvent) {
@@ -412,6 +432,12 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
         if (index >= 0) list.splice(index, 1);
         return;
       }
+      case "tiles":
+        for (const [key, kind] of event.changes) {
+          if (kind) this.state.tiles.set(key, kind);
+          else this.state.tiles.delete(key);
+        }
+        return;
     }
   }
 
@@ -678,11 +704,48 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     }
     move.budget -= dist;
 
-    const resolved = resolveCollisions({ x, y });
+    // Positions only change area through the door (server teleport), never by walking.
+    if (isInYard({ y }) !== isInYard(player)) {
+      player.teleportSeq++;
+      return;
+    }
+    const resolved = resolveCollisions({ x, y }, this.solid);
     player.x = resolved.x;
     player.y = resolved.y;
     if (DIRECTIONS.has(payload.direction)) player.direction = payload.direction;
     if (Math.hypot(resolved.x - x, resolved.y - y) > COLLISION_TOLERANCE) player.teleportSeq++;
+  }
+
+  /** Through the shop's door: from the doormat outside to inside, or from the exit inside to the yard. */
+  private handleUseDoor(client: Client) {
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+    // A little slack: the client reports positions every 50 ms.
+    const outside = isInYard(player);
+    if (!inRect(player, outside ? SHOP_ENTER_ZONE : SHOP_EXIT_ZONE, 24)) return;
+    const spawn = outside ? SHOP_ENTRY_SPAWN : YARD_SPAWN;
+    player.x = spawn.x;
+    player.y = spawn.y;
+    player.direction = outside ? "up" : "down";
+    player.teleportSeq++;
+    this.resetMoveBudget(client.sessionId);
+  }
+
+  /** Building in the yard: the host's land, paid from the host's wallet. Allowed during shifts too. */
+  private handleBuildTiles(client: Client, payload: BuildTilesMessage) {
+    if (!this.hostShop || this.sessionNames.get(client.sessionId) !== this.hostKey) {
+      return client.send(ServerEvents.InteractFailed, { reason: `Chỉ chủ phòng (${this.state.hostName}) mới xây được` });
+    }
+    // No wall on top of someone standing in the yard.
+    const blocked = (cx: number, cy: number) => {
+      const r = cellRect(cx, cy);
+      for (const p of this.state.players.values()) {
+        if (isInYard(p) && inRect(p, r, PLAYER_RADIUS)) return true;
+      }
+      return false;
+    };
+    const error = this.hostShop.build(payload?.tool, payload?.x0, payload?.y0, payload?.x1, payload?.y1, blocked);
+    if (error) client.send(ServerEvents.InteractFailed, { reason: error });
   }
 
   private handleInteract(client: Client) {

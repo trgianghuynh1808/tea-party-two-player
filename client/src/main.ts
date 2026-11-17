@@ -29,7 +29,8 @@ import {
 } from "@boba/shared";
 import type { BobaShopState } from "@boba/shared/schema";
 import { FORCE_TOUCH_PARAM, isTouchDevice } from "./input/TouchControls";
-import { DECORATE_MODE_EVENT, ShopScene, type ShopSceneData } from "./scenes/ShopScene";
+import { AREA_EVENT, BUILD_MODE_EVENT, BUILD_TOOL_EVENT, DECORATE_MODE_EVENT, ShopScene, type ShopSceneData } from "./scenes/ShopScene";
+import { BuildPanel } from "./ui/BuildPanel";
 import { DECOR_ROTATE, DecorPanel, PALETTE_DRAG_START } from "./ui/DecorPanel";
 import { OrdersPanel, buildMenu } from "./ui/OrdersPanel";
 import { ShiftOverlay } from "./ui/ShiftOverlay";
@@ -58,6 +59,8 @@ const decorateBtn = $<HTMLButtonElement>("decorate-btn");
 const fullscreenBtn = $<HTMLButtonElement>("fullscreen-btn");
 const ordersRoot = $<HTMLElement>("orders-panel");
 const decorRoot = $<HTMLElement>("decor-panel");
+const buildBtn = $<HTMLButtonElement>("build-btn");
+const buildRoot = $<HTMLElement>("build-panel");
 const menuInline = $<HTMLElement>("menu-inline");
 const shiftOverlayRoot = $<HTMLElement>("shift-overlay");
 const modal = $<HTMLElement>("modal");
@@ -80,6 +83,10 @@ let ordersPanel: OrdersPanel | undefined;
 let shiftOverlay: ShiftOverlay | undefined;
 let decorPanel: DecorPanel | undefined;
 let decorating = false;
+let buildPanel: BuildPanel | undefined;
+let building = false;
+/** Last build tool picked (the panel is rebuilt for every room). */
+let buildTool = "floor_wood";
 
 // Keep the ?touch=1 debug flag across URL rewrites so a refresh still forces touch controls.
 const forceTouch = new URLSearchParams(location.search).get(FORCE_TOUCH_PARAM) === "1";
@@ -455,16 +462,37 @@ function startGame(room: Room<BobaShopState>) {
   $state.onAdd("players", renderPlayerCount);
   $state.onRemove("players", renderPlayerCount);
 
-  // Only the host decorates (the room shows their furniture), and only between shifts.
+  buildPanel = new BuildPanel(buildRoot, room, (tool) => {
+    buildTool = tool;
+    game?.events.emit(BUILD_TOOL_EVENT, tool);
+  });
+
+  // Only the host decorates (the room shows their furniture), and only between shifts, inside the shop.
+  // Building is on the host's land outside the shop: host only, any time.
   let amHost = false;
+  let inYard = false;
   const updateDecorateBtn = () => {
     const playing = room.state.phase === GamePhase.Playing;
-    decorateBtn.disabled = playing || !amHost;
-    decorateBtn.title = amHost
-      ? "Trang trí quán (ngoài giờ ca)"
-      : `Quán này dùng nội thất của ${room.state.hostName || "chủ phòng"}, chỉ chủ phòng mới trang trí được`;
+    const host = room.state.hostName || "chủ phòng";
+    decorateBtn.disabled = playing || !amHost || inYard;
+    decorateBtn.title = !amHost
+      ? `Quán này dùng nội thất của ${host}, chỉ chủ phòng mới trang trí được`
+      : inYard
+        ? "Vào trong quán để trang trí"
+        : "Trang trí quán (ngoài giờ ca)";
     if (decorateBtn.disabled && decorating) setDecorating(false);
+    buildBtn.disabled = !amHost || !inYard;
+    buildBtn.title = !amHost
+      ? `Đất này của ${host}, chỉ chủ phòng mới xây được`
+      : inYard
+        ? "Xây nhà trên đất trống"
+        : "Ra khỏi quán (cửa ở giữa cạnh dưới) để xây nhà";
+    if (buildBtn.disabled && building) setBuilding(false);
   };
+  game.events.on(AREA_EVENT, (yard: boolean) => {
+    inYard = yard;
+    updateDecorateBtn();
+  });
   $state.listen("phase", updateDecorateBtn);
   $state.listen("hostName", updateDecorateBtn);
   $state.onAdd("players", (player, sessionId) => {
@@ -493,6 +521,9 @@ function stopGame() {
   decorPanel?.destroy();
   decorPanel = undefined;
   if (decorating) setDecorating(false);
+  buildPanel?.destroy();
+  buildPanel = undefined;
+  if (building) setBuilding(false);
   shiftOverlay = undefined;
   ordersPanel = undefined;
   currentRoom = undefined;
@@ -548,6 +579,7 @@ menuBtn.addEventListener("click", () => openModal("📋 Menu", buildMenu()));
 // ---------------------------------------------------------------- Decorate mode (between shifts only)
 
 function setDecorating(on: boolean) {
+  if (on && building) setBuilding(false);
   decorating = on;
   decorateBtn.classList.toggle("active", on);
   decorateBtn.querySelector("span")!.textContent = on ? "Xong" : "Trang trí";
@@ -556,6 +588,28 @@ function setDecorating(on: boolean) {
   if (on) shiftOverlay?.collapse(); // the shift card would cover the shop
   game?.events.emit(DECORATE_MODE_EVENT, on);
 }
+
+// ---------------------------------------------------------------- Build mode (in the yard, host only)
+
+function setBuilding(on: boolean) {
+  if (on && decorating) setDecorating(false);
+  building = on;
+  buildBtn.classList.toggle("active", on);
+  buildBtn.querySelector("span")!.textContent = on ? "Xong" : "Xây";
+  buildRoot.hidden = !on;
+  ordersRoot.hidden = on;
+  if (on) {
+    shiftOverlay?.collapse();
+    game?.events.emit(BUILD_TOOL_EVENT, buildTool);
+  }
+  game?.events.emit(BUILD_MODE_EVENT, on);
+}
+
+buildBtn.addEventListener("click", () => {
+  if (!currentRoom || buildBtn.disabled) return;
+  setBuilding(!building);
+  buildBtn.blur(); // keep Space / WASD for the game
+});
 
 decorateBtn.addEventListener("click", () => {
   if (!currentRoom || decorateBtn.disabled) return;

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { getDecorationDef, isValidShopId, type ShopSave } from "@boba/shared";
+import { canBuildCell, getBuildTile, getDecorationDef, isValidShopId, parseTileKey, type ShopSave } from "@boba/shared";
 
 /**
  * The game's database: two collections.
@@ -151,7 +151,18 @@ export function parseShopSave(data: unknown): ShopSave {
     decorations: (Array.isArray(save.decorations) ? save.decorations : [])
       .filter((d) => d && getDecorationDef(d.kind) && Number.isFinite(d.x) && Number.isFinite(d.y))
       .map(({ kind, x, y, rotation }) => ({ kind, x, y, rotation: Number.isFinite(rotation) ? rotation : 0 })),
+    tiles: parseTiles(save.tiles),
   };
+}
+
+function parseTiles(data: unknown): Record<string, string> {
+  const tiles: Record<string, string> = {};
+  if (!data || typeof data !== "object") return tiles;
+  for (const [key, kind] of Object.entries(data)) {
+    const cell = parseTileKey(key);
+    if (cell && canBuildCell(cell.cx, cell.cy) && typeof kind === "string" && getBuildTile(kind)) tiles[key] = kind;
+  }
+  return tiles;
 }
 
 /**
