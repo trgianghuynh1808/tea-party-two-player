@@ -24,19 +24,12 @@ export interface CharacterDef {
   bodyHeight: number;
 }
 
+/**
+ * Every character uses the maid's frame layout and body size: 72 px tall frames (40 px wide, wider only when
+ * the figure needs it), feet on row 70, body ~60 px tall, 3 walk columns (step, stand, step).
+ * Build new sheets with client/assets-src/characters/build_walk_sheet.py.
+ */
 export const CHARACTERS: CharacterDef[] = [
-  {
-    id: "female",
-    gender: "female",
-    name: "Cô nông dân",
-    sheet: "assets/characters/female.png",
-    frameWidth: 32,
-    frameHeight: 32,
-    columns: 1,
-    standColumn: 0,
-    feetRow: 24,
-    bodyHeight: 20,
-  },
   {
     id: "maid",
     gender: "female",
@@ -50,16 +43,40 @@ export const CHARACTERS: CharacterDef[] = [
     bodyHeight: 60,
   },
   {
-    id: "male",
+    id: "young_master",
     gender: "male",
-    name: "Anh nông dân",
-    sheet: "assets/characters/male.png",
-    frameWidth: 32,
-    frameHeight: 32,
-    columns: 1,
-    standColumn: 0,
-    feetRow: 24,
-    bodyHeight: 20,
+    name: "Cậu thiếu gia",
+    sheet: "assets/characters/young_master.png",
+    frameWidth: 40,
+    frameHeight: 72,
+    columns: 3,
+    standColumn: 1,
+    feetRow: 71,
+    bodyHeight: 60,
+  },
+  {
+    id: "schoolgirl",
+    gender: "female",
+    name: "Cô nữ sinh",
+    sheet: "assets/characters/schoolgirl.png",
+    frameWidth: 52,
+    frameHeight: 72,
+    columns: 3,
+    standColumn: 1,
+    feetRow: 71,
+    bodyHeight: 60,
+  },
+  {
+    id: "schoolboy",
+    gender: "male",
+    name: "Cậu học sinh",
+    sheet: "assets/characters/schoolboy.png",
+    frameWidth: 40,
+    frameHeight: 72,
+    columns: 3,
+    standColumn: 1,
+    feetRow: 71,
+    bodyHeight: 60,
   },
 ];
 
