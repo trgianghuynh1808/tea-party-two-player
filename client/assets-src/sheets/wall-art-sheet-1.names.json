@@ -5,7 +5,6 @@
   "decor/wall/tapestry.png": [6],
   "decor/wall/photo_cat.png": [5],
   "decor/wall/photo_dog.png": [7],
-  "decor/wall/art_arches.png": [8],
   "decor/wall/art_tulips.png": [9],
   "decor/wall/art_vase.png": [10],
   "decor/wall/art_sunset.png": [12],
@@ -14,9 +13,6 @@
   "decor/wall/art_sunflowers.png": [18],
   "decor/wall/art_orange.png": [19],
   "decor/wall/art_apple.png": [20],
-  "decor/wall/art_leopard.png": [21],
-  "decor/wall/art_shapes.png": [23],
   "decor/wall/art_grid.png": [24],
-  "decor/wall/art_heart.png": [25],
-  "decor/wall/art_mouse.png": [26]
+  "decor/wall/art_heart.png": [25]
 }
