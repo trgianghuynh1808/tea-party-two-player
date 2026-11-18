@@ -1,6 +1,6 @@
 import { Callbacks, type Room } from "@colyseus/sdk";
-import { BUILD_REFUND_RATE, BUILD_TILES, ERASE_TOOL, type BuildTileDef } from "@boba/shared";
-import { propUrl } from "../scenes/YardView";
+import { BUILD_REFUND_RATE, BUILD_TILES, DECORATION_CATEGORIES, ERASE_TOOL, type BuildTileDef } from "@boba/shared";
+import { propThumbnail } from "../scenes/YardView";
 import type { BobaShopState } from "@boba/shared/schema";
 
 const hex = (color: number) => "#" + color.toString(16).padStart(6, "0");
@@ -11,6 +11,11 @@ const GROUPS: { title: string; has: (def: BuildTileDef) => boolean }[] = [
   { title: "🚪 Cửa (đặt lên 1 ô)", has: (d) => d.shape === "door" },
   { title: "🌳 Cây cối (bấm vào 1 ô)", has: (d) => d.group === "tree" },
   { title: "🪵 Đồ ngoài trời (bấm vào 1 ô)", has: (d) => d.group === "outdoor" },
+  // Furniture shared with the decorate catalog, in its groups (rugs / wall art have no yard version).
+  ...DECORATION_CATEGORIES.map((c) => ({
+    title: `${c.title} (nội thất, bấm vào 1 ô)`,
+    has: (d: BuildTileDef) => d.group === "decor" && d.category === c.id,
+  })),
 ];
 
 /** Build mode side panel: pick a material (or the eraser), then drag over the yard (BuildController). */
@@ -37,10 +42,12 @@ export class BuildPanel {
     const list = Object.assign(document.createElement("div"), { className: "decor-list" });
 
     for (const group of GROUPS) {
+      const defs = BUILD_TILES.filter(group.has);
+      if (!defs.length) continue;
       list.append(Object.assign(document.createElement("h3"), { className: "build-group", textContent: group.title }));
-      for (const def of BUILD_TILES.filter(group.has)) {
+      for (const def of defs) {
         const price = def.shape === "prop" ? `$${def.price}` : `$${def.price}/ô`;
-        list.append(this.makeButton(def.kind, def.label, price, hex(def.color), hex(def.accent), def.image && propUrl(def.image)));
+        list.append(this.makeButton(def.kind, def.label, price, hex(def.color), hex(def.accent), propThumbnail(def), !def.decor));
       }
     }
     list.append(Object.assign(document.createElement("h3"), { className: "build-group", textContent: "🧽 Dỡ bỏ" }));
@@ -62,11 +69,11 @@ export class BuildPanel {
     this.unsubscribers.forEach((off) => off());
   }
 
-  private makeButton(tool: string, label: string, price: string, color: string, accent: string, image?: string): HTMLElement {
+  private makeButton(tool: string, label: string, price: string, color: string, accent: string, image?: string, pixelArt = true): HTMLElement {
     const el = Object.assign(document.createElement("button"), { type: "button", className: "decor-item build-item" });
     let swatch: HTMLElement;
     if (image) {
-      swatch = Object.assign(document.createElement("img"), { className: "swatch-img pixel", src: `${import.meta.env.BASE_URL}${image}`, alt: "" });
+      swatch = Object.assign(document.createElement("img"), { className: pixelArt ? "swatch-img pixel" : "swatch-img", src: `${import.meta.env.BASE_URL}${image}`, alt: "" });
     } else {
       swatch = Object.assign(document.createElement("span"), { className: "swatch" });
       swatch.style.background = `linear-gradient(135deg, ${color} 60%, ${accent} 60%)`;

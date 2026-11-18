@@ -14,6 +14,7 @@ import {
   cellRect,
   connectMask,
   floorAt,
+  getDecorationDef,
   parseTileKey,
   propAnchor,
   structureAt,
@@ -21,6 +22,7 @@ import {
   type TileGetter,
 } from "@boba/shared";
 import type { BobaShopState } from "@boba/shared/schema";
+import { decorTextureKey } from "./DecorController";
 
 const GROUND_DEPTH = -1000;
 const FLOOR_DEPTH = -900;
@@ -32,6 +34,30 @@ const pieceUrl = (name: string) => `assets/build/${name}.png`;
 /** Outdoor props (trees, bench...): client/public/assets/decor/yard/ (client/assets-src/tools/draw_yard_props.py). */
 export const propKey = (kind: string) => `build-prop-${kind}`;
 export const propUrl = (image: string) => `assets/decor/yard/${image}.png`;
+
+/**
+ * How a prop is drawn: yard pixel art at PROP_SCALE, or furniture from the decorate catalog (front view)
+ * at its catalog height. undefined = artwork not loaded.
+ */
+export function propTexture(scene: Phaser.Scene, def: BuildTileDef): { key: string; scale: number } | undefined {
+  const decor = def.decor ? getDecorationDef(def.decor) : undefined;
+  if (decor) {
+    const front = decorTextureKey(decor.kind, "front");
+    const key = decor.views && scene.textures.exists(front) ? front : decorTextureKey(decor.kind);
+    if (!scene.textures.exists(key)) return undefined;
+    const height = scene.textures.getFrame(key).height;
+    return { key, scale: (decor.imageHeight ?? decor.height) / height };
+  }
+  const key = propKey(def.kind);
+  return scene.textures.exists(key) ? { key, scale: PROP_SCALE } : undefined;
+}
+
+/** Catalog thumbnail of a prop (build panel), or undefined for tiles drawn with code. */
+export function propThumbnail(def: BuildTileDef): string | undefined {
+  const decor = def.decor ? getDecorationDef(def.decor) : undefined;
+  if (decor) return decor.views?.front ?? decor.image;
+  return def.image && propUrl(def.image);
+}
 
 /** Load the wall / fence / door pieces (call from the scene's preload). */
 export function preloadBuildTextures(scene: Phaser.Scene) {
@@ -152,11 +178,11 @@ export class YardView {
     }
 
     if (structure?.shape === "prop") {
-      // Props stand on the bottom of their cell, drawn at a whole-number scale so the pixels stay square.
-      const key = propKey(structure.kind);
-      if (this.scene.textures.exists(key)) {
+      // Props stand on the bottom of their cell (pixel art at a whole-number scale so the pixels stay square).
+      const tex = propTexture(this.scene, structure);
+      if (tex) {
         const at = propAnchor(cx, cy);
-        view.structure = this.scene.add.image(at.x, at.y + 2, key).setOrigin(0.5, 1).setScale(PROP_SCALE).setDepth(at.y);
+        view.structure = this.scene.add.image(at.x, at.y + 2, tex.key).setOrigin(0.5, 1).setScale(tex.scale).setDepth(at.y);
       }
     } else if (structure) {
       const key = pieceKey(pieceName(this.tiles, structure, cx, cy));

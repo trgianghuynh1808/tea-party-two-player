@@ -1,3 +1,5 @@
+import { DECORATION_CATALOG, type DecorationCategory, type DecorationDef } from "./decor";
+
 // The world outside the tea shop: a big yard with the shop building in its top-left corner.
 // Everything lives in one coordinate system so positions, collisions and the camera stay simple:
 // - the shop interior is the 960×600 box at the origin (as before),
@@ -54,14 +56,37 @@ export interface BuildTileDef {
   accent: number;
   /** Props: artwork client/public/assets/decor/yard/<image>.png (client/assets-src/tools/draw_yard_props.py). */
   image?: string;
-  /** Props: build panel group. */
-  group?: "tree" | "outdoor";
+  /** Props: build panel group ("decor" = furniture shared with the decorate catalog). */
+  group?: "tree" | "outdoor" | "decor";
+  /** Furniture props: the decorate-catalog piece this tile shows (its artwork, front view). */
+  decor?: string;
+  /** Furniture props: decorate-catalog group (build panel section). */
+  category?: DecorationCategory;
   /** Props that block movement: size (world px) of the blocked box at the foot of the prop (trunk, base...). */
   block?: { w: number; h: number };
 }
 
 /** Players can't walk through these. */
 export const isSolidShape = (shape: BuildShape) => shape === "wall" || shape === "fence";
+
+/** Build kind of a decorate-catalog piece placed in the yard (prefixed so it never clashes with yard kinds). */
+export const decorPropKind = (decorKind: string) => `decor_${decorKind}`;
+
+function decorProp(d: DecorationDef): BuildTileDef {
+  return {
+    kind: decorPropKind(d.kind),
+    label: d.label,
+    price: d.price,
+    shape: "prop",
+    color: d.color,
+    accent: 0x3d2c29,
+    group: "decor",
+    decor: d.kind,
+    category: d.category,
+    // The floor footprint blocks players, capped to the cell.
+    block: { w: Math.min(d.width, BUILD_TILE - 4), h: Math.min(d.height, 16) },
+  };
+}
 
 // Kinds are saved in shop files: keep existing ones when changing the catalog.
 export const BUILD_TILES: BuildTileDef[] = [
@@ -114,6 +139,9 @@ export const BUILD_TILES: BuildTileDef[] = [
       block,
     }),
   ),
+  // Standing furniture from the decorate catalog (plants, chairs, lanterns...): one piece per cell, same art and price.
+  // Rugs and wall art aren't included: they don't fit the one-object-per-cell grid.
+  ...DECORATION_CATALOG.filter((d) => d.layer === "object").map(decorProp),
 ];
 
 export const getBuildTile = (kind: string | undefined) => (kind ? BUILD_TILES.find((t) => t.kind === kind) : undefined);

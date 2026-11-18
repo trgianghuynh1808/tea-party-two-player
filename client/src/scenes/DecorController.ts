@@ -34,7 +34,7 @@ const GRID_LINE_ALPHA = 0.35;
 /** If the server rejects a move/turn, the synced state doesn't change: re-sync to it after this long. */
 const RESYNC_MS = 600;
 
-const decorTextureKey = (kind: string, view?: string) => (view ? `decor-${kind}-${view}` : `decor-${kind}`);
+export const decorTextureKey = (kind: string, view?: string) => (view ? `decor-${kind}-${view}` : `decor-${kind}`);
 
 /** Load the artwork of every catalog item (call from the scene's preload). */
 export function preloadDecorTextures(scene: Phaser.Scene) {

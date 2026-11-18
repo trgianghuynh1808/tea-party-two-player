@@ -12,14 +12,13 @@ import {
   cellAt,
   cellRect,
   cellsForTool,
-  PROP_SCALE,
   getBuildTile,
   propAnchor,
   planCellChange,
   type BuildTilesMessage,
 } from "@boba/shared";
 import type { BobaShopState } from "@boba/shared/schema";
-import { propKey } from "./YardView";
+import { propTexture } from "./YardView";
 
 const UI_DEPTH = 15000;
 const OK_COLOR = 0x2a9d8f;
@@ -53,7 +52,7 @@ export class BuildController {
       .setOrigin(0, 1)
       .setDepth(UI_DEPTH - 1)
       .setVisible(false);
-    this.ghost = scene.add.image(0, 0, "__DEFAULT").setOrigin(0.5, 1).setScale(PROP_SCALE).setAlpha(0.65).setDepth(UI_DEPTH - 3).setVisible(false);
+    this.ghost = scene.add.image(0, 0, "__DEFAULT").setOrigin(0.5, 1).setAlpha(0.65).setDepth(UI_DEPTH - 3).setVisible(false);
 
     scene.input.on(Phaser.Input.Events.POINTER_DOWN, this.onDown, this);
     scene.input.on(Phaser.Input.Events.POINTER_MOVE, this.onMove, this);
@@ -135,9 +134,10 @@ export class BuildController {
       this.costLabel.setVisible(false);
       return;
     }
-    if (def?.shape === "prop" && this.scene.textures.exists(propKey(def.kind))) {
+    const tex = def?.shape === "prop" ? propTexture(this.scene, def) : undefined;
+    if (tex) {
       const at = propAnchor(to.cx, to.cy);
-      this.ghost.setTexture(propKey(def.kind)).setPosition(at.x, at.y + 2).setVisible(true);
+      this.ghost.setTexture(tex.key).setScale(tex.scale).setPosition(at.x, at.y + 2).setVisible(true);
     }
     const r = cellRect(to.cx, to.cy);
     const text = cost >= 0 ? `${count} ô · $${cost}` : `${count} ô · hoàn $${-cost}`;
