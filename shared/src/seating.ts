@@ -49,7 +49,7 @@ export function seatTableMap(decorations: Iterable<PlacedDecoration>): Map<strin
   const tables: { id: string; box: Box }[] = [];
   for (const d of decorations) {
     const role = roleOf(d.kind);
-    const box = role && footprintBox(d);
+    const box = (role === "seat" || role === "table") && footprintBox(d);
     if (!box) continue;
     (role === "seat" ? seats : tables).push({ id: d.id, box });
   }

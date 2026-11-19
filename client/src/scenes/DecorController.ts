@@ -45,6 +45,22 @@ export function preloadDecorTextures(scene: Phaser.Scene) {
 }
 
 /**
+ * World point of a bed's pillow (where a sleeper's head goes), from DecorationDef.pillow and the drawn artwork
+ * (bottom-aligned on the footprint like buildDecorVisual, mirrored when flipped).
+ */
+export function bedPillowPoint(scene: Phaser.Scene, bed: { kind: string; x: number; y: number; rotation?: number }): { x: number; y: number } {
+  const def = getDecorationDef(bed.kind);
+  if (!def?.pillow) return { x: bed.x, y: bed.y };
+  const artHeight = def.imageHeight ?? def.height;
+  const key = decorTextureKey(def.kind);
+  const source = scene.textures.exists(key) ? scene.textures.get(key).getSourceImage() : undefined;
+  const artWidth = source ? (source.width * artHeight) / source.height : def.width;
+  const flipped = def.rotation === "flip" && bed.rotation === 1;
+  const fx = flipped ? 1 - def.pillow.x : def.pillow.x;
+  return { x: bed.x + (fx - 0.5) * artWidth, y: bed.y + def.height / 2 - artHeight * (1 - def.pillow.y) };
+}
+
+/**
  * The visible part of a piece of furniture turned to `rotation`, centred on its floor footprint.
  * Artwork stands on the footprint (bottom-aligned) and may rise above it; rugs fill the footprint.
  * Returns the objects plus the box they cover (for the drag hit area).

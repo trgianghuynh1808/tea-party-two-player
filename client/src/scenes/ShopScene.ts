@@ -23,7 +23,12 @@ import {
   footprintBox,
   pendingDrinksAt,
   planInteraction,
+  planLieDown,
   planServeTable,
+  bedSpots,
+  findBedSpot,
+  getDecorationDef,
+  GET_UP_LABEL,
   tablesWaiting,
   stepMovement,
   describeItem,
@@ -40,7 +45,7 @@ import { KeyboardState } from "../input/KeyboardState";
 import { TouchControls, isTouchDevice } from "../input/TouchControls";
 import { DECOR_ROTATE, PALETTE_DRAG_START, type PaletteDragStart } from "../ui/DecorPanel";
 import { CupView, preloadCupTextures } from "./CupView";
-import { DecorController, preloadDecorTextures } from "./DecorController";
+import { DecorController, bedPillowPoint, preloadDecorTextures } from "./DecorController";
 import { CustomerController } from "./CustomerController";
 import { YardView, preloadBuildTextures } from "./YardView";
 import { BuildController } from "./BuildController";
@@ -64,6 +69,12 @@ export const BUILD_TOOL_EVENT = "build-tool";
 export const AREA_EVENT = "area-changed";
 /** Don't send UseDoor again while waiting for the server's teleport. */
 const DOOR_RESEND_MS = 700;
+/** Don't send LeaveBed again while waiting for the server to get us up. */
+const LEAVE_BED_RESEND_MS = 500;
+/** Lying in bed: only the head and shoulders show above the blanket (share of the body height, from the top). */
+const SLEEPER_VISIBLE_SHARE = 0.42;
+/** Lying in bed: the pillow point is this share of the body height below the top of the head (≈ head centre). */
+const SLEEPER_HEAD_CENTER_SHARE = 0.2;
 
 /**
  * Remote players are drawn this far in the past so there are always two snapshots to interpolate between,
@@ -84,6 +95,12 @@ interface PositionSample {
 interface PlayerView {
   container: Phaser.GameObjects.Container;
   sprite: Phaser.GameObjects.Sprite;
+  /** Coloured ring at the feet (hidden in bed). */
+  ring: Phaser.GameObjects.Ellipse;
+  /** "💤" floating above a sleeper. */
+  zzz: Phaser.GameObjects.Text;
+  /** Bed (decoration id) this player is drawn lying in; "" = standing. */
+  bedId: string;
   heldCup: CupView;
   heldLabel: Phaser.GameObjects.Text;
   nameLabel: Phaser.GameObjects.Text;
@@ -205,6 +222,7 @@ export class ShopScene extends Phaser.Scene {
   /** Area the camera currently shows (undefined until the local player exists). */
   private inYard?: boolean;
   private lastDoorAt = 0;
+  private lastLeaveBedAt = 0;
   /** Walls in the yard for movement prediction (same rule as the server). */
   private readonly tiles = { get: (key: string) => this.room?.state.tiles?.get(key) };
   /** Outline around the table the action key would serve. */
@@ -403,6 +421,7 @@ export class ShopScene extends Phaser.Scene {
     const renderAt = performance.now() - REMOTE_INTERP_DELAY_MS;
     for (const view of this.players.values()) {
       const c = view.container;
+      if (view.bedId && this.placeSleeper(view)) continue;
       // Local player is moved directly in handleInput(); remote players follow the snapshot buffer.
       if (!view.isLocal) this.interpolateRemote(view, renderAt);
       c.setDepth(c.y);
@@ -426,7 +445,14 @@ export class ShopScene extends Phaser.Scene {
     }
 
     const local = this.players.get(this.room.sessionId);
-    if (local) {
+    if (local?.bedId) {
+      // In bed: walking gets up (the server moves us out in front of the bed).
+      const now = performance.now();
+      if ((dx !== 0 || dy !== 0) && now - this.lastLeaveBedAt > LEAVE_BED_RESEND_MS) {
+        this.lastLeaveBedAt = now;
+        this.room.send(Messages.LeaveBed);
+      }
+    } else if (local) {
       const moving = dx !== 0 || dy !== 0;
       if (moving) {
         const next = stepMovement(local.container, dx, dy, dt, this.tiles);
@@ -644,10 +670,17 @@ export class ShopScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setVisible(false);
 
-    const container = this.add.container(state.x, state.y, [shadow, sprite, name, heldCup, heldLabel]);
+    const zzz = this.add
+      .text(0, 0, "💤", { fontFamily: "sans-serif", fontSize: fs(16) })
+      .setOrigin(0.5)
+      .setVisible(false);
+    const container = this.add.container(state.x, state.y, [shadow, sprite, name, heldCup, heldLabel, zzz]);
     const view: PlayerView = {
       container,
       sprite,
+      ring: shadow,
+      zzz,
+      bedId: "",
       heldCup,
       heldLabel,
       nameLabel: name,
@@ -663,7 +696,48 @@ export class ShopScene extends Phaser.Scene {
     this.applyFacing(view, state.direction);
     this.applyHeldItem(view, state.heldItem);
     this.applyName(view, state);
+    this.applyBed(view, state.bedId, state.heldItem);
     return view;
+  }
+
+  /**
+   * In bed: face the viewer, show only the head and shoulders (the bed's blanket covers the rest) and float a 💤.
+   * Where it's drawn is updated every frame by placeSleeper (the bed may move).
+   */
+  private applyBed(view: PlayerView, bedId: string, heldItem: string) {
+    if (view.bedId === bedId) return;
+    view.bedId = bedId;
+    const { character, sprite } = view;
+    const lying = !!bedId;
+    view.ring.setVisible(!lying);
+    this.tweens.killTweensOf(view.zzz);
+    view.zzz.setVisible(lying);
+    if (lying) {
+      view.direction = "down";
+      this.setCharacterFrame(view, character.standColumn);
+      const headTop = character.feetRow - character.bodyHeight;
+      sprite.setCrop(0, 0, character.frameWidth, headTop + character.bodyHeight * SLEEPER_VISIBLE_SHARE);
+      // Container origin = pillow: lift the sprite (anchored at its feet) so the head centre sits there.
+      sprite.y = CHARACTER_BODY_PX * (1 - SLEEPER_HEAD_CENTER_SHARE);
+      view.nameLabel.setY(-CHARACTER_BODY_PX * SLEEPER_HEAD_CENTER_SHARE - 10);
+      view.zzz.setPosition(24, -12).setAlpha(1);
+      this.tweens.add({ targets: view.zzz, y: -26, alpha: 0.2, duration: 1400, yoyo: true, repeat: -1, ease: "Sine.easeInOut" });
+    } else {
+      sprite.setCrop();
+      sprite.y = FEET_Y;
+      view.heldCup.setItem(heldItem); // (players lie down empty-handed)
+      view.nameLabel.setY(HEAD_Y - 8);
+    }
+  }
+
+  /** Draw a sleeper on their bed's pillow, just in front of the bed. false = the bed isn't there (draw normally). */
+  private placeSleeper(view: PlayerView): boolean {
+    const decorations = this.room?.state.decorations;
+    const bed = decorations && findBedSpot(view.bedId, decorations, this.tiles);
+    if (!bed) return false;
+    const p = bedPillowPoint(this, bed);
+    view.container.setPosition(p.x, p.y).setDepth(bed.depth + 1);
+    return true;
   }
 
   /** Username over the head; a player who lost connection is faded out until they come back. */
@@ -696,6 +770,7 @@ export class ShopScene extends Phaser.Scene {
   }
 
   private onPlayerChanged(view: PlayerView, player: Player) {
+    this.applyBed(view, player.bedId, player.heldItem);
     const teleported = player.teleportSeq !== view.teleportSeq;
     view.teleportSeq = player.teleportSeq;
     if (view.isLocal) {
@@ -794,14 +869,18 @@ export class ShopScene extends Phaser.Scene {
     // The first state patch may not have arrived yet during the first frames.
     const state = room?.state;
     const tables = state?.orders && state.decorations ? tablesWaiting(state.decorations, state.orders) : [];
-    const target = local ? findInteractTarget(local.container, tables) : undefined;
+    const beds = state?.decorations ? bedSpots(state.decorations, state.tiles?.entries()) : [];
+    // In bed the action key only gets up: nothing to highlight.
+    const target = local && !local.bedId ? findInteractTarget(local.container, tables, beds) : undefined;
     const def = target?.type === "station" ? target.def : undefined;
     for (const [id, view] of this.stations) view.highlight.setVisible(id === def?.id);
-    const tableBox = target?.type === "table" ? footprintBox(target.table) : undefined;
+    const piece = target?.type === "table" ? target.table : target?.type === "bed" ? target.bed : undefined;
+    const tableBox = piece && footprintBox(piece);
     this.tableHighlight.setVisible(!!tableBox);
-    if (tableBox) {
-      // The table art rises above its footprint: outline the whole piece.
-      const top = tableBox.bottom - 52;
+    if (piece && tableBox) {
+      // The art rises above its footprint: outline the whole piece.
+      const artHeight = target?.type === "bed" ? (getDecorationDef(piece.kind)?.imageHeight ?? 52) : 52;
+      const top = tableBox.bottom - Math.max(artHeight, tableBox.bottom - tableBox.top);
       this.tableHighlight
         .setPosition((tableBox.left + tableBox.right) / 2, (top + tableBox.bottom) / 2)
         .setSize(tableBox.right - tableBox.left + 12, tableBox.bottom - top + 8)
@@ -813,7 +892,15 @@ export class ShopScene extends Phaser.Scene {
     let reason = "";
     const player = state?.players?.get(room!.sessionId);
     const station = def && state?.stations?.get(def.id);
-    if (room && state?.orders && player && target?.type === "table") {
+    if (player?.bedId) {
+      label = GET_UP_LABEL;
+    } else if (player && target?.type === "bed") {
+      let occupied = false;
+      state!.players.forEach((p) => (occupied ||= p.bedId === target.bed.id));
+      const plan = planLieDown({ held: player.heldItem, occupied });
+      if (plan.ok) label = plan.label;
+      else reason = plan.reason;
+    } else if (room && state?.orders && player && target?.type === "table") {
       const plan = planServeTable({ phase: state.phase, held: player.heldItem, orderedDrinkIds: pendingDrinksAt(state.orders, target.table.id) });
       if (plan.ok) label = plan.label;
       else reason = plan.reason;

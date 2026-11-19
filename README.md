@@ -47,6 +47,10 @@ To play from another machine on the same LAN, open the **Network** URL printed b
 - A customer walking out costs $10 and resets the combo. Completing 3+ orders in a row gives +20%, 6+ gives +50% (🔥 combo in the HUD).
 - Special customers: 👑 VIP (double price, waits only 25s), 🧐 picky (+$10 if fast, half price if slow), 👨‍👩‍👧 group (2–3 drinks, pays once all are delivered).
 - A finished cup left on a timed machine spills after 6s (the bar turns red, "Sắp tràn!").
+- Beds (furniture with `role: "bed"` in `shared/src/decor.ts`): stand next to one with empty hands and press Space to
+  lie down (head on the pillow, 💤). Works for beds in the shop and beds built in the yard. Space or walking gets
+  you up in front of it. One player per bed; starting a shift, selling / erasing or moving the bed gets the sleeper
+  up / moves them with it (`BedSpot`, `bedSpots`, `findBedSpot` in `shared/src/index.ts`).
 
 Add or change drinks, ingredients, machines, shift length and star thresholds in `shared/src/menu.ts`.
 Interaction rules live in `shared/src/interaction.ts` (`planInteraction`), used by the server to apply actions and by the client to preview them.

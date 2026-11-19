@@ -100,6 +100,18 @@ export function planInteraction(def: StationDef, ctx: InteractionContext): Inter
   }
 }
 
+/** Lying down in a bed. `occupied` = someone else is already lying in it. */
+export function planLieDown(ctx: { held: string; occupied: boolean }): InteractPlanSimple {
+  if (ctx.occupied) return fail("Giường có người nằm rồi");
+  if (ctx.held !== EMPTY_HAND) return fail("Đặt ly xuống trước rồi hẵng đi ngủ");
+  return { ok: true, label: "Nằm nghỉ" };
+}
+
+/** Label of the action key while lying in bed (Space or walking gets up). */
+export const GET_UP_LABEL = "Dậy";
+
+export type InteractPlanSimple = { ok: false; reason: string } | { ok: true; label: string };
+
 /** Serving a table: `orderedDrinkIds` = drinks still awaited by the customers sitting at it. */
 export function planServeTable(ctx: Pick<InteractionContext, "phase" | "held" | "orderedDrinkIds">): InteractionPlan {
   if (ctx.phase === GamePhase.Ended) return fail("Ca đã kết thúc, bấm Chơi ca mới");

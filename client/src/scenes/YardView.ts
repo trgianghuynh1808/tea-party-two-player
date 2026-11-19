@@ -4,6 +4,7 @@ import {
   BUILD_TILE,
   BUILD_TILES,
   CONNECT,
+  PROP_ART_DROP,
   PROP_SCALE,
   SHOP_BUILDING,
   SHOP_DOOR_X,
@@ -182,7 +183,7 @@ export class YardView {
       const tex = propTexture(this.scene, structure);
       if (tex) {
         const at = propAnchor(cx, cy);
-        view.structure = this.scene.add.image(at.x, at.y + 2, tex.key).setOrigin(0.5, 1).setScale(tex.scale).setDepth(at.y);
+        view.structure = this.scene.add.image(at.x, at.y + PROP_ART_DROP, tex.key).setOrigin(0.5, 1).setScale(tex.scale).setDepth(at.y);
       }
     } else if (structure) {
       const key = pieceKey(pieceName(this.tiles, structure, cx, cy));

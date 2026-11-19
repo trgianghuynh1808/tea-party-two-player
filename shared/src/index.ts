@@ -48,6 +48,8 @@ export const Messages = {
   UseDoor: "use_door",
   /** Build (or erase) yard tiles over a dragged rectangle of cells: BuildTilesMessage. */
   BuildTiles: "build_tiles",
+  /** Get out of bed (sent when a player lying down tries to walk). */
+  LeaveBed: "leave_bed",
 } as const;
 
 export interface BuildTilesMessage {
@@ -91,10 +93,22 @@ export interface MachineOverflowEvent {
 
 export * from "./decor";
 export * from "./world";
-import { BUILD_TILE, SHOP_BUILDING, YARD, blockingRects, isInYard, type TileGetter } from "./world";
+import {
+  BUILD_TILE,
+  PROP_ART_DROP,
+  SHOP_BUILDING,
+  YARD,
+  blockingRects,
+  getBuildTile,
+  isInYard,
+  parseTileKey,
+  propAnchor,
+  tileKey,
+  type TileGetter,
+} from "./world";
 export * from "./seating";
 import { distanceToBox, footprintBox } from "./seating";
-import type { PlacedDecoration } from "./decor";
+import { getDecorationDef, type PlacedDecoration } from "./decor";
 
 // ---- Shared movement (used by server simulation and client prediction) ----
 
@@ -205,14 +219,88 @@ export function findNearestStationDef(p: Vec2): StationDef | undefined {
   return best;
 }
 
-/** What the action key would act on: a station, or a table where seated customers wait for drinks. */
-export type InteractTarget = { type: "station"; def: StationDef } | { type: "table"; table: PlacedDecoration };
+/** What the action key would act on: a station, a table where seated customers wait for drinks, or a bed. */
+export type InteractTarget =
+  | { type: "station"; def: StationDef }
+  | { type: "table"; table: PlacedDecoration }
+  | { type: "bed"; bed: BedSpot };
+
+// ---------------------------------------------------------------- Beds
 
 /**
- * Nearest station or table within INTERACT_RANGE (same rule on server and client).
- * `tables` = only the tables that can be served right now (see tablesWaiting).
+ * A bed a player can lie in: furniture in the shop (id = decoration id) or a furniture prop built in the yard
+ * (id = YARD_BED_PREFIX + its cell). Shaped like a placed decoration (kind = catalog kind, footprint centred on x, y,
+ * artwork standing on the footprint's bottom edge) so footprintBox and the pillow maths work for both.
  */
-export function findInteractTarget(p: Vec2, tables: Iterable<PlacedDecoration>): InteractTarget | undefined {
+export interface BedSpot extends PlacedDecoration {
+  /** Where the sleeper's position is kept while lying (inside the bed's area: shop floor or the yard cell). */
+  rest: Vec2;
+  /** Drawing depth of the bed's artwork (the sleeper is drawn just above it). */
+  depth: number;
+}
+
+export const YARD_BED_PREFIX = "yard:";
+
+const isBed = (kind: string) => getDecorationDef(kind)?.role === "bed";
+
+function shopBedSpot(d: PlacedDecoration): BedSpot {
+  return { id: d.id, kind: d.kind, x: d.x, y: d.y, rotation: d.rotation, rest: { x: d.x, y: d.y }, depth: d.y };
+}
+
+/** The yard prop on structure tile `key`, if it's a bed. */
+function yardBedSpot(key: string, buildKind: string | undefined): BedSpot | undefined {
+  const decorKind = getBuildTile(buildKind)?.decor;
+  const cell = parseTileKey(key);
+  const def = decorKind ? getDecorationDef(decorKind) : undefined;
+  if (!def || def.role !== "bed" || !cell || cell.layer !== "structure") return undefined;
+  // Same place YardView draws the prop: bottom-centred on its anchor (yard props never turn).
+  const at = propAnchor(cell.cx, cell.cy);
+  const bottom = at.y + PROP_ART_DROP;
+  return {
+    id: `${YARD_BED_PREFIX}${cell.cx},${cell.cy}`,
+    kind: def.kind,
+    x: at.x,
+    y: bottom - def.height / 2,
+    rotation: 0,
+    rest: { x: at.x, y: at.y - 8 },
+    depth: at.y,
+  };
+}
+
+/** Every bed: shop furniture plus yard props. `tiles` = the yard's synced tiles (key -> kind). */
+export function bedSpots(decorations: Iterable<PlacedDecoration>, tiles?: Iterable<[string, string]>): BedSpot[] {
+  const beds: BedSpot[] = [];
+  for (const d of decorations) if (isBed(d.kind)) beds.push(shopBedSpot(d));
+  for (const [key, kind] of tiles ?? []) {
+    if (!kind.startsWith("decor_")) continue;
+    const bed = yardBedSpot(key, kind);
+    if (bed) beds.push(bed);
+  }
+  return beds;
+}
+
+/** The bed with this id, or undefined if it's gone (sold, erased, replaced). */
+export function findBedSpot(id: string, decorations: Iterable<PlacedDecoration>, tiles: TileGetter): BedSpot | undefined {
+  if (id.startsWith(YARD_BED_PREFIX)) {
+    const [cx, cy] = id.slice(YARD_BED_PREFIX.length).split(",").map(Number);
+    const key = tileKey(cx, cy, "structure");
+    return yardBedSpot(key, tiles.get(key));
+  }
+  for (const d of decorations) if (d.id === id && isBed(d.kind)) return shopBedSpot(d);
+  return undefined;
+}
+
+/** Where a player getting out of `bed` stands: just in front of it (then pushed out of stations / walls). */
+export function bedExitPoint(bed: BedSpot, tiles?: TileGetter): Vec2 {
+  const box = footprintBox(bed);
+  return resolveCollisions({ x: bed.x, y: (box?.bottom ?? bed.y) + PLAYER_RADIUS + 4 }, tiles);
+}
+
+/**
+ * Nearest station, table or bed within INTERACT_RANGE (same rule on server and client).
+ * `tables` = only the tables that can be served right now (see tablesWaiting); `beds` = the shop's beds.
+ */
+export function findInteractTarget(p: Vec2, tables: Iterable<PlacedDecoration>, beds: Iterable<BedSpot> = []): InteractTarget | undefined {
   let best: InteractTarget | undefined;
   let bestDist = INTERACT_RANGE;
   for (const def of STATIONS) {
@@ -228,6 +316,14 @@ export function findInteractTarget(p: Vec2, tables: Iterable<PlacedDecoration>):
     if (d <= bestDist) {
       bestDist = d;
       best = { type: "table", table };
+    }
+  }
+  for (const bed of beds) {
+    const box = footprintBox(bed);
+    const d = box ? distanceToBox(p, box) : Infinity;
+    if (d <= bestDist) {
+      bestDist = d;
+      best = { type: "bed", bed };
     }
   }
   return best;

@@ -18,6 +18,8 @@ export class Player extends Schema {
   @type("boolean") host: boolean = false;
   /** What this player got (or lost) from the last shift's split earnings. */
   @type("number") shiftShare: number = 0;
+  /** Bed (decoration id) the player is lying in; "" = standing. */
+  @type("string") bedId: string = "";
   /** Bumped when the server moves the player itself (spawn, shift start, rejected move): the client must snap. */
   @type("number") teleportSeq: number = 0;
 }

@@ -208,6 +208,8 @@ export function connectMask(tiles: TileGetter, cx: number, cy: number): number {
 /** Props are drawn PROP_SCALE× their pixel-art size, standing PROP_BASE px above the cell's bottom edge. */
 export const PROP_SCALE = 2;
 export const PROP_BASE = 6;
+/** The prop's artwork is drawn this far below its anchor (its bottom edge overlaps the ground a little). */
+export const PROP_ART_DROP = 2;
 /** Where a prop stands in its cell (world px): the foot of the art. */
 export function propAnchor(cx: number, cy: number) {
   const c = cellRect(cx, cy);

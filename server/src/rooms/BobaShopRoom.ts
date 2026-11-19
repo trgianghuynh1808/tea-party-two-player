@@ -44,7 +44,12 @@ import {
   usernameKey,
   findInteractTarget,
   planInteraction,
+  planLieDown,
   planServeTable,
+  bedSpots,
+  bedExitPoint,
+  findBedSpot,
+  type BedSpot,
   PLAYER_SPEED,
   resolveCollisions,
   cupContents,
@@ -170,6 +175,10 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     },
     build_tiles: (client: Client, payload: BuildTilesMessage) => {
       this.handleBuildTiles(client, payload);
+    },
+    leave_bed: (client: Client) => {
+      const player = this.state.players.get(client.sessionId);
+      if (player?.bedId) this.getUp(client.sessionId, player);
     },
     start_shift: () => {
       if (this.state.phase !== GamePhase.Playing) this.startShift();
@@ -450,6 +459,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
 
   private update(dt: number) {
     this.updateMachines(dt);
+    this.updateSleepers();
 
     if (this.state.phase === GamePhase.Playing) {
       this.updateOrders(dt);
@@ -482,6 +492,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
       player.x = spawn.x;
       player.y = spawn.y;
       player.teleportSeq++;
+      player.bedId = "";
       player.heldItem = EMPTY_HAND;
       player.shiftShare = 0;
       this.resetMoveBudget(sessionId);
@@ -688,6 +699,8 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     const x = Number(payload?.x);
     const y = Number(payload?.y);
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    // Lying in bed: the player doesn't move until they get up (LeaveBed / Interact).
+    if (player.bedId) return;
 
     const now = Date.now();
     move.budget = Math.min(MOVE_BUDGET_CAP, move.budget + ((now - move.lastAt) / 1000) * PLAYER_SPEED * MOVE_BUDGET_SLACK);
@@ -714,6 +727,46 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     if (Math.hypot(resolved.x - x, resolved.y - y) > COLLISION_TOLERANCE) player.teleportSeq++;
   }
 
+  // ---------------------------------------------------------------- Beds
+
+  /** Lie down in `bed`: the player stays at its rest point until they get up (clients draw them on the pillow). */
+  private lieDown(sessionId: string, player: Player, bed: BedSpot) {
+    player.bedId = bed.id;
+    player.x = bed.rest.x;
+    player.y = bed.rest.y;
+    player.direction = "down";
+    player.teleportSeq++;
+    this.resetMoveBudget(sessionId);
+  }
+
+  /** Step out in front of the bed (or stay put if the bed is gone). */
+  private getUp(sessionId: string, player: Player) {
+    const bed = this.findBed(player.bedId);
+    player.bedId = "";
+    if (bed) {
+      const p = bedExitPoint(bed, this.state.tiles);
+      player.x = p.x;
+      player.y = p.y;
+    }
+    player.direction = "down";
+    player.teleportSeq++;
+    this.resetMoveBudget(sessionId);
+  }
+
+  private findBed(id: string) {
+    return findBedSpot(id, this.state.decorations, this.state.tiles);
+  }
+
+  /** Bed sold / erased: its sleeper gets up. Bed moved: its sleeper moves with it. */
+  private updateSleepers() {
+    this.state.players.forEach((player, sessionId) => {
+      if (!player.bedId) return;
+      const bed = this.findBed(player.bedId);
+      if (!bed) return this.getUp(sessionId, player);
+      if (bed.rest.x !== player.x || bed.rest.y !== player.y) this.lieDown(sessionId, player, bed);
+    });
+  }
+
   /** Through the shop's door: from the doormat outside to inside, or from the exit inside to the yard. */
   private handleUseDoor(client: Client) {
     const player = this.state.players.get(client.sessionId);
@@ -722,6 +775,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     const outside = isInYard(player);
     if (!inRect(player, outside ? SHOP_ENTER_ZONE : SHOP_EXIT_ZONE, 24)) return;
     const spawn = outside ? SHOP_ENTRY_SPAWN : YARD_SPAWN;
+    player.bedId = "";
     player.x = spawn.x;
     player.y = spawn.y;
     player.direction = outside ? "up" : "down";
@@ -751,9 +805,21 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     if (!player) return;
 
     const fail = (reason: string) => client.send(ServerEvents.InteractFailed, { reason });
+    // In bed: the action key gets up.
+    if (player.bedId) return this.getUp(client.sessionId, player);
     const orders = this.state.orders;
-    const target = findInteractTarget(player, tablesWaiting(this.state.decorations, orders));
+    const target = findInteractTarget(player, tablesWaiting(this.state.decorations, orders), bedSpots(this.state.decorations, this.state.tiles.entries()));
     if (!target) return fail("Không có quầy nào gần đây");
+
+    if (target.type === "bed") {
+      const bedId = target.bed.id;
+      let occupied = false;
+      this.state.players.forEach((p) => (occupied ||= p.bedId === bedId));
+      const plan = planLieDown({ held: player.heldItem, occupied });
+      if (!plan.ok) return fail(plan.reason);
+      this.lieDown(client.sessionId, player, target.bed);
+      return;
+    }
 
     // Serving customers seated at a table.
     if (target.type === "table") {
