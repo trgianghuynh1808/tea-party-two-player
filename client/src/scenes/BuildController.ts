@@ -19,6 +19,7 @@ import {
 } from "@boba/shared";
 import type { BobaShopState } from "@boba/shared/schema";
 import { propTexture } from "./YardView";
+import { isScreenUi } from "../input/TouchControls";
 
 const UI_DEPTH = 15000;
 const OK_COLOR = 0x2a9d8f;
@@ -59,9 +60,10 @@ export class BuildController {
     scene.input.on(Phaser.Input.Events.POINTER_UP, this.onUp, this);
   }
 
-  setEnabled(enabled: boolean) {
+  /** `showGrid`: keep the cell grid on while input is paused (phones walking around in build mode). */
+  setEnabled(enabled: boolean, showGrid = enabled) {
     this.enabled = enabled;
-    this.grid.setVisible(enabled);
+    this.grid.setVisible(showGrid);
     this.dragStart = undefined;
     this.clearPreview();
   }
@@ -77,8 +79,8 @@ export class BuildController {
     this.scene.input.off(Phaser.Input.Events.POINTER_UP, this.onUp, this);
   }
 
-  private onDown(pointer: Phaser.Input.Pointer) {
-    if (!this.enabled || this.dragStart) return;
+  private onDown(pointer: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[] = []) {
+    if (!this.enabled || this.dragStart || isScreenUi(over)) return;
     const cell = cellAt(pointer.worldX, pointer.worldY);
     if (cell.cx < 0 || cell.cy < 0 || cell.cx >= YARD_COLS || cell.cy >= YARD_ROWS) return;
     this.dragStart = cell;

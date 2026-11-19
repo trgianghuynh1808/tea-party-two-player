@@ -57,9 +57,17 @@ Interaction rules live in `shared/src/interaction.ts` (`planInteraction`), used 
 
 ## Mobile
 
-Play in landscape. The game area scales to fit the screen; on small screens the side panel only shows orders,
-and 📋 Menu / 🛒 Shop open as pop-ups. Holding the phone in portrait shows a "rotate your phone" hint.
-On Android, ⛶ Full switches to fullscreen and locks landscape (iPhone Safari has no Fullscreen API).
+Phones always play in landscape (`client/src/forceLandscape.ts`):
+- Android (and other browsers with the Screen Orientation API): the first tap goes fullscreen and locks landscape.
+  ⛶ Full does the same again after leaving fullscreen.
+- iPhone Safari can't lock the screen: a phone held upright gets the whole page turned 90° with CSS
+  (`body.force-landscape`), so turning the phone sideways shows the game the right way up. Phaser input and the
+  furniture drag use `toLayout` / `layoutRect` to read touches through the turn.
+
+The game area scales to fit the screen; on small screens the side panel only shows orders,
+and 📋 Menu / 🛒 Shop open as pop-ups.
+In build mode one finger either builds or steers: the **🚶 Đi lại / 🔨 Xây tiếp** button (top right of the game)
+switches between dragging to build and the joystick. Picking a material switches back to building.
 
 To test on a phone, open the Vite **Network** URL (e.g. `http://192.168.x.x:5173`) on the same Wi-Fi.
 

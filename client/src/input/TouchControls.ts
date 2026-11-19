@@ -16,6 +16,10 @@ const TOUCH_DEVICE =
   window.matchMedia("(pointer: coarse)").matches ||
   navigator.maxTouchPoints > 0;
 
+/** Data key marking on-screen buttons: touches on them don't start the joystick or a build drag. */
+export const SCREEN_UI = "screen-ui";
+export const isScreenUi = (over: Phaser.GameObjects.GameObject[]) => over.some((o) => o.getData?.(SCREEN_UI));
+
 /** True on phones/tablets (or when forced with ?touch=1). */
 export function isTouchDevice(): boolean {
   return TOUCH_DEVICE;
@@ -118,7 +122,7 @@ export class TouchControls {
 
   private onPointerDown(pointer: Phaser.Input.Pointer, over: Phaser.GameObjects.GameObject[]) {
     if (!this.enabled || this.joystickPointerId !== null) return;
-    if (over.includes(this.button)) return;
+    if (over.includes(this.button) || isScreenUi(over)) return;
     if (pointer.x > this.scene.scale.width / 2) return;
 
     this.joystickPointerId = pointer.id;

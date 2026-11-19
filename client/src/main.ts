@@ -31,6 +31,7 @@ import type { BobaShopState } from "@boba/shared/schema";
 import { FORCE_TOUCH_PARAM, isTouchDevice } from "./input/TouchControls";
 import { AREA_EVENT, BUILD_MODE_EVENT, BUILD_TOOL_EVENT, DECORATE_MODE_EVENT, ShopScene, type ShopSceneData } from "./scenes/ShopScene";
 import { BuildPanel } from "./ui/BuildPanel";
+import { initForceLandscape, patchPhaserForRotation } from "./forceLandscape";
 import { DECOR_ROTATE, DecorPanel, PALETTE_DRAG_START } from "./ui/DecorPanel";
 import { OrdersPanel, buildMenu } from "./ui/OrdersPanel";
 import { ShiftOverlay } from "./ui/ShiftOverlay";
@@ -446,6 +447,7 @@ function startGame(room: Room<BobaShopState>) {
       max: { width: WORLD_WIDTH * 1.5, height: WORLD_HEIGHT * 1.5 },
     },
   });
+  patchPhaserForRotation(game);
   game.scene.add("ShopScene", ShopScene, true, data);
   ordersPanel = new OrdersPanel(ordersRoot, room);
   shiftOverlay = new ShiftOverlay(shiftOverlayRoot, room);
@@ -638,6 +640,9 @@ if (isTouchDevice() && document.documentElement.requestFullscreen) {
 }
 
 // ---------------------------------------------------------------- Boot
+
+// Phones always play in landscape (lock where possible, else the page is turned with CSS).
+initForceLandscape();
 
 // Full menu shown inline in the side panel on large screens (hidden on phones; 📋 opens it in a modal).
 const menuTitle = document.createElement("h2");

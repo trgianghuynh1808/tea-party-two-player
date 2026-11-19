@@ -42,7 +42,7 @@ import {
   type StationDef,
 } from "@boba/shared";
 import { KeyboardState } from "../input/KeyboardState";
-import { TouchControls, isTouchDevice } from "../input/TouchControls";
+import { SCREEN_UI, TouchControls, isTouchDevice } from "../input/TouchControls";
 import { DECOR_ROTATE, PALETTE_DRAG_START, type PaletteDragStart } from "../ui/DecorPanel";
 import { CupView, preloadCupTextures } from "./CupView";
 import { DecorController, bedPillowPoint, preloadDecorTextures } from "./DecorController";
@@ -228,6 +228,12 @@ export class ShopScene extends Phaser.Scene {
   /** Outline around the table the action key would serve. */
   private tableHighlight!: Phaser.GameObjects.Rectangle;
 
+  /** Build mode on (🔨 button). Phones also pick between building and walking (buildWalking) with buildToggle. */
+  private building = false;
+  private buildWalking = false;
+  private buildToggle?: Phaser.GameObjects.Text;
+  private controlsText!: Phaser.GameObjects.Text;
+
   private keys!: KeyboardState;
   private touch?: TouchControls;
   private actionHint!: Phaser.GameObjects.Text;
@@ -286,6 +292,7 @@ export class ShopScene extends Phaser.Scene {
     this.keys = new KeyboardState(["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"]);
     if (isTouchDevice()) {
       this.touch = new TouchControls(this);
+      this.updateControlsText();
       this.actionHint.setVisible(false); // the action button shows the label instead
     }
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.touch?.destroy());
@@ -300,10 +307,18 @@ export class ShopScene extends Phaser.Scene {
     const onPaletteDrag = (e: PaletteDragStart) => this.decor?.startPaletteDrag(e);
     const onRotate = () => this.decor?.rotate();
     const onBuildMode = (enabled: boolean) => {
-      this.build?.setEnabled(enabled);
-      this.touch?.setEnabled(!enabled); // dragging builds instead of steering
+      this.building = enabled;
+      this.buildWalking = false;
+      this.applyBuildInput();
     };
-    const onBuildTool = (tool: string) => this.build?.setTool(tool);
+    const onBuildTool = (tool: string) => {
+      this.build?.setTool(tool);
+      // Picking a material on a phone means "build now".
+      if (this.building && this.buildWalking) {
+        this.buildWalking = false;
+        this.applyBuildInput();
+      }
+    };
     this.game.events.on(DECORATE_MODE_EVENT, onDecorateMode);
     this.game.events.on(PALETTE_DRAG_START, onPaletteDrag);
     this.game.events.on(DECOR_ROTATE, onRotate);
@@ -410,6 +425,37 @@ export class ShopScene extends Phaser.Scene {
     room.onMessage(ServerEvents.InteractFailed, (msg: { reason: string }) => {
       this.toast(msg.reason, "#e63946");
     });
+  }
+
+  /**
+   * Who gets the touches in build mode. Desktop: the mouse builds, WASD walks. Phones: either the drag builds
+   * (joystick off) or the joystick walks (building off), switched with buildToggle.
+   */
+  private applyBuildInput() {
+    const walking = this.building && !!this.touch && this.buildWalking;
+    this.build?.setEnabled(this.building && !walking, this.building);
+    this.touch?.setEnabled(!this.building || walking);
+    if (this.buildToggle) {
+      this.buildToggle
+        .setVisible(this.building)
+        .setText(walking ? "🔨 Xây tiếp" : "🚶 Đi lại")
+        .setBackgroundColor(walking ? "#e76f51" : "#457b9d");
+    }
+    this.updateControlsText();
+  }
+
+  private updateControlsText() {
+    let text = "WASD/mũi tên: đi · Space: tương tác · thảm đỏ: ra sân";
+    if (this.touch) {
+      text = !this.building
+        ? "Chạm nửa trái để di chuyển · nút tròn bên phải để tương tác"
+        : this.buildWalking
+          ? "Đang đi lại: chạm nửa trái để di chuyển · bấm 🔨 Xây tiếp để xây"
+          : "Đang xây: kéo trên sân để xây · bấm 🚶 Đi lại để di chuyển";
+    } else if (this.building) {
+      text = "Kéo chuột trên sân để xây · WASD/mũi tên: đi";
+    }
+    this.controlsText?.setText(text);
   }
 
   // ---------------------------------------------------------------- Game loop
@@ -612,16 +658,31 @@ export class ShopScene extends Phaser.Scene {
     this.statusText = this.add
       .text(16, WORLD_HEIGHT - 52, "Đang kết nối...", { fontFamily: "sans-serif", fontSize: fs(14), color: "#3d2c29" })
       .setDepth(10000).setScrollFactor(0);
-    this.add
-      .text(
-        16,
-        WORLD_HEIGHT - 28,
-        isTouchDevice()
-          ? "Chạm nửa trái để di chuyển · nút tròn bên phải để tương tác"
-          : "WASD/mũi tên: đi · Space: tương tác · thảm đỏ: ra sân",
-        { fontFamily: "sans-serif", fontSize: fs(13), color: "#6b5b57" },
-      )
+    this.controlsText = this.add
+      .text(16, WORLD_HEIGHT - 28, "", { fontFamily: "sans-serif", fontSize: fs(13), color: "#6b5b57" })
       .setDepth(10000).setScrollFactor(0);
+    this.updateControlsText();
+    if (isTouchDevice()) {
+      // Phones in build mode: one finger either builds or steers, so this button switches between the two.
+      this.buildToggle = this.add
+        .text(WORLD_WIDTH - 16, 52, "", {
+          fontFamily: "sans-serif",
+          fontSize: fs(17),
+          fontStyle: "bold",
+          color: "#ffffff",
+          padding: { x: 12, y: 8 },
+        })
+        .setOrigin(1, 0)
+        .setDepth(20000).setScrollFactor(0)
+        .setData(SCREEN_UI, true)
+        .setVisible(false)
+        .setInteractive({ useHandCursor: true });
+      this.buildToggle.on(Phaser.Input.Events.GAMEOBJECT_POINTER_DOWN, () => {
+        this.buildWalking = !this.buildWalking;
+        this.applyBuildInput();
+        if ("vibrate" in navigator) navigator.vibrate?.(10);
+      });
+    }
     // Desktop: previews what Space does at the highlighted station.
     this.actionHint = this.add
       .text(WORLD_WIDTH - 16, WORLD_HEIGHT - 84, "", {

@@ -19,6 +19,7 @@ import {
 } from "@boba/shared";
 import type { BobaShopState, Decoration } from "@boba/shared/schema";
 import type { PaletteDragStart } from "../ui/DecorPanel";
+import { layoutRect, toLayout } from "../forceLandscape";
 
 const OK_COLOR = 0x2a9d8f;
 const BAD_COLOR = 0xe63946;
@@ -476,11 +477,13 @@ export class DecorController {
 
   private ghostTarget(clientX: number, clientY: number) {
     if (!this.ghost) return undefined;
-    const rect = this.scene.game.canvas.getBoundingClientRect();
-    const inside = clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+    // Layout coordinates: phones held upright have the page turned (see forceLandscape.ts).
+    const rect = layoutRect(this.scene.game.canvas);
+    const p = toLayout(clientX, clientY);
+    const inside = p.x >= rect.left && p.x <= rect.right && p.y >= rect.top && p.y <= rect.bottom;
     if (!inside) return undefined;
-    const x = snapToGrid(((clientX - rect.left) / rect.width) * WORLD_WIDTH);
-    const y = snapToGrid(((clientY - rect.top) / rect.height) * WORLD_HEIGHT);
+    const x = snapToGrid(((p.x - rect.left) / rect.width) * WORLD_WIDTH);
+    const y = snapToGrid(((p.y - rect.top) / rect.height) * WORLD_HEIGHT);
     return { x, y, ok: canPlaceDecoration(this.ghost.def.kind, x, y, this.placed(), undefined, this.ghost.rotation) };
   }
 

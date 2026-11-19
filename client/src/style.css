@@ -119,6 +119,8 @@ body.in-game {
 .card {
   width: 400px;
   max-width: calc(100vw - 24px);
+  /* Phones held upright: the page is turned, so the usable width is the screen's height. */
+  max-width: calc(var(--page-w, 100vw) - 24px);
   /* auto margins center the card but let it scroll (not clip) when the screen is short */
   margin: auto;
   padding: 32px 28px;
@@ -935,6 +937,8 @@ h1 {
 .build-item {
   width: 100%;
   cursor: pointer;
+  /* Not dragged (unlike decorate items): let a swipe over the buttons scroll the panel on phones. */
+  touch-action: manipulation;
   text-align: left;
   font-family: inherit;
   color: inherit;
@@ -981,6 +985,39 @@ h1 {
   flex-shrink: 0;
   object-fit: contain;
   pointer-events: none; /* the whole row is the drag handle */
+}
+
+/* ---------------------------------------------------------------- Forced landscape (phones held upright)
+ * forceLandscape.ts adds body.force-landscape: the page is laid out landscape (screen height × screen width) and
+ * turned 90° to fill the upright screen. Fixed elements inside (game screen, modal) follow the turned body. */
+
+/* The page itself can't scroll (it's turned): the turned body is the scroller (lobby on short screens). */
+html.force-landscape {
+  overflow: hidden;
+  height: 100%;
+}
+
+body.force-landscape {
+  --page-w: var(--screen-h);
+  --page-h: var(--screen-w);
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: var(--screen-h);
+  height: var(--screen-w);
+  min-height: 0;
+  overflow: auto;
+  transform-origin: top left;
+  transform: rotate(90deg) translateY(-100%);
+}
+
+body.force-landscape.in-game {
+  overflow: hidden;
+}
+
+/* The page is already turned: no need to ask for it. */
+body.force-landscape .rotate-hint {
+  display: none !important;
 }
 
 /* ---------------------------------------------------------------- Rotate hint (phones in portrait) */

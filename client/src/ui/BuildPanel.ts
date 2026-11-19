@@ -1,6 +1,7 @@
 import { Callbacks, type Room } from "@colyseus/sdk";
 import { BUILD_REFUND_RATE, BUILD_TILES, DECORATION_CATEGORIES, ERASE_TOOL, type BuildTileDef } from "@boba/shared";
 import { propThumbnail } from "../scenes/YardView";
+import { isTouchDevice } from "../input/TouchControls";
 import type { BobaShopState } from "@boba/shared/schema";
 
 const hex = (color: number) => "#" + color.toString(16).padStart(6, "0");
@@ -37,7 +38,10 @@ export class BuildPanel {
       textContent:
         "Chọn vật liệu rồi kéo trên đất trống. Tường đứng trên sàn: lát sàn phủ cả các ô tường để sàn liền tới chân tường. " +
         "Tường chặn đường đi, nhớ đặt một ô Cửa để vào nhà. " +
-        `Xây đè hoặc dùng Tẩy được hoàn ${BUILD_REFUND_RATE * 100}% tiền ô cũ. Vẫn đi lại bằng WASD khi đang xây.`,
+        `Xây đè hoặc dùng Tẩy được hoàn ${BUILD_REFUND_RATE * 100}% tiền ô cũ. ` +
+        (isTouchDevice()
+          ? "Bấm nút 🚶 Đi lại trên màn hình để dùng joystick đi quanh sân, bấm 🔨 Xây tiếp để xây."
+          : "Vẫn đi lại bằng WASD khi đang xây."),
     });
     const list = Object.assign(document.createElement("div"), { className: "decor-list" });
 
