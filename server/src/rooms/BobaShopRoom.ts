@@ -783,11 +783,14 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     this.resetMoveBudget(client.sessionId);
   }
 
-  /** Building in the yard: the host's land, paid from the host's wallet. Allowed during shifts too. */
+  /**
+   * Building in the yard: the host's land, paid from the builder's own wallet. Guests may only build on empty
+   * cells (no replacing, no eraser). Allowed during shifts too.
+   */
   private handleBuildTiles(client: Client, payload: BuildTilesMessage) {
-    if (!this.hostShop || this.sessionNames.get(client.sessionId) !== this.hostKey) {
-      return client.send(ServerEvents.InteractFailed, { reason: `Chỉ chủ phòng (${this.state.hostName}) mới xây được` });
-    }
+    const key = this.sessionNames.get(client.sessionId);
+    if (!this.hostShop || !key) return;
+    const payer = shopOf(key);
     // No wall on top of someone standing in the yard.
     const blocked = (cx: number, cy: number) => {
       const r = cellRect(cx, cy);
@@ -796,7 +799,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
       }
       return false;
     };
-    const error = this.hostShop.build(payload?.tool, payload?.x0, payload?.y0, payload?.x1, payload?.y1, blocked);
+    const error = this.hostShop.build(payload?.tool, payload?.x0, payload?.y0, payload?.x1, payload?.y1, blocked, payer);
     if (error) client.send(ServerEvents.InteractFailed, { reason: error });
   }
 

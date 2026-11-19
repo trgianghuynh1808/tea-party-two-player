@@ -131,33 +131,46 @@ export class SharedShop {
   /**
    * Build (or erase) yard tiles over a dragged rectangle of cells (see cellsForTool). Cells already holding that
    * tile are skipped; replacing or erasing a tile refunds part of its price. `blocked` cells (a player stands there)
-   * don't get walls. Returns an error message, or undefined on success.
+   * don't get walls. `payer` is whose wallet pays (default: this shop's owner); another player's wallet = a guest
+   * building on this land, who may only build on empty cells (see planCellChange's onlyEmpty).
+   * Returns an error message, or undefined on success.
    */
-  build(tool: unknown, x0: unknown, y0: unknown, x1: unknown, y1: unknown, blocked: (cx: number, cy: number) => boolean): string | undefined {
+  build(
+    tool: unknown,
+    x0: unknown,
+    y0: unknown,
+    x1: unknown,
+    y1: unknown,
+    blocked: (cx: number, cy: number) => boolean,
+    payer: SharedShop = this,
+  ): string | undefined {
     const kind = String(tool);
     const def = getBuildTile(kind);
+    const guest = payer !== this;
     if (!def && kind !== ERASE_TOOL) return "Không có loại này";
+    if (guest && !def) return "Chỉ chủ phòng mới dỡ được";
     const solid = !!def && isBlocking(def);
     const changes: [string, string][] = [];
     let cost = 0;
     for (const { cx, cy } of cellsForTool(kind, Number(x0), Number(y0), Number(x1), Number(y1))) {
-      const change = planCellChange(this.tiles, kind, cx, cy);
+      const change = planCellChange(this.tiles, kind, cx, cy, guest);
       if (!change || (solid && blocked(cx, cy))) continue;
       const oldDef = getBuildTile(change.old);
       cost += (def?.price ?? 0) - (oldDef ? buildRefund(oldDef) : 0);
       changes.push([change.key, change.kind]);
     }
-    if (!changes.length) return def ? "Không xây được ở đây" : undefined;
-    if (cost > this.money) return `Không đủ tiền (cần $${cost})`;
+    if (!changes.length) return def ? (guest ? "Chỉ xây được trên ô trống" : "Không xây được ở đây") : undefined;
+    if (cost > payer.money) return `Không đủ tiền (cần $${cost})`;
 
     for (const [key, k] of changes) {
       if (k) this.tiles.set(key, k);
       else this.tiles.delete(key);
     }
-    this.money -= cost;
+    payer.money -= cost;
     this.emit({ type: "tiles", changes });
-    this.emit({ type: "money", money: this.money });
+    payer.emit({ type: "money", money: payer.money });
     this.scheduleSave();
+    if (guest) payer.scheduleSave();
     return undefined;
   }
 

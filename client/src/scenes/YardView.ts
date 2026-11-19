@@ -253,7 +253,7 @@ export class YardView {
     g.fillStyle(0xcbb08a).fillRect(SHOP_DOOR_X - 28, SHOP_BUILDING.bottom, 56, lot.bottom - SHOP_BUILDING.bottom);
     g.lineStyle(2, 0xb0916a, 0.7).strokeRoundedRect(lot.left + 6, SHOP_BUILDING.bottom - 10, lot.right - lot.left - 12, lot.bottom - SHOP_BUILDING.bottom, 14);
     this.scene.add
-      .text(lot.right + 320, lot.top + 60, "🏡 Đất trống · chủ phòng bấm 🔨 Xây để xây nhà", {
+      .text(lot.right + 320, lot.top + 60, "🏡 Đất trống · bấm 🔨 Xây để xây nhà", {
         fontFamily: "sans-serif",
         fontSize: "16px",
         color: "#3d2c29",

@@ -470,7 +470,7 @@ function startGame(room: Room<BobaShopState>) {
   });
 
   // Only the host decorates (the room shows their furniture), and only between shifts, inside the shop.
-  // Building is on the host's land outside the shop: host only, any time.
+  // Building is on the host's land outside the shop: anyone (paying from their own wallet), any time.
   let amHost = false;
   let inYard = false;
   const updateDecorateBtn = () => {
@@ -483,12 +483,13 @@ function startGame(room: Room<BobaShopState>) {
         ? "Vào trong quán để trang trí"
         : "Trang trí quán (ngoài giờ ca)";
     if (decorateBtn.disabled && decorating) setDecorating(false);
-    buildBtn.disabled = !amHost || !inYard;
-    buildBtn.title = !amHost
-      ? `Đất này của ${host}, chỉ chủ phòng mới xây được`
-      : inYard
+    // Guests build on the host's land too, paid from their own wallet (empty cells only).
+    buildBtn.disabled = !inYard;
+    buildBtn.title = !inYard
+      ? "Ra khỏi quán (cửa ở giữa cạnh dưới) để xây nhà"
+      : amHost
         ? "Xây nhà trên đất trống"
-        : "Ra khỏi quán (cửa ở giữa cạnh dưới) để xây nhà";
+        : `Xây giúp ${host} trên đất trống, trả bằng ví của bạn`;
     if (buildBtn.disabled && building) setBuilding(false);
   };
   game.events.on(AREA_EVENT, (yard: boolean) => {
@@ -591,7 +592,7 @@ function setDecorating(on: boolean) {
   game?.events.emit(DECORATE_MODE_EVENT, on);
 }
 
-// ---------------------------------------------------------------- Build mode (in the yard, host only)
+// ---------------------------------------------------------------- Build mode (in the yard; guests pay from their own wallet)
 
 function setBuilding(on: boolean) {
   if (on && decorating) setDecorating(false);

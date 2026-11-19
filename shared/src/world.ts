@@ -292,15 +292,24 @@ export function cellsForTool(tool: string, x0: number, y0: number, x1: number, y
 /**
  * What a tool would do on one cell: the key it writes, the new kind ("" = removed) and the old kind.
  * The eraser removes the structure if there is one, else the floor. undefined = nothing to do.
+ * `onlyEmpty` (guests building on the host's land): only new tiles on empty cells, no replacing and no eraser,
+ * so a guest can't tear down the host's buildings or pocket their refunds.
  */
-export function planCellChange(tiles: TileGetter, tool: string, cx: number, cy: number): { key: string; kind: string; old?: string } | undefined {
+export function planCellChange(
+  tiles: TileGetter,
+  tool: string,
+  cx: number,
+  cy: number,
+  onlyEmpty = false,
+): { key: string; kind: string; old?: string } | undefined {
   const def = getBuildTile(tool);
   if (def) {
     const key = tileKey(cx, cy, layerOf(def));
     const old = tiles.get(key);
+    if (onlyEmpty && old) return undefined;
     return old === def.kind ? undefined : { key, kind: def.kind, old };
   }
-  if (tool !== ERASE_TOOL) return undefined;
+  if (tool !== ERASE_TOOL || onlyEmpty) return undefined;
   for (const layer of ["structure", "floor"] as const) {
     const key = tileKey(cx, cy, layer);
     const old = tiles.get(key);

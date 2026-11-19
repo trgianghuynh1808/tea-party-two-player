@@ -26,7 +26,7 @@ const OK_COLOR = 0x2a9d8f;
 const ERASE_COLOR = 0xe63946;
 
 /**
- * Build mode in the yard (host only): pick a tool in the DOM panel, then drag over the land.
+ * Build mode in the yard (anyone, paid from their own wallet; guests on empty cells only): pick a tool in the DOM panel, then drag over the land.
  * Floors / the eraser fill the dragged rectangle, walls and fences draw its outline, a door goes on one cell.
  * The preview shows the affected cells and the price; the server re-checks and applies it.
  */
@@ -120,7 +120,7 @@ export class BuildController {
     let cost = 0;
     let count = 0;
     for (const { cx, cy } of cellsForTool(this.tool, from.cx, from.cy, to.cx, to.cy)) {
-      const change = tiles && planCellChange(tiles, this.tool, cx, cy);
+      const change = tiles && planCellChange(tiles, this.tool, cx, cy, !this.isHost());
       if (!change) continue;
       const oldDef = getBuildTile(change.old);
       cost += (def?.price ?? 0) - (oldDef ? buildRefund(oldDef) : 0);
@@ -154,6 +154,11 @@ export class BuildController {
     this.preview.clear();
     this.ghost.setVisible(false);
     this.costLabel.setVisible(false);
+  }
+
+  /** Guests (not the host) may only build on empty cells (see planCellChange's onlyEmpty). */
+  private isHost(): boolean {
+    return !!this.room.state.players?.get(this.room.sessionId)?.host;
   }
 
   private money(): number {

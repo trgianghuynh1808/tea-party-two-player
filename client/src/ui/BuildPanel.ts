@@ -22,6 +22,7 @@ const GROUPS: { title: string; has: (def: BuildTileDef) => boolean }[] = [
 /** Build mode side panel: pick a material (or the eraser), then drag over the yard (BuildController). */
 export class BuildPanel {
   private buttons = new Map<string, HTMLElement>();
+  private selected = "";
   private moneyLabel: HTMLElement;
   private unsubscribers: (() => void)[] = [];
 
@@ -54,10 +55,17 @@ export class BuildPanel {
         list.append(this.makeButton(def.kind, def.label, price, hex(def.color), hex(def.accent), propThumbnail(def), !def.decor));
       }
     }
-    list.append(Object.assign(document.createElement("h3"), { className: "build-group", textContent: "🧽 Dỡ bỏ" }));
-    list.append(this.makeButton(ERASE_TOOL, "Tẩy (kéo để dỡ)", "", "#ffffff", "#e63946"));
+    const eraseTitle = Object.assign(document.createElement("h3"), { className: "build-group", textContent: "🧽 Dỡ bỏ" });
+    const eraseBtn = this.makeButton(ERASE_TOOL, "Tẩy (kéo để dỡ)", "", "#ffffff", "#e63946");
+    list.append(eraseTitle, eraseBtn);
+    // Guests build on the host's land with their own money, on empty cells only (no replacing, no eraser).
+    const guestNote = Object.assign(document.createElement("p"), {
+      className: "hint",
+      hidden: true,
+      textContent: `Bạn đang xây giúp ${room.state.hostName || "chủ phòng"}: tiền trừ vào ví của bạn, chỉ xây được trên ô trống (không xây đè, không dỡ).`,
+    });
 
-    root.append(title, this.moneyLabel, help, list);
+    root.append(title, this.moneyLabel, guestNote, help, list);
     this.select("floor_wood");
 
     const $ = Callbacks.get(room);
@@ -65,6 +73,13 @@ export class BuildPanel {
       $.onAdd("players", (player, sessionId) => {
         if (sessionId !== room.sessionId) return;
         this.unsubscribers.push($.listen(player, "money", (money) => (this.moneyLabel.textContent = `💰 Ví của bạn có $${money}`)));
+        this.unsubscribers.push(
+          $.listen(player, "host", (host) => {
+            guestNote.hidden = host;
+            eraseTitle.hidden = eraseBtn.hidden = !host;
+            if (!host && this.selected === ERASE_TOOL) this.select("floor_wood");
+          }),
+        );
       }),
     );
   }
@@ -94,6 +109,7 @@ export class BuildPanel {
   }
 
   private select(tool: string) {
+    this.selected = tool;
     for (const [t, el] of this.buttons) el.classList.toggle("selected", t === tool);
     this.onTool(tool);
   }
