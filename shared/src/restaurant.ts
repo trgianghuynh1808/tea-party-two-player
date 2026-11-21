@@ -264,30 +264,39 @@ export function describeKitchenItem(item: string): string {
 // ---------------------------------------------------------------- Kitchen layout
 //
 // Local coordinates inside RESTAURANT (0,0 = top-left of the room). The back wall is y 0..WALL_BOTTOM.
-// - Back wall: dish shelves and the cookers.
-// - Left wall and a long island: ingredient crates.
-// - Middle: counters to put things down and assemble dishes; take-away counter; trash in the corner.
+// The kitchen is a one-way flow so two players can split the work: prep on the left, handover in
+// the middle, cooking and serving on the right.
+// - Prep zone (x <= 382): ingredient crates in three columns (x = 31, 129, 227), chop
+//   boards at x = 340, and trash in the bottom-left corner.
+// - Handover zone (x = 455): one column of counters to put prepped parts on for the other player.
+// - Cook + serve zone (x >= COOK_X): cookers in two rows, container shelves, then the take-away counter.
 // - Right: the dining room, furnished by the host (decorate mode), with the door at the bottom.
+// Every adjacent pair of columns/rows along x has a 44px aisle (the player is 36px wide).
 
 const at = (x: number, y: number) => ({ x: RESTAURANT.x + x, y: RESTAURANT.y + y });
+// Cook zone rows (x >= COOK_X): back row against the wall, then a second row, then the container shelves.
 const BACK_Y = WALL_BOTTOM + 25;
+const MID_Y = 290;
+const SHELF_Y = 500;
+const COOK_X = 570;
+const COOK_PITCH = 90;
 
-const shelf = (container: ContainerId, x: number): StationDef => ({
+const shelf = (container: ContainerId, x: number, y: number): StationDef => ({
   id: `r_shelf_${container}`,
   type: StationType.Shelf,
   label: CONTAINERS[container].shelf,
-  ...at(x, BACK_Y),
+  ...at(x, y),
   width: 84,
   height: 60,
   color: 0xe9dcc9,
   container,
 });
 
-const cooker = (process: ProcessId, n: number, x: number): StationDef => ({
+const cooker = (process: ProcessId, n: number, x: number, y: number): StationDef => ({
   id: `r_${process}_${n}`,
   type: StationType.Cooker,
   label: PROCESSES[process].station,
-  ...at(x, BACK_Y),
+  ...at(x, y),
   width: 84,
   height: 60,
   color: PROCESSES[process].color,
@@ -305,22 +314,28 @@ const crate = (foodId: FoodId, x: number, y: number): StationDef => ({
   food: foodId,
 });
 
-const BACK_ROW: (ContainerId | [ProcessId, number])[] = [
-  "plate",
-  "bowl",
-  "glass",
-  ["chop", 1],
-  ["chop", 2],
+/** Prep zone (x <= 382): chop boards between the island crates and the handover counters. */
+const CHOP_BOARDS: { n: number; x: number; y: number }[] = [
+  { n: 1, x: 340, y: 230 },
+  { n: 2, x: 340, y: 330 },
+];
+/** Cook zone, back row (y = BACK_Y): the fast hot cookers. */
+const BACK_ROW: [ProcessId, number][] = [
   ["fry", 1],
   ["fry", 2],
   ["boil", 1],
   ["boil", 2],
   ["grill", 1],
+];
+/** Cook zone, second row (y = MID_Y): the slow / special cookers. */
+const MID_ROW: [ProcessId, number][] = [
   ["bake", 1],
   ["deepfry", 1],
   ["blend", 1],
   ["brew", 1],
 ];
+/** Cook zone, third row (y = SHELF_Y): the container shelves. */
+const SHELF_ROW: ContainerId[] = ["plate", "bowl", "glass"];
 const LEFT_CRATES: FoodId[] = ["beef", "chicken", "salmon", "shrimp", "egg", "milk", "cheese"];
 const ISLAND_CRATES: FoodId[] = [
   "potato",
@@ -340,15 +355,19 @@ const ISLAND_CRATES: FoodId[] = [
 ];
 
 export const RESTAURANT_STATIONS: StationDef[] = [
-  ...BACK_ROW.map((s, i) => (typeof s === "string" ? shelf(s, 62 + i * 96) : cooker(s[0], s[1], 62 + i * 96))),
-  ...LEFT_CRATES.map((f, i) => crate(f, 40, 240 + i * 66)),
-  ...ISLAND_CRATES.map((f, i) => crate(f, 170 + i * 60, 330)),
+  ...CHOP_BOARDS.map((b) => cooker("chop", b.n, b.x, b.y)),
+  ...BACK_ROW.map(([process, n], i) => cooker(process, n, COOK_X + i * COOK_PITCH, BACK_Y)),
+  ...MID_ROW.map(([process, n], i) => cooker(process, n, COOK_X + i * COOK_PITCH, MID_Y)),
+  ...SHELF_ROW.map((container, i) => shelf(container, COOK_X + i * COOK_PITCH, SHELF_Y)),
+  ...LEFT_CRATES.map((f, i) => crate(f, 31, 170 + i * 60)),
+  ...ISLAND_CRATES.slice(0, 7).map((f, i) => crate(f, 129, 170 + i * 60)),
+  ...ISLAND_CRATES.slice(7).map((f, i) => crate(f, 227, 170 + i * 60)),
   ...[0, 1, 2, 3, 4, 5].map(
     (i): StationDef => ({
       id: `r_counter_${i + 1}`,
       type: StationType.Counter,
       label: "Bàn",
-      ...at(270 + i * 62, 500),
+      ...at(455, 200 + i * 66),
       width: 58,
       height: 58,
       color: 0xc9a27e,
@@ -366,4 +385,4 @@ const KITCHEN_STATION_IDS = new Set(RESTAURANT_STATIONS.map((s) => s.id));
 export const isKitchenStation = (def: StationDef) => KITCHEN_STATION_IDS.has(def.id);
 
 /** Where players stand when a restaurant shift starts. */
-export const RESTAURANT_SPAWN_POINTS = [at(420, 610), at(560, 610)];
+export const RESTAURANT_SPAWN_POINTS = [at(470, 630), at(560, 630)];
