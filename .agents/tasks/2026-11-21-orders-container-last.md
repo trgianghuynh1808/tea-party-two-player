@@ -9,13 +9,13 @@ Trong panel Đơn hàng (nhà hàng), dòng chỉ vật chứa (tô/đĩa/ly) hi
 
 ## Plan
 - [x] 1. [dễ] `client/src/ui/OrdersPanel.ts`, hàm `recipeSteps`: chuyển dòng `parts.append(span("part-into", ...))` xuống sau vòng `for (const part of dish.parts)` (trước `return parts`); đổi text thành `${CONTAINER_ICONS[dish.container]} Bày ra ${CONTAINERS[dish.container].label.toLowerCase()}`.
-- [ ] 2. [dễ] `client/src/style.css`, rule `.order .part-into`: thêm `margin-top: 2px; padding-top: 3px; border-top: 1px dashed #d9cbb8;` để tách khỏi các bước.
+- [x] 2. [dễ] `client/src/style.css`, rule `.order .part-into`: thêm `margin-top: 2px; padding-top: 3px; border-top: 1px dashed #d9cbb8;` để tách khỏi các bước.
 
 ## Trạng thái hiện tại
-Bước 1 xong (commit 70dfe04): dòng vật chứa đã xuống sau các bước làm với text mới "Bày ra …". Còn bước 2 (CSS `.order .part-into`).
+Hoàn tất cả 2 bước: bước 1 (commit 70dfe04) đưa dòng vật chứa xuống cuối với text "Bày ra …"; bước 2 thêm separator CSS cho `.order .part-into` (border-top dashed + padding/margin) để tách khỏi các bước làm.
 
 ## Test status
-- Lần chạy cuối: 2026-11-21 — `npm run typecheck` PASS (server + client); `npx playwright test` không có spec.
+- Lần chạy cuối: 2026-11-21 (sau bước 2) — `npm run typecheck` PASS (server + client); `npx playwright test` không có spec ("No tests found", như mong đợi vì `tests/` trống).
 - Fail: không.
 - Ghi chú: `tests/` có thể chưa có spec; nếu Playwright báo "No tests found" thì chỉ dựa vào `npm run typecheck`.
 

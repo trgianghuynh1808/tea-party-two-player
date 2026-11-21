@@ -621,6 +621,9 @@ h1 {
   color: #6b5b57;
   font-size: 11px;
   font-weight: 600;
+  margin-top: 2px;
+  padding-top: 3px;
+  border-top: 1px dashed #d9cbb8;
 }
 
 .order .part {
