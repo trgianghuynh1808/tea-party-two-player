@@ -278,33 +278,28 @@ export function describeKitchenItem(item: string): string {
 // ---------------------------------------------------------------- Kitchen layout
 //
 // Local coordinates inside RESTAURANT (0,0 = top-left of the room). The back wall is y 0..WALL_BOTTOM.
-// The kitchen is grouped by purpose so two players can split the work by zone:
-// - Cook zone (x <= 510): cooking ingredient crates in three columns (x = 31, 129, 227), then two
-//   columns of cooking machines (x = 340, 468) ending in the plate/bowl shelves; trash tucked
-//   between the two machine columns at the bottom.
-// - Shared zone (x = 585..712): one column of handover counters plus the crates both zones draw
-//   from (milk, strawberry) beside them.
-// - Drink zone (x >= 745): drink crates (x = 790), then the blender, coffee machine, glass shelf and
-//   second chop board in one column (x = 903).
-// - Right: the dining room, furnished by the host (decorate mode), with the door at the bottom.
-// Every adjacent pair of columns along x has a 44px aisle, and stations stacked in one column
-// (crates, machines, shelves, counters) keep a 40px vertical gap, so the player (36px wide) fits
-// between them.
+// The kitchen hugs the edges so the middle of the room stays open as the dining area:
+// - Crate row: all 21 ingredient crates in one horizontal line under the back wall (y = TOP_Y) —
+//   cooking ingredients first, then the shared ones, then the drink ones.
+// - Machine columns: the cookers stacked vertically along the left and right edges (from y = 270,
+//   70px apart), so every machine is reached from the open middle.
+// - Bottom row: trash, plate/bowl shelves, the six handover counters, the take-away counter and the
+//   glass shelf in one horizontal line (center y = 715), leaving x 640..760 free for the door at the
+//   bottom centre.
 
 const at = (x: number, y: number) => ({ x: RESTAURANT.x + x, y: RESTAURANT.y + y });
-// First row of every wall-side column (station centers), just below the back wall.
+/** Center y of the crate row, just below the back wall. */
 const TOP_Y = WALL_BOTTOM + 50;
-const CRATE_PITCH = 88;
-const COOK_MACHINE_PITCH = 100;
-const DRINK_MACHINE_PITCH = 100;
-const COUNTER_PITCH = 98;
-// Zone columns (local x of the station centers); adjacent columns keep a 44px aisle.
-const COOK_CRATE_X = [31, 129, 227];
-const COOK_MACHINE_X = [340, 468];
-const COUNTER_X = 585;
-const SHARED_CRATE_X = 685;
-const DRINK_CRATE_X = 790;
-const DRINK_MACHINE_X = 903;
+/** Horizontal pitch of the crate row (54px crates, so 8px gaps). */
+const CRATE_PITCH_X = 62;
+/** Local x of the two machine columns, hugging the left and right edges. */
+const LEFT_MACHINE_X = 60;
+const RIGHT_MACHINE_X = 1340;
+/** Top machine y, then the vertical pitch down each column (60px machines, 10px gaps). */
+const MACHINE_TOP_Y = 270;
+const MACHINE_PITCH_Y = 70;
+/** Center y of the bottom row (the 80px-tall take-away counter sits at y = 705). */
+const BOTTOM_Y = 715;
 
 const shelf = (container: ContainerId, x: number, y: number): StationDef => ({
   id: `r_shelf_${container}`,
@@ -339,73 +334,64 @@ const crate = (foodId: FoodId, x: number, y: number): StationDef => ({
   food: foodId,
 });
 
-/** Cook zone (left): cooking ingredients, three columns of five crates. */
-const COOK_CRATES: FoodId[][] = [
-  ["beef", "chicken", "salmon", "shrimp", "egg"],
-  ["potato", "tomato", "lettuce", "mushroom", "pumpkin"],
-  ["rice", "noodles", "flour", "bread", "cheese"],
+/** Crate row: cooking ingredients, left to right. */
+const COOK_CRATES: FoodId[] = [
+  "beef", "chicken", "salmon", "shrimp", "egg",
+  "potato", "tomato", "lettuce", "mushroom", "pumpkin",
+  "rice", "noodles", "flour", "bread", "cheese",
 ];
-/** Shared zone (middle): crates both zones draw from, beside the handover counters. */
+/** Crate row: ingredients both sides draw from. */
 const SHARED_CRATES: FoodId[] = ["milk", "strawberry"];
-/** Drink zone (right): drink ingredients, one column of crates. */
+/** Crate row: drink ingredients. */
 const DRINK_CRATES: FoodId[] = ["coffee", "orange", "lemon", "chocolate"];
-/** Cook zone, wall column: the chop board, then the fast hot cookers. */
-const COOK_MACHINES: [ProcessId, number][] = [
+/** Left machine column (top to bottom): the chop board, the pans, the grill, the pots. */
+const LEFT_MACHINES: [ProcessId, number][] = [
   ["chop", 1],
   ["fry", 1],
   ["fry", 2],
   ["grill", 1],
-];
-/** Cook zone, inner column by the shared zone: the wet / slow cookers. */
-const COOK_MACHINES_INNER: [ProcessId, number][] = [
   ["boil", 1],
   ["boil", 2],
+];
+/** Right machine column (top to bottom): the oven, the fryer, then the drink-side machines. */
+const RIGHT_MACHINES: [ProcessId, number][] = [
   ["bake", 1],
   ["deepfry", 1],
-];
-/** Cook zone: container shelves continuing the inner machine column. */
-const COOK_SHELVES: ContainerId[] = ["plate", "bowl"];
-/** Drink zone, machine column: the blender and the coffee machine. */
-const DRINK_MACHINES: [ProcessId, number][] = [
+  ["chop", 2],
   ["blend", 1],
   ["brew", 1],
 ];
 
 export const RESTAURANT_STATIONS: StationDef[] = [
-  // Cook zone (left): cooking crates in three columns.
-  ...COOK_CRATES.flatMap((column, c) => column.map((f, i) => crate(f, COOK_CRATE_X[c], TOP_Y + i * CRATE_PITCH))),
-  // Cook zone: machines in two wall-side columns; the plate/bowl shelves continue the inner one.
-  ...COOK_MACHINES.map(([process, n], i) => cooker(process, n, COOK_MACHINE_X[0], TOP_Y + i * COOK_MACHINE_PITCH)),
-  ...COOK_MACHINES_INNER.map(([process, n], i) =>
-    cooker(process, n, COOK_MACHINE_X[1], TOP_Y + i * COOK_MACHINE_PITCH),
+  // Crate row along the back wall: cooking, shared, then drink ingredients.
+  ...COOK_CRATES.map((f, i) => crate(f, 40 + i * CRATE_PITCH_X, TOP_Y)),
+  ...SHARED_CRATES.map((f, i) => crate(f, 986 + i * CRATE_PITCH_X, TOP_Y)),
+  ...DRINK_CRATES.map((f, i) => crate(f, 1126 + i * CRATE_PITCH_X, TOP_Y)),
+  // Machine columns along the left and right edges.
+  ...LEFT_MACHINES.map(([process, n], i) =>
+    cooker(process, n, LEFT_MACHINE_X, MACHINE_TOP_Y + i * MACHINE_PITCH_Y),
   ),
-  ...COOK_SHELVES.map((container, i) =>
-    shelf(container, COOK_MACHINE_X[1], TOP_Y + (COOK_MACHINES_INNER.length + i) * COOK_MACHINE_PITCH),
+  ...RIGHT_MACHINES.map(([process, n], i) =>
+    cooker(process, n, RIGHT_MACHINE_X, MACHINE_TOP_Y + i * MACHINE_PITCH_Y),
   ),
-  // Shared zone (middle): the handover counters.
-  ...[0, 1, 2, 3, 4, 5].map(
-    (i): StationDef => ({
+  // Bottom row: trash and shelves on the left, handover counters around the door gap (x 640..760),
+  // take-away counter and glass shelf on the right.
+  { id: "r_trash", type: StationType.Trash, label: "Thùng rác", ...at(120, BOTTOM_Y), width: 52, height: 52, color: 0x9e9e9e },
+  shelf("plate", 200, BOTTOM_Y),
+  shelf("bowl", 300, BOTTOM_Y),
+  ...[400, 470, 540, 860, 930, 1000].map(
+    (x, i): StationDef => ({
       id: `r_counter_${i + 1}`,
       type: StationType.Counter,
       label: "Bàn",
-      ...at(COUNTER_X, 200 + i * COUNTER_PITCH),
+      ...at(x, BOTTOM_Y),
       width: 58,
       height: 58,
       color: 0xc9a27e,
     }),
   ),
-  // Shared zone: crates both zones draw from.
-  ...SHARED_CRATES.map((f, i) => crate(f, SHARED_CRATE_X, TOP_Y + i * CRATE_PITCH)),
-  // Drink zone (right): drink crates.
-  ...DRINK_CRATES.map((f, i) => crate(f, DRINK_CRATE_X, TOP_Y + i * CRATE_PITCH)),
-  // Drink zone: blender, coffee machine, glass shelf, then the second chop board.
-  ...DRINK_MACHINES.map(([process, n], i) =>
-    cooker(process, n, DRINK_MACHINE_X, TOP_Y + i * DRINK_MACHINE_PITCH),
-  ),
-  shelf("glass", DRINK_MACHINE_X, TOP_Y + DRINK_MACHINES.length * DRINK_MACHINE_PITCH),
-  cooker("chop", 2, DRINK_MACHINE_X, TOP_Y + (DRINK_MACHINES.length + 1) * DRINK_MACHINE_PITCH),
-  { id: "r_delivery", type: StationType.DeliveryCounter, label: "Mang đi", ...at(820, 640), width: 150, height: 80, color: 0x90be6d },
-  { id: "r_trash", type: StationType.Trash, label: "Thùng rác", ...at(404, 730), width: 52, height: 52, color: 0x9e9e9e },
+  { id: "r_delivery", type: StationType.DeliveryCounter, label: "Mang đi", ...at(1120, 705), width: 150, height: 80, color: 0x90be6d },
+  shelf("glass", 1250, BOTTOM_Y),
 ];
 
 const KITCHEN_STATION_IDS = new Set(RESTAURANT_STATIONS.map((s) => s.id));
@@ -415,5 +401,5 @@ const KITCHEN_STATION_IDS = new Set(RESTAURANT_STATIONS.map((s) => s.id));
  */
 export const isKitchenStation = (def: StationDef) => KITCHEN_STATION_IDS.has(def.id);
 
-/** Where players stand when a restaurant shift starts. */
-export const RESTAURANT_SPAWN_POINTS = [at(470, 740), at(560, 740)];
+/** Where players stand when a restaurant shift starts (in the open middle of the room). */
+export const RESTAURANT_SPAWN_POINTS = [at(630, 600), at(770, 600)];
