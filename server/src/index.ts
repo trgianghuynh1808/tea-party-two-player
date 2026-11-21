@@ -47,7 +47,8 @@ const server = defineServer({
   express: (app) => {
     // Liveness probe for Render (healthCheckPath in render.yaml); deployed via the GitHub Action deploy hook.
     app.get("/health", (_req, res) => {
-      res.json({ ok: true });
+      // RENDER_GIT_COMMIT is set by Render: shows which commit is actually running.
+      res.json({ ok: true, commit: process.env.RENDER_GIT_COMMIT?.slice(0, 7) ?? null });
     });
     // Lobby: rooms currently open and who's inside. Public + CORS: the client may be hosted elsewhere (GitHub Pages).
     app.get(ROOMS_PATH, async (_req, res) => {
