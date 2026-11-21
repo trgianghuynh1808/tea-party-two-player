@@ -11,7 +11,7 @@ import {
   type Direction,
   type StationDef,
 } from "@boba/shared";
-import { joinAsHost } from "./helpers";
+import { joinAsHost, startRestaurantShift } from "./helpers";
 
 /**
  * Layout specs for the restaurant kitchen zones (prep -> handover -> cook).
@@ -438,6 +438,20 @@ test("T10: adjacent crates in the same column leave a 40px vertical gap; no stat
   }
 });
 
+test("T11: the station in the player's facing direction wins over the plain nearest one", () => {
+  // The aisle between the cooker rows: r_boil_1 (local 750,145) is 43px away, r_blend_1 (local 750,290)
+  // is 42px away, so without facing the blender wins and only facing decides.
+  const boilAisle = { x: RESTAURANT.x + 750, y: RESTAURANT.y + 218 };
+  expect(findNearestStationDef(boilAisle)?.id).toBe("r_blend_1");
+  expect(findNearestStationDef(boilAisle, "up")?.id).toBe("r_boil_1");
+  expect(findNearestStationDef(boilAisle, "down")?.id).toBe("r_blend_1");
+
+  // The 40px vertical gap between the shrimp (local 31,434) and egg (local 31,522) crates, ~20px from each.
+  const crateGap = { x: RESTAURANT.x + 31, y: RESTAURANT.y + 477 };
+  expect(findNearestStationDef(crateGap, "up")?.id).toBe("r_crate_shrimp");
+  expect(findNearestStationDef(crateGap, "down")?.id).toBe("r_crate_egg");
+});
+
 test("T9: a player can walk into the vertical gaps between crates to pick shrimp from column 1 and tomato from column 2", async ({
   page,
 }) => {
@@ -511,4 +525,48 @@ test("T9: a player can walk into the vertical gaps between crates to pick shrimp
   );
   await interact();
   await expect.poll(heldOf).toBe("food:tomato");
+});
+
+test("T12: the server picks the crate the player faces, one independent room per facing", async ({ browser }) => {
+  const ctx1 = await browser.newContext();
+  const ctx2 = await browser.newContext();
+  try {
+    const page1 = await ctx1.newPage();
+    const page2 = await ctx2.newPage();
+    await joinAsHost(page1, uniqueUser("p1"));
+    await joinAsHost(page2, uniqueUser("p2"));
+    await startRestaurantShift(page1);
+    await startRestaurantShift(page2);
+
+    const interact = (page: Page) =>
+      page.evaluate(() => (window as unknown as { __GAME__: { send(t: string): void } }).__GAME__.send("interact"));
+    const heldOf = (page: Page) =>
+      page.evaluate(() => {
+        const g = (
+          window as unknown as {
+            __GAME__: { room: { sessionId: string }; state: { players: { get(id: string): { heldItem: string } } } };
+          }
+        ).__GAME__;
+        return g.state.players.get(g.room.sessionId).heldItem;
+      });
+
+    // Both players stand in the 40px gap between the shrimp (local 31,434) and egg (local 31,522) crates,
+    // ~20px from each: only the facing direction tells the two picks apart.
+    const crateGapPath: [number, number][] = [
+      [470, 742],
+      [76, 742],
+      [76, 477],
+      [31, 477],
+    ];
+    await walkRestaurantPath(page1, crateGapPath, "up");
+    await interact(page1);
+    await expect.poll(() => heldOf(page1)).toBe("food:shrimp");
+
+    await walkRestaurantPath(page2, crateGapPath, "down");
+    await interact(page2);
+    await expect.poll(() => heldOf(page2)).toBe("food:egg");
+  } finally {
+    await ctx1.close();
+    await ctx2.close();
+  }
 });

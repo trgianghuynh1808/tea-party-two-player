@@ -987,7 +987,7 @@ export class ShopScene extends Phaser.Scene {
     const tables = state?.orders && state.decorations ? tablesWaiting(state.decorations, state.orders) : [];
     const beds = state?.decorations ? bedSpots(state.decorations, state.tiles?.entries()) : [];
     // In bed the action key only gets up: nothing to highlight.
-    const target = local && !local.bedId ? findInteractTarget(local.container, tables, beds) : undefined;
+    const target = local && !local.bedId ? findInteractTarget(local.container, tables, beds, this.localDirection) : undefined;
     const def = target?.type === "station" ? target.def : undefined;
     for (const [id, view] of this.stations) view.highlight.setVisible(id === def?.id);
     const piece = target?.type === "table" ? target.table : target?.type === "bed" ? target.bed : undefined;

@@ -858,7 +858,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     // In bed: the action key gets up.
     if (player.bedId) return this.getUp(client.sessionId, player);
     const orders = this.state.orders;
-    const target = findInteractTarget(player, tablesWaiting(this.state.decorations, orders), bedSpots(this.state.decorations, this.state.tiles.entries()));
+    const target = findInteractTarget(player, tablesWaiting(this.state.decorations, orders), bedSpots(this.state.decorations, this.state.tiles.entries()), player.direction);
     if (!target) return fail("Không có quầy nào gần đây");
 
     if (target.type === "bed") {

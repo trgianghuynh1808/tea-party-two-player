@@ -12,6 +12,8 @@ export const WORLD_HEIGHT = 600;
 export const PLAYER_RADIUS = 18;
 export const PLAYER_SPEED = 200; // pixels per second
 export const INTERACT_RANGE = 70; // max distance from player center to station edge
+/** Stations the player is facing count as this much closer when picking which station to interact with. */
+export const FACING_BIAS = 30;
 
 export type Direction = "up" | "down" | "left" | "right";
 
@@ -225,21 +227,59 @@ export function directionFromInput(dx: number, dy: number, fallback: Direction):
   return dy > 0 ? "down" : "up";
 }
 
+/** The point of a station rectangle closest to p (p itself if inside). */
+function closestPointOnStation(p: Vec2, s: StationDef): Vec2 {
+  return {
+    x: Math.max(s.x - s.width / 2, Math.min(p.x, s.x + s.width / 2)),
+    y: Math.max(s.y - s.height / 2, Math.min(p.y, s.y + s.height / 2)),
+  };
+}
+
+/** Facing direction as a unit vector (undefined for anything that is not a valid Direction). */
+function facingVector(facing: string | undefined): Vec2 | undefined {
+  switch (facing) {
+    case "up":
+      return { x: 0, y: -1 };
+    case "down":
+      return { x: 0, y: 1 };
+    case "left":
+      return { x: -1, y: 0 };
+    case "right":
+      return { x: 1, y: 0 };
+    default:
+      return undefined;
+  }
+}
+
 /** Distance from a point to the edge of a station rectangle (0 if inside). */
 export function distanceToStation(p: Vec2, s: StationDef): number {
-  const cx = Math.max(s.x - s.width / 2, Math.min(p.x, s.x + s.width / 2));
-  const cy = Math.max(s.y - s.height / 2, Math.min(p.y, s.y + s.height / 2));
-  return Math.hypot(p.x - cx, p.y - cy);
+  const c = closestPointOnStation(p, s);
+  return Math.hypot(p.x - c.x, p.y - c.y);
+}
+
+/**
+ * Effective distance used to pick which station the action key acts on: stations whose closest point lies in front of
+ * `facing` get FACING_BIAS off. An invalid or missing facing means no bias (plain distance).
+ */
+export function stationScore(p: Vec2, def: StationDef, facing?: string): number {
+  const d = distanceToStation(p, def);
+  const v = facingVector(facing);
+  if (!v) return d;
+  const c = closestPointOnStation(p, def);
+  const inFront = (c.x - p.x) * v.x + (c.y - p.y) * v.y > 0;
+  return inFront ? d - FACING_BIAS : d;
 }
 
 /** Nearest station within INTERACT_RANGE of a position (same rule on server and client). */
-export function findNearestStationDef(p: Vec2): StationDef | undefined {
+export function findNearestStationDef(p: Vec2, facing?: string): StationDef | undefined {
   let best: StationDef | undefined;
   let bestDist = INTERACT_RANGE;
   for (const def of stationsAt(p)) {
     const d = distanceToStation(p, def);
-    if (d <= bestDist) {
-      bestDist = d;
+    if (d > INTERACT_RANGE) continue;
+    const score = stationScore(p, def, facing);
+    if (score <= bestDist) {
+      bestDist = score;
       best = def;
     }
   }
@@ -326,14 +366,22 @@ export function bedExitPoint(bed: BedSpot, tiles?: TileGetter): Vec2 {
 /**
  * Nearest station, table or bed within INTERACT_RANGE (same rule on server and client).
  * `tables` = only the tables that can be served right now (see tablesWaiting); `beds` = the shop's beds.
+ * `facing` biases the station pick (see stationScore); tables and beds keep plain distances.
  */
-export function findInteractTarget(p: Vec2, tables: Iterable<PlacedDecoration>, beds: Iterable<BedSpot> = []): InteractTarget | undefined {
+export function findInteractTarget(
+  p: Vec2,
+  tables: Iterable<PlacedDecoration>,
+  beds: Iterable<BedSpot> = [],
+  facing?: string,
+): InteractTarget | undefined {
   let best: InteractTarget | undefined;
   let bestDist = INTERACT_RANGE;
   for (const def of stationsAt(p)) {
     const d = distanceToStation(p, def);
-    if (d <= bestDist) {
-      bestDist = d;
+    if (d > INTERACT_RANGE) continue;
+    const score = stationScore(p, def, facing);
+    if (score <= bestDist) {
+      bestDist = score;
       best = { type: "station", def };
     }
   }
