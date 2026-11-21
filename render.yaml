@@ -4,11 +4,20 @@
 services:
   - type: web
     name: boba-shop
+    branch: main
     runtime: node
     plan: free
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /health
+    autoDeployTrigger: commit       # commit | checksPass | off
+    buildFilter:
+         ignoredPaths:
+            - .agents/**
+            - scripts/**
+            - tests/**
+            - "**/*.md"
+            - playwright.config.ts
     envVars:
       - key: NODE_VERSION
         value: "24"
