@@ -8,9 +8,14 @@ When the user approves a plan:
 
 1. Write the plan to `.agents/tasks/<YYYY-MM-DD>-<slug>.md` using `.agents/tasks/_TEMPLATE.md`.
    - Every plan step must look like `- [ ] N. [dễ|vừa|khó] ...` and name the exact files and functions to change.
-   - The plan must include a "Test cases" section: each e2e test as `- [ ] T1. <name> — <what it verifies> — tests/<file>.spec.ts`.
-   - The plan must include the step(s) that write those specs. If a test needs game state that is hard to reach, plan to set it via `window.__GAME__` (add what the hook is missing as its own step).
    - Label honestly: `[dễ]` = one file, mechanical change; `[vừa]` = a few files following existing patterns; `[khó]` = new design, cross client/server/shared, or tricky sync logic.
+   - Prefer 3–6 steps; merge tiny related changes into one step. Consecutive steps with the same label run in one OpenCode session, so keep same-label steps together when it makes sense.
+   - Add a "## Ngữ cảnh" section before "## Plan": the key file paths, function signatures, types and constants the steps depend on (short snippets, not whole files), so OpenCode does not have to re-explore the codebase.
+   - The plan must include a "Test cases" section: each e2e test as `- [ ] T1. <name> — <what it verifies> — tests/<file>.spec.ts`.
+   - Keep tests lean: at most 3 test cases per task, each tied to one goal. Prefer extending an existing spec file and reusing `tests/helpers.ts` over new files. Do not test what the type checker already guarantees.
+   - The plan must include the step(s) that write those specs. If a test needs game state that is hard to reach, plan to set it via `window.__GAME__` (add what the hook is missing as its own step).
+   - Every step that runs tests must name the exact command, e.g. `npx playwright test tests/orders-panel.spec.ts -g "T1"`, so the executor does not run or design anything else.
+   - Set the `Verify mode:` line at the top of the task file: `none` for refactors, copy/text or config changes with no user-visible behavior; `light` (default) for normal UI/feature changes; `full` only for new player flows, 2-player/sync logic, or risky changes.
 2. Create a task branch from the current main branch: `git checkout main && git pull --ff-only && git checkout -b task/<slug>`. If the working tree is dirty, stop and ask the user.
 3. Commit only the task file on that branch: `git add <task file> && git commit -m "plan: <slug>"`. The working tree must be clean afterwards (OpenCode refuses to start otherwise).
 4. Hand off: `echo <task file> > .agents/queue/$(date +%s).job`

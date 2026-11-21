@@ -8,14 +8,32 @@
 #   REUSE_SESSION=0 scripts/run-task.sh ... # mỗi nhóm bước một phiên mới (không --continue)
 #   BATCH_MAX=1 scripts/run-task.sh ...     # mỗi lần chạy chỉ 1 bước (như bản cũ)
 #   ACTIONS=0 scripts/run-task.sh ...       # ẩn các dòng hành động, chỉ hiện commit
+#   VERIFY_MODE=full scripts/run-task.sh ...# none | light (mặc định) | full — ghi đè "Verify mode:" trong file task
 #
 # Màn hình chỉ hiện tóm tắt. Chi tiết đầy đủ nằm trong .agents/run.log
 #   (xem trực tiếp ở ô khác: tail -f .agents/run.log)
 #
 # Quy ước trong file task:  - [ ] N. [dễ|vừa|khó] ...
 # Leo thang khi một bước chưa xong:  dễ → vừa → khó → dừng (chuyển Claude)
+#
+# Cấu hình cho từng project: .agents/config.sh (model, URL verify, lệnh kiểm tra...)
 
 set -euo pipefail
+
+# Mặc định — có thể ghi đè trong .agents/config.sh hoặc bằng biến môi trường
+MODELS=(
+  "opencode-go/deepseek-v4.1-flash"   # 0: dễ
+  "opencode-go/glm-5.3"               # 1: vừa
+  "opencode-go/kimi-k3.1-pro"         # 2: khó
+)
+DEFAULT_VERIFY_MODEL="opencode-go/gemini-4-argon"
+DEFAULT_VERIFY_URL="http://localhost:5173"
+DEFAULT_CHECK_HINT="lệnh typecheck/lint và các test liên quan theo mục Commands trong AGENTS.md"
+DEFAULT_VERIFY_HINT=""
+
+CONFIG=".agents/config.sh"
+# shellcheck source=/dev/null
+if [[ -f "$CONFIG" ]]; then source "$CONFIG"; fi
 
 TASK="${1:?Usage: scripts/run-task.sh .agents/tasks/<file>.md}"
 MAX_RUNS="${MAX_RUNS:-20}"
@@ -28,14 +46,12 @@ DEFAULT_ACTION_REGEX='^[[:space:]]*(← |\$ |[|│][[:space:]]*(Edit|Write|Bash|
 ACTION_REGEX="${ACTION_REGEX:-$DEFAULT_ACTION_REGEX}"
 LOG=".agents/run.log"
 
-# Đổi model ở đây nếu cần (xem ID chính xác bằng: opencode models)
-MODELS=(
-  "opencode-go/deepseek-v4.1-flash"   # 0: dễ
-  "opencode-go/glm-5.3"               # 1: vừa
-  "opencode-go/kimi-k3.1-pro"         # 2: khó
-)
 LABELS=("dễ" "vừa" "khó")
-VERIFY_MODEL="${VERIFY_MODEL:-opencode-go/gemini-4-argon}"
+VERIFY_MODEL="${VERIFY_MODEL:-$DEFAULT_VERIFY_MODEL}"
+VERIFY_URL="${VERIFY_URL:-$DEFAULT_VERIFY_URL}"
+CHECK_HINT="${CHECK_HINT:-$DEFAULT_CHECK_HINT}"
+VERIFY_HINT="${VERIFY_HINT:-$DEFAULT_VERIFY_HINT}"
+VERIFY="${VERIFY:-1}"                  # 0 = bỏ qua bước Verify trên trình duyệt
 
 # ---------- giao diện ----------
 if [[ -t 1 ]]; then
@@ -142,25 +158,38 @@ run_agent() {
 
 # ---------- Verify ----------
 verify() {
+  local mode="$1"
   echo ""
   hr
-  echo "${BOLD}🔍 Verify trên trình duyệt${RESET}  ${DIM}$VERIFY_MODEL${RESET}"
+  echo "${BOLD}🔍 Verify ${mode} trên trình duyệt${RESET}  ${DIM}$VERIFY_MODEL${RESET}"
   hr
 
-  local prompt="Đọc AGENTS.md và $TASK. Toàn bộ các bước code đã xong.
-Nhiệm vụ: kiểm tra tính năng vừa làm như một người chơi thật, bằng playwright-cli.
-1. Chạy npx playwright test trước. Ghi kết quả từng test vào 'Test status'.
-2. Đảm bảo dev server đang chạy (npm run dev). Dùng playwright-cli mở game tại
-   http://localhost:5173/?test=1. Với tính năng 2 người chơi, mở 2 session riêng.
-3. Kiểm tra từng ý trong 'Mục tiêu' và 'Test cases': thao tác, chụp màn hình,
-   dùng window.__GAME__ để đọc/set state thay vì tự chơi.
-4. Ghi vào file task mục '## Verify' gồm: từng ý đã kiểm tra, PASS/FAIL,
-   đường dẫn screenshot, lỗi phát hiện.
-5. Với MỖI kịch bản đã kiểm tra (kể cả PASS): viết thành test trong tests/ để lần sau chạy tự động,
-   và thêm nó vào mục 'Test cases' nếu chưa có. Kịch bản FAIL thì test được phép fail.
-   KHÔNG sửa code game.
+  local prompt common
+  common="Đọc AGENTS.md và $TASK. Toàn bộ các bước code đã xong. KHÔNG sửa code của app.
+Dev server: xem AGENTS.md. App tại $VERIFY_URL. Nếu AGENTS.md mô tả test hook để set state, dùng nó.
+$VERIFY_HINT"
+
+  if [[ "$mode" == "full" ]]; then
+    prompt="$common
+Nhiệm vụ (Verify FULL): kiểm tra tính năng như một người dùng thật, bằng playwright-cli.
+1. Chạy toàn bộ e2e test một lần. Ghi kết quả từng test vào 'Test status'.
+2. Mở app bằng playwright-cli (tính năng nhiều người dùng: nhiều session).
+3. Kiểm tra từng ý trong 'Mục tiêu' và 'Test cases', thêm tối đa 2 kịch bản biên quan trọng nhất. Chụp màn hình.
+4. Ghi mục '## Verify': từng ý, PASS/FAIL, đường dẫn screenshot, lỗi phát hiện.
+5. Viết test cho các kịch bản CHƯA có spec (kể cả PASS), tối đa 3 test mới. Kịch bản FAIL thì test được phép fail.
 6. Dòng cuối mục Verify phải là đúng 'VERIFY: PASS' hoặc 'VERIFY: FAIL'.
 7. Dọn dẹp: đóng browser, dừng dev server nếu bạn đã bật. Commit file task và test mới."
+  else
+    prompt="$common
+Nhiệm vụ (Verify LIGHT, làm nhanh, không suy luận thêm kịch bản):
+1. Chạy toàn bộ e2e test một lần. Ghi kết quả từng test vào 'Test status'.
+2. Chỉ mở playwright-cli cho các ý trong 'Test cases' mà spec KHÔNG kiểm tra được (thường là hình ảnh/bố cục):
+   mỗi ý 1 screenshot. Ý nào spec đã PASS thì coi là PASS, không mở trình duyệt.
+3. KHÔNG nghĩ thêm kịch bản mới. Chỉ viết test mới nếu phát hiện lỗi (tối đa 1 test tái hiện lỗi đó).
+4. Ghi mục '## Verify' ngắn gọn: từng ý, PASS/FAIL, screenshot (nếu có).
+5. Dòng cuối mục Verify phải là đúng 'VERIFY: PASS' hoặc 'VERIFY: FAIL'.
+6. Dọn dẹp: đóng browser, dừng dev server nếu bạn đã bật. Commit file task (và test mới nếu có)."
+  fi
 
   run_agent "$VERIFY_MODEL" "$prompt" "verify"
   info "  ⏱  $(fmt_time "${LAST_DURATION:-0}")"
@@ -234,7 +263,14 @@ while (( runs < MAX_RUNS )); do
   if [[ -z "$unchecked" ]]; then
     echo ""
     ok "✅ Đã xong mọi bước code."
-    set +e; verify; rc=$?; set -e
+    # Mức Verify: biến môi trường VERIFY_MODE > dòng "Verify mode: ..." trong file task > light
+    mode="${VERIFY_MODE:-$(grep -m1 -oE 'Verify mode: *(none|light|full)' "$TASK" | sed -E 's/.*: *//' || true)}"
+    mode="${mode:-light}"
+    if [[ "$VERIFY" != "1" || "$mode" == "none" ]]; then
+      ok "   (Verify mode: none) Tiếp theo: mở Claude → gõ review."
+      exit 0
+    fi
+    set +e; verify "$mode"; rc=$?; set -e
     exit $rc
   fi
 
@@ -289,7 +325,9 @@ while (( runs < MAX_RUNS )); do
   done
 
   prompt="Đọc AGENTS.md và $TASK. Làm LẦN LƯỢT các bước $steps_csv, không làm bước nào khác.
-Sau MỖI bước: chạy npm run typecheck và các Playwright spec liên quan (nếu có);
+Sau MỖI bước: chạy $CHECK_HINT.
+Về test: nếu bước có ghi lệnh test cụ thể thì CHỈ chạy đúng lệnh đó (không chạy cả bộ test);
+KHÔNG tự nghĩ thêm hay viết thêm test ngoài những gì plan yêu cầu. Sau đó
 commit với message rõ ràng; tick checkbox của bước đó; cập nhật 'Trạng thái hiện tại' và 'Test status'.
 Nếu một bước sau 2 lần sửa vẫn fail: KHÔNG tick checkbox của bước đó, ghi nguyên nhân và cách đã thử vào
 'Đã thử mà không được', commit file task, rồi DỪNG (không làm các bước sau)."
