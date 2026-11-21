@@ -570,3 +570,18 @@ test("T12: the server picks the crate the player faces, one independent room per
     await ctx2.close();
   }
 });
+
+test('T1: empty counters show no "Bàn" label while functional stations keep theirs', async ({ page }) => {
+  await joinAsHost(page, uniqueUser("p1"));
+
+  const stationLabels = () =>
+    page.evaluate(() =>
+      (window as unknown as { __GAME__: { stationLabels(): string[] } }).__GAME__.stationLabels(),
+    );
+
+  // The hook is installed before the scene boots: wait until the stations have created their labels.
+  await expect.poll(async () => (await stationLabels()).length).toBeGreaterThan(0);
+  const labels = await stationLabels();
+  expect(labels.some((label) => label.includes("Bàn")), "no counter keeps its Bàn label").toBe(false);
+  expect(labels.some((label) => label.includes("Giao hàng")), "functional stations keep their label").toBe(true);
+});

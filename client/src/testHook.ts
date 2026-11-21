@@ -6,6 +6,12 @@ import type { BobaShopState } from "@boba/shared/schema";
 export const TEST_MODE_PARAM = "test";
 
 /**
+ * The slice of ShopScene the hook reads. Structural on purpose: testHook does not import the scene,
+ * main.ts owns the Phaser game and passes in the accessor.
+ */
+type StationLabelScene = { stationLabelTexts(): string[] };
+
+/**
  * Minimal hook for e2e tests, exposed as `window.__GAME__` when `?test=1` is set.
  * Future test tasks only add fields/methods to this same object.
  */
@@ -16,6 +22,8 @@ export type GameTestHook = {
   send(type: (typeof Messages)[keyof typeof Messages], payload?: unknown): void;
   /** Live room state (the same object as `room.state`). */
   state: BobaShopState;
+  /** Label text of every station currently showing one; [] until the scene has booted. */
+  stationLabels(): string[];
 };
 
 declare global {
@@ -28,11 +36,12 @@ declare global {
 export const isTestMode = new URLSearchParams(location.search).get(TEST_MODE_PARAM) === "1";
 
 /** Assign `window.__GAME__` so e2e tests can drive the game; a no-op outside test mode. */
-export function installTestHook(room: Room<BobaShopState>): void {
+export function installTestHook(room: Room<BobaShopState>, getShopScene: () => StationLabelScene | undefined): void {
   if (!isTestMode) return;
   window.__GAME__ = {
     room,
     send: (type, payload) => room.send(type, payload),
     state: room.state,
+    stationLabels: () => getShopScene()?.stationLabelTexts() ?? [],
   };
 }

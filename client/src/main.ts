@@ -429,7 +429,8 @@ usernameInput.value = username ?? "";
 
 function startGame(room: Room<BobaShopState>) {
   currentRoom = room;
-  installTestHook(room);
+  // The closure reads `game` lazily: at call time the game has booted and the scene exists.
+  installTestHook(room, () => game?.scene.getScene("ShopScene") as ShopScene | undefined);
   clearTimeout(lobbyPollTimer);
   setUrl(room.roomId); // a refresh comes straight back into this room
   roomNameInput.value = "";

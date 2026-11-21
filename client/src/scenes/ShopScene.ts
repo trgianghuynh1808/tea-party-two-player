@@ -203,6 +203,8 @@ const WALL = {
 /** On-screen cup heights: sitting on a station / carried above the head. */
 const STATION_CUP_HEIGHT = 32;
 const HELD_CUP_HEIGHT = 26;
+/** Restaurant stations: smaller items so the station art stays visible around them. */
+const KITCHEN_STATION_ITEM_HEIGHT = 22;
 /** Progress bar inset from the station's visible edges (images have a thicker dark border). */
 const BAR_INSET = { rect: { x: 6, bottom: 8 }, image: { x: 9, bottom: 11 } };
 const stationTextureKey = (id: string) => `station-${id}`;
@@ -222,6 +224,8 @@ export class ShopScene extends Phaser.Scene {
   private room?: Room<BobaShopState>;
   private players = new Map<string, PlayerView>();
   private stations = new Map<string, StationView>();
+  /** Station label texts by id; counters have no label, so they never get an entry. */
+  private readonly stationLabels = new Map<string, Phaser.GameObjects.Text>();
   private decor?: DecorController;
   private customers?: CustomerController;
   private yard?: YardView;
@@ -602,19 +606,25 @@ export class ShopScene extends Phaser.Scene {
       const seconds = def.processSeconds || (def.process && isProcess(def.process) ? PROCESSES[def.process].seconds : 0);
       const timed = seconds ? (FONT_SCALE > 1 ? " ⏱" : ` ⏱${seconds}s`) : "";
       const crate = def.type === StationType.Crate;
-      const labelTop = def.y - def.height / 2 - (kitchenStationTexture(def) && !crate ? KITCHEN_ART_RISE : 0);
-      this.add
-        .text(def.x, labelTop - (crate ? 6 : 10), def.label + timed, {
-          fontFamily: "sans-serif",
-          fontSize: fs(crate ? 10 : 12),
-          color: "#3d2c29",
-          fontStyle: "bold",
-          // Machine labels sit on the skirting board: a light tag keeps them readable.
-          backgroundColor: "#fdf6ecd9",
-          padding: { x: 3, y: 1 },
-        })
-        .setOrigin(0.5)
-        .setDepth(def.y + def.height / 2 + 1);
+      // Empty counters ("Bàn") need no label: the art says it all.
+      if (def.type !== StationType.Counter) {
+        const labelTop = def.y - def.height / 2 - (kitchenStationTexture(def) && !crate ? KITCHEN_ART_RISE : 0);
+        this.stationLabels.set(
+          def.id,
+          this.add
+            .text(def.x, labelTop - (crate ? 6 : 10), def.label + timed, {
+              fontFamily: "sans-serif",
+              fontSize: fs(crate ? 10 : 12),
+              color: "#3d2c29",
+              fontStyle: "bold",
+              // Machine labels sit on the skirting board: a light tag keeps them readable.
+              backgroundColor: "#fdf6ecd9",
+              padding: { x: 3, y: 1 },
+            })
+            .setOrigin(0.5)
+            .setDepth(def.y + def.height / 2 + 1),
+        );
+      }
       // Cups stand on the table top, not on the counter's front face.
       const slice = SLICED_STATIONS[def.type];
       const topSurfaceBottom = kitchenStationTexture(def)
@@ -624,7 +634,9 @@ export class ShopScene extends Phaser.Scene {
         : FITTED_ART[def.type]
           ? def.y - def.height / 2 + def.height * FITTED_ART[def.type]!.topCentre + 8
           : Infinity;
-      const itemCup = new CupView(this, def.x, Math.min(def.y + STATION_CUP_HEIGHT / 2, topSurfaceBottom), STATION_CUP_HEIGHT);
+      // Restaurant stations: smaller items so the station itself stays visible.
+      const itemHeight = kitchenStationTexture(def) || def.id.startsWith("r_counter_") ? KITCHEN_STATION_ITEM_HEIGHT : STATION_CUP_HEIGHT;
+      const itemCup = new CupView(this, def.x, Math.min(def.y + itemHeight / 2, topSurfaceBottom), itemHeight);
       const inset = rect instanceof Phaser.GameObjects.Image ? BAR_INSET.image : BAR_INSET.rect;
       const visibleWidth = rect.displayWidth;
       const progressMaxWidth = visibleWidth - inset.x * 2;
@@ -646,6 +658,11 @@ export class ShopScene extends Phaser.Scene {
       readyLabel.setDepth(9000); // above players standing in front of the machine
       this.stations.set(def.id, { def, rect, itemCup, progressBar, progressMaxWidth, highlight, readyLabel });
     }
+  }
+
+  /** Label text of every station currently showing one, so tests can assert counters' "Bàn" is gone. */
+  stationLabelTexts(): string[] {
+    return [...this.stationLabels.values()].map((label) => label.text);
   }
 
   /**
