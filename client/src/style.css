@@ -609,6 +609,68 @@ h1 {
   flex: none;
 }
 
+/* Restaurant recipe on an order: one line per part (ingredient picture ➜ cookers) */
+.order .parts {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 4px;
+}
+
+.order .part-into {
+  color: #6b5b57;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.order .part {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 4px;
+  border-radius: 6px;
+  background: #f6efe6;
+  font-size: 12px;
+}
+
+.order .part-img {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+.order .part-name {
+  font-weight: 700;
+}
+
+.order .part-raw {
+  color: #8a7a76;
+  font-size: 11px;
+}
+
+.order .part-arrow {
+  color: #b0a29e;
+  font-size: 11px;
+}
+
+.order .part-step {
+  padding: 0 5px;
+  border: 1.5px solid #d8cbb9;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Hot cookers: food burns if left there */
+.order .part-step.hot {
+  border-color: #e76f51;
+  background: #fff1ec;
+}
+
 /* "?" on an order: opens the cooking guide */
 .help-btn {
   width: 22px;

@@ -359,6 +359,13 @@ export const RESTAURANT_STATIONS: StationDef[] = [
   { id: "r_trash", type: StationType.Trash, label: "Thùng rác", ...at(40, 712), width: 52, height: 52, color: 0x9e9e9e },
 ];
 
+const KITCHEN_STATION_IDS = new Set(RESTAURANT_STATIONS.map((s) => s.id));
+/**
+ * A restaurant station: its counters, trash and take-away counter share their type with the tea shop's,
+ * but follow the kitchen rules (plates, bowls, glasses) — see planKitchen.
+ */
+export const isKitchenStation = (def: StationDef) => KITCHEN_STATION_IDS.has(def.id);
+
 /** The dining room's tables and chairs (fixed, not part of anyone's decorations). Chairs face their table. */
 function diningTable(n: number, x: number, y: number): PlacedDecoration[] {
   const p = (dx: number, dy: number) => at(x + dx, y + dy);

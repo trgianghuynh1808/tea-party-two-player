@@ -40,7 +40,14 @@ function chip(text: string, color: number): HTMLElement {
 
 const separator = (text: string) => Object.assign(document.createElement("span"), { className: "arrow", textContent: text });
 
-/** Tea shop: ingredients in order (→). Restaurant: the container, then each part with its cooking steps (+, any order). */
+const span = (className: string, text = "") => Object.assign(document.createElement("span"), { className, textContent: text });
+const CONTAINER_ICONS = { plate: "🍽️", bowl: "🥣", glass: "🥤" } as const;
+
+/**
+ * Tea shop: ingredients in order (→).
+ * Restaurant: what to serve it in, then one line per part: its ingredient (picture) ➜ each cooker it goes through
+ * (hot ones, which burn food, outlined in red). Readable at a glance; "?" opens the full guide.
+ */
 function recipeSteps(item: MenuItem): HTMLElement {
   const steps = document.createElement("div");
   steps.className = "steps";
@@ -54,15 +61,25 @@ function recipeSteps(item: MenuItem): HTMLElement {
   }
   const dish = getDish(item.id);
   if (!dish) return steps;
-  steps.append(chip(CONTAINERS[dish.container].label, 0xe9e4dc), separator(":"));
-  dish.parts.forEach((part, i) => {
+  const parts = document.createElement("div");
+  parts.className = "parts";
+  parts.append(span("part-into", `${CONTAINER_ICONS[dish.container]} Bày ra ${CONTAINERS[dish.container].label.toLowerCase()}, gồm:`));
+  for (const part of dish.parts) {
     const parsed = parseFood(part);
-    if (!parsed) return;
-    if (i > 0) steps.append(separator("+"));
-    const how = parsed.steps.map((step) => PROCESSES[step].icon).join("");
-    steps.append(chip(`${FOODS[parsed.food].label}${how ? " " + how : ""}`, FOODS[parsed.food].color));
-  });
-  return steps;
+    if (!parsed) continue;
+    const food = FOODS[parsed.food];
+    const row = span("part");
+    const img = Object.assign(document.createElement("img"), { className: "part-img", alt: "", draggable: false });
+    img.src = `${import.meta.env.BASE_URL}${food.image}`;
+    row.append(img, span("part-name", food.label));
+    if (!parsed.steps.length) row.append(span("part-raw", "để nguyên"));
+    for (const step of parsed.steps) {
+      const p = PROCESSES[step];
+      row.append(span("part-arrow", "➜"), span(`part-step${p.burns ? " hot" : ""}`, `${p.icon} ${p.station}`));
+    }
+    parts.append(row);
+  }
+  return parts;
 }
 
 /**

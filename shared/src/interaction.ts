@@ -26,6 +26,7 @@ import {
   describePart,
   foodKey,
   isProcess,
+  isKitchenStation,
   isUsefulFood,
   makeContainer,
   makeFood,
@@ -71,6 +72,8 @@ const fail = (reason: string): InteractionPlan => ({ ok: false, reason });
 export function planInteraction(def: StationDef, ctx: InteractionContext): InteractionPlan {
   const { held, stationItem, stationProgress } = ctx;
   if (ctx.phase === GamePhase.Ended) return fail("Ca đã kết thúc, bấm Chơi ca mới");
+  // Restaurant counters / trash / take-away share the tea shop's types but follow the kitchen rules.
+  if (isKitchenStation(def)) return planKitchen(def, ctx);
 
   switch (def.type) {
     case StationType.CupShelf:
