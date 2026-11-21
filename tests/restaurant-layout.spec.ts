@@ -70,36 +70,64 @@ test("T1: every station stays inside the kitchen and no two stations overlap", (
   }
 });
 
-test("T2: zone order is prep (crates + boards) < handover counters < cook (cookers + shelves)", () => {
-  const prep = [...byIdPrefix("r_crate_"), ...byIdPrefix("r_chop_")];
-  const counters = byIdPrefix("r_counter_");
-  const cook = [...cookers(), ...byIdPrefix("r_shelf_")];
-  expect(prep.length).toBeGreaterThan(0);
-  expect(counters.length).toBeGreaterThan(0);
-  expect(cook.length).toBeGreaterThan(0);
+const DRINK_CRATE_FOODS = ["coffee", "orange", "lemon", "chocolate"];
+const SHARED_CRATE_FOODS = ["milk", "strawberry"];
+const crateIds = (foods: string[]): string[] => foods.map((f) => `r_crate_${f}`);
+const byIds = (ids: string[]): StationDef[] => RESTAURANT_STATIONS.filter((s) => ids.includes(s.id));
+const DRINK_IDS = [...crateIds(DRINK_CRATE_FOODS), "r_blend_1", "r_brew_1", "r_shelf_glass", "r_chop_2"];
+const SHARED_IDS = [...crateIds(SHARED_CRATE_FOODS)];
+const minX = (list: StationDef[]) => Math.min(...list.map((s) => local(s).x));
+const maxX = (list: StationDef[]) => Math.max(...list.map((s) => local(s).x));
+const cookSide = (): StationDef[] =>
+  RESTAURANT_STATIONS.filter((s) => /^r_(crate|chop|fry|boil|grill|bake|deepfry|shelf)_/.test(s.id)).filter(
+    (s) => !DRINK_IDS.includes(s.id) && !SHARED_IDS.includes(s.id),
+  );
 
-  const maxPrepX = Math.max(...prep.map((s) => local(s).x));
-  const minCookX = Math.min(...cook.map((s) => local(s).x));
-  for (const s of counters) {
-    const x = local(s).x;
-    expect(x, `${s.id} right of the prep zone`).toBeGreaterThan(maxPrepX);
-    expect(x, `${s.id} left of the cook zone`).toBeLessThan(minCookX);
-  }
+test("T2: zone order is cook side < handover counters + shared crates < drink side", () => {
+  const cook = cookSide();
+  const counters = byIdPrefix("r_counter_");
+  const shared = byIds(SHARED_IDS);
+  const drink = byIds(DRINK_IDS);
+  expect(cook.length).toBeGreaterThan(0);
+  expect(counters.length).toBeGreaterThan(0);
+  expect(shared.length).toBe(SHARED_IDS.length);
+  expect(drink.length).toBe(DRINK_IDS.length);
+
+  const middle = [...counters, ...shared];
+  expect(maxX(cook), "cook side left of the middle").toBeLessThan(minX(middle));
+  expect(maxX(middle), "middle left of the drink side").toBeLessThan(minX(drink));
 });
 
-test("T3: the handover column is reachable from both sides", () => {
+test("T3: the handover column is reachable from the cook machines and from the shared crates", () => {
   const counters = byIdPrefix("r_counter_");
   expect(counters.length, "exactly six handover counters").toBe(6);
   expect(new Set(counters.map((s) => local(s).x)).size, "counters share one column").toBe(1);
 
-  const boards = byIdPrefix("r_chop_");
-  const appliances = cookers();
+  const machines = cookers().filter((k) => !DRINK_IDS.includes(k.id));
+  const shared = byIds(SHARED_IDS);
   const bridging = counters.filter(
     (c) =>
-      boards.some((b) => dist(local(c), local(b)) <= BRIDGE_RANGE) &&
-      appliances.some((k) => dist(local(c), local(k)) <= BRIDGE_RANGE),
+      machines.some((k) => dist(local(c), local(k)) <= BRIDGE_RANGE) &&
+      shared.some((k) => dist(local(c), local(k)) <= BRIDGE_RANGE),
   );
-  expect(bridging.length, "counters within reach of a board and a cooker").toBeGreaterThanOrEqual(3);
+  expect(bridging.length, "counters within reach of a cook machine and a shared crate").toBeGreaterThanOrEqual(2);
+});
+
+test("T13: crates sit with their zone; milk and strawberry are shared in the middle", () => {
+  const cookCrates = cookSide().filter((s) => s.id.startsWith("r_crate_"));
+  expect(cookCrates.length, "15 cooking crates").toBe(15);
+  const drinkCrates = byIds(crateIds(DRINK_CRATE_FOODS));
+  const shared = byIds(SHARED_IDS);
+  const drinkMachines = byIds(["r_blend_1", "r_brew_1", "r_shelf_glass"]);
+  expect(drinkCrates.length).toBe(4);
+  expect(shared.length).toBe(2);
+  for (const c of RESTAURANT_STATIONS.filter((s) => s.id.startsWith("r_counter_"))) {
+    expect(maxX(cookCrates), "cooking crates left of counters").toBeLessThan(local(c).x);
+    expect(minX([...drinkCrates, ...drinkMachines]), "drink crates/machines right of counters").toBeGreaterThan(local(c).x);
+  }
+  expect(minX(shared)).toBeGreaterThan(maxX(cookCrates));
+  expect(maxX(shared)).toBeLessThan(minX(drinkCrates));
+  expect(minX(drinkCrates), "drink crates share a column with each other").toBe(maxX(drinkCrates));
 });
 
 test("T4: restaurant spawn points are valid", () => {
@@ -264,15 +292,16 @@ test("T6: two players can collaborate across the one-way prep -> handover -> coo
         id,
       );
 
-    // Player 1 (prep zone): pick potato -> chop on r_chop_1 -> place on handover counter r_counter_1.
+    // Player 1 (cook side): pick potato from aisle x=80 -> chop on r_chop_1 -> place on handover counter r_counter_1.
     await walkRestaurantPath(
       page1,
       [
         [404, 630],
-        [404, 128],
-        [129, 128],
+        [404, 742],
+        [80, 742],
+        [80, 170],
       ],
-      "down",
+      "right",
     );
     await interact(page1);
     await expect.poll(() => heldOf(page1)).toBe("food:potato");
@@ -280,8 +309,9 @@ test("T6: two players can collaborate across the one-way prep -> handover -> coo
     await walkRestaurantPath(
       page1,
       [
-        [404, 128],
-        [400, 230],
+        [80, 742],
+        [404, 742],
+        [404, 170],
       ],
       "left",
     );
@@ -290,47 +320,39 @@ test("T6: two players can collaborate across the one-way prep -> handover -> coo
     await interact(page1);
     await expect.poll(() => heldOf(page1)).toBe("food:potato.chop");
 
-    await walkRestaurantPath(page1, [[408, 200]], "right");
+    await walkRestaurantPath(
+      page1,
+      [
+        [404, 600],
+        [533, 600],
+        [533, 200],
+      ],
+      "right",
+    );
     await interact(page1);
     await expect.poll(() => stationItemOf(page1, "r_counter_1")).toBe("food:potato.chop");
     await expect.poll(() => heldOf(page1)).toBe("");
 
-    // Player 2 (cook zone): pick chopped potato from r_counter_1 -> deepfry at r_deepfry_1 -> grab plate at r_shelf_plate -> scoop fries onto plate.
+    // Player 2: take it from r_counter_1 -> deepfry at r_deepfry_1 -> grab a plate at r_shelf_plate -> scoop fries onto it.
     await walkRestaurantPath(
       page2,
       [
-        [506, 630],
-        [506, 200],
+        [533, 630],
+        [533, 200],
       ],
-      "left",
+      "right",
     );
     await interact(page2);
     await expect.poll(() => heldOf(page2)).toBe("food:potato.chop");
 
-    await walkRestaurantPath(page2, [[660, 240]], "down");
+    await walkRestaurantPath(page2, [[533, 395]], "left");
     await interact(page2);
-    await walkRestaurantPath(
-      page2,
-      [
-        [506, 240],
-        [506, 450],
-        [570, 450],
-      ],
-      "down",
-    );
+    await walkRestaurantPath(page2, [[533, 470]], "left");
     await interact(page2);
     await expect.poll(() => heldOf(page2)).toBe("plate");
 
     await expect.poll(() => stationItemOf(page2, "r_deepfry_1")).toBe("food:potato.chop.deepfry");
-    await walkRestaurantPath(
-      page2,
-      [
-        [506, 450],
-        [506, 240],
-        [660, 240],
-      ],
-      "down",
-    );
+    await walkRestaurantPath(page2, [[533, 395]], "left");
     await interact(page2);
     await expect.poll(() => heldOf(page2)).toBe("plate:potato.chop.deepfry");
   } finally {
@@ -389,18 +411,17 @@ test("T7: every kitchen station is reachable on foot from the restaurant spawn p
   expect(unreachable, "stations unreachable on foot from spawn").toEqual([]);
 });
 
-test("T8: every x-adjacent station pair in the prep zone leaves a 44px aisle (the player is 36px wide)", () => {
+test("T8: every x-adjacent station pair in the kitchen leaves a 44px aisle (the player is 36px wide)", () => {
   const MIN_AISLE = 44;
-  const prep = [...byIdPrefix("r_crate_"), ...byIdPrefix("r_chop_")];
-  expect(prep.length).toBeGreaterThan(0);
-  for (let i = 0; i < prep.length; i++) {
-    for (let j = i + 1; j < prep.length; j++) {
-      const a = rectOf(prep[i]);
-      const b = rectOf(prep[j]);
+  const all = RESTAURANT_STATIONS.filter((s) => s.id !== "r_delivery" && s.id !== "r_trash");
+  for (let i = 0; i < all.length; i++) {
+    for (let j = i + 1; j < all.length; j++) {
+      const a = rectOf(all[i]);
+      const b = rectOf(all[j]);
       // Only stations sharing a vertical lane need a walking aisle between them.
       if (!(a.top < b.bottom && b.top < a.bottom)) continue;
       const gap = a.right <= b.left ? b.left - a.right : b.right <= a.left ? a.left - b.right : 0;
-      expect(gap, `${prep[i].id} <-> ${prep[j].id} aisle`).toBeGreaterThanOrEqual(MIN_AISLE);
+      expect(gap, `${all[i].id} <-> ${all[j].id} aisle`).toBeGreaterThanOrEqual(MIN_AISLE);
     }
   }
 });
@@ -439,12 +460,12 @@ test("T10: adjacent crates in the same column leave a 40px vertical gap; no stat
 });
 
 test("T11: the station in the player's facing direction wins over the plain nearest one", () => {
-  // The aisle between the cooker rows: r_boil_1 (local 750,145) is 43px away, r_blend_1 (local 750,290)
-  // is 42px away, so without facing the blender wins and only facing decides.
-  const boilAisle = { x: RESTAURANT.x + 750, y: RESTAURANT.y + 218 };
-  expect(findNearestStationDef(boilAisle)?.id).toBe("r_blend_1");
-  expect(findNearestStationDef(boilAisle, "up")?.id).toBe("r_boil_1");
-  expect(findNearestStationDef(boilAisle, "down")?.id).toBe("r_blend_1");
+  // The 15px gap between r_boil_1 (local 468,170) and r_boil_2 (local 468,245): r_boil_1 is nearer,
+  // so without facing it wins and only facing "down" picks r_boil_2.
+  const boilGap = { x: RESTAURANT.x + 468, y: RESTAURANT.y + 205 };
+  expect(findNearestStationDef(boilGap)?.id).toBe("r_boil_1");
+  expect(findNearestStationDef(boilGap, "up")?.id).toBe("r_boil_1");
+  expect(findNearestStationDef(boilGap, "down")?.id).toBe("r_boil_2");
 
   // The 40px vertical gap between the shrimp (local 31,434) and egg (local 31,522) crates, ~20px from each.
   const crateGap = { x: RESTAURANT.x + 31, y: RESTAURANT.y + 477 };

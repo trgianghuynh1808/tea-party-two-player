@@ -73,11 +73,12 @@ export class RestaurantView {
       .text(signX, R.y + 38, "🍽️ Nhà hàng", { fontFamily: "sans-serif", fontSize: this.fs(22), fontStyle: "bold", color: "#fdf6ec" })
       .setOrigin(0.5)
       .setDepth(WALL_DEPTH + 1);
-    g.fillStyle(0x8a929c).fillRect(R.x + 600, R.y + 22, 300, 4);
-    for (let i = 0; i < 6; i++) {
-      g.fillStyle(0xfffdf5).fillRect(R.x + 612 + i * 48, R.y + 24, 26, 20);
-      g.lineStyle(1, 0xc9bfae).strokeRect(R.x + 612 + i * 48, R.y + 24, 26, 20);
-      g.fillStyle(0xc9bfae).fillRect(R.x + 616 + i * 48, R.y + 30, 18, 2).fillRect(R.x + 616 + i * 48, R.y + 35, 12, 2);
+    // Pass rail over the two cook-machine columns (local x 298..510), with order tickets hanging from it.
+    g.fillStyle(0x8a929c).fillRect(R.x + 298, R.y + 22, 212, 4);
+    for (let i = 0; i < 5; i++) {
+      g.fillStyle(0xfffdf5).fillRect(R.x + 319 + i * 36, R.y + 24, 26, 20);
+      g.lineStyle(1, 0xc9bfae).strokeRect(R.x + 319 + i * 36, R.y + 24, 26, 20);
+      g.fillStyle(0xc9bfae).fillRect(R.x + 323 + i * 36, R.y + 30, 18, 2).fillRect(R.x + 323 + i * 36, R.y + 35, 12, 2);
     }
   }
 
@@ -94,21 +95,22 @@ export class RestaurantView {
   }
 
   /**
-   * Floor labels for the kitchen's one-way flow: prep on the left, handover in the middle, cook + serve
-   * on the right. Drawn just above the tiles, below everything that stands on the floor, and away from
-   * every station rectangle (crates end at y=554, counters at y=559; the "Nấu" label is nudged left of
-   * the delivery counter, which starts at x=745).
+   * Floor labels for the kitchen's three zones: cook on the left, shared crates + handover counters in
+   * the middle, drinks on the right. Drawn just above the tiles, below everything that stands on the
+   * floor, and away from every station rectangle (crates end at y=546, shelves/counters at y=559..575).
+   * The "Pha chế" label sits in the aisle above the take-away counter (x=745..895, y=600..680), which
+   * covers the drink zone's floor edge at y=610.
    */
   private drawZoneLabels() {
     const R = RESTAURANT;
-    const zones: [number, string][] = [
-      [190, "🔪 Sơ chế"],
-      [455, "🤝 Bàn giao"],
-      [690, "🍳 Nấu"],
+    const zones: [number, number, string][] = [
+      [270, 610, "🍳 Nấu ăn"],
+      [640, 610, "🤝 Dùng chung"],
+      [850, 555, "🥤 Pha chế"],
     ];
-    for (const [x, label] of zones) {
+    for (const [x, y, label] of zones) {
       this.scene.add
-        .text(R.x + x, R.y + 610, label, { fontFamily: "sans-serif", fontSize: this.fs(15), fontStyle: "bold", color: "#5b3a29" })
+        .text(R.x + x, R.y + y, label, { fontFamily: "sans-serif", fontSize: this.fs(15), fontStyle: "bold", color: "#5b3a29" })
         .setOrigin(0.5)
         .setDepth(FLOOR_DEPTH + 10);
     }
