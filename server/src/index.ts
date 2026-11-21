@@ -45,7 +45,7 @@ const server = defineServer({
     [ROOM_NAME]: defineRoom(BobaShopRoom),
   },
   express: (app) => {
-    // Liveness probe for Render (healthCheckPath in render.yaml).
+    // Liveness probe for Render (healthCheckPath in render.yaml); deployed via the GitHub Action deploy hook.
     app.get("/health", (_req, res) => {
       res.json({ ok: true });
     });
