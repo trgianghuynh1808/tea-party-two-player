@@ -9,6 +9,7 @@
 #   BATCH_MAX=1 scripts/run-task.sh ...     # mỗi lần chạy chỉ 1 bước (như bản cũ)
 #   ACTIONS=0 scripts/run-task.sh ...       # ẩn các dòng hành động, chỉ hiện commit
 #   VERIFY_MODE=full scripts/run-task.sh ...# none | light (mặc định) | full — ghi đè "Verify mode:" trong file task
+#   VERIFY_AGENT=claude scripts/run-task.sh ...# để Claude làm Verify (tiết kiệm quota OpenCode)
 #
 # Màn hình chỉ hiện tóm tắt. Chi tiết đầy đủ nằm trong .agents/run.log
 #   (xem trực tiếp ở ô khác: tail -f .agents/run.log)
@@ -26,10 +27,14 @@ MODELS=(
   "opencode-go/glm-5.3"               # 1: vừa
   "opencode-go/kimi-k3.1-pro"         # 2: khó
 )
+# Mức [vừa] chọn model theo thư mục của file đầu tiên trong bước ("tiền tố=model").
+# Không khớp quy tắc nào thì dùng MODELS[1]. Để trống = luôn dùng MODELS[1].
+MEDIUM_RULES=()
 DEFAULT_VERIFY_MODEL="opencode-go/gemini-4-argon"
 DEFAULT_VERIFY_URL="http://localhost:5173"
 DEFAULT_CHECK_HINT="lệnh typecheck/lint và các test liên quan theo mục Commands trong AGENTS.md"
 DEFAULT_VERIFY_HINT=""
+DEFAULT_VERIFY_AGENT="opencode"   # opencode = OpenCode tự Verify · claude = để Claude Verify khi bạn gõ "verify"
 
 CONFIG=".agents/config.sh"
 # shellcheck source=/dev/null
@@ -52,6 +57,7 @@ VERIFY_URL="${VERIFY_URL:-$DEFAULT_VERIFY_URL}"
 CHECK_HINT="${CHECK_HINT:-$DEFAULT_CHECK_HINT}"
 VERIFY_HINT="${VERIFY_HINT:-$DEFAULT_VERIFY_HINT}"
 VERIFY="${VERIFY:-1}"                  # 0 = bỏ qua bước Verify trên trình duyệt
+VERIFY_AGENT="${VERIFY_AGENT:-$DEFAULT_VERIFY_AGENT}"
 
 # ---------- giao diện ----------
 if [[ -t 1 ]]; then
@@ -254,9 +260,31 @@ level_of() {
   esac
 }
 
+# Đường dẫn file đầu tiên nhắc tới trong dòng bước (vd client/src/ui/OrdersPanel.ts)
+first_path_of() {
+  grep -oE '[A-Za-z0-9_.@-]+/[A-Za-z0-9_./@-]+' <<< "$1" | head -n1 || true
+}
+
+# Model cho một bước ở một mức. Mức [vừa] có thể chọn theo thư mục qua MEDIUM_RULES.
+model_for() {
+  local line="$1" lvl="$2" path rule prefix
+  if [[ "$lvl" == "1" && ${#MEDIUM_RULES[@]} -gt 0 ]]; then
+    path=$(first_path_of "$line")
+    for rule in "${MEDIUM_RULES[@]}"; do
+      prefix="${rule%%=*}"
+      if [[ -n "$path" && "$path" == "$prefix"* ]]; then
+        echo "${rule#*=}"
+        return
+      fi
+    done
+  fi
+  echo "${MODELS[$lvl]}"
+}
+
 runs=0
 failed_step=""     # bước vừa chạy mà chưa xong → lần sau leo thang
 failed_level=0
+failed_model=""
 
 while (( runs < MAX_RUNS )); do
   unchecked=$(grep -E '^- \[ \] [0-9]+\.' "$TASK" || true)
@@ -268,6 +296,10 @@ while (( runs < MAX_RUNS )); do
     mode="${mode:-light}"
     if [[ "$VERIFY" != "1" || "$mode" == "none" ]]; then
       ok "   (Verify mode: none) Tiếp theo: mở Claude → gõ review."
+      exit 0
+    fi
+    if [[ "$VERIFY_AGENT" == "claude" ]]; then
+      ok "   Verify $mode giao cho Claude. Tiếp theo: mở Claude → /clear → gõ verify (Claude verify + review luôn)."
       exit 0
     fi
     set +e; verify "$mode"; rc=$?; set -e
@@ -283,6 +315,10 @@ while (( runs < MAX_RUNS )); do
   n=0
   if [[ "$first_step" == "$failed_step" ]]; then
     level=$((failed_level + 1))
+    # Bỏ qua mức có cùng model với lần vừa thất bại (chạy lại y hệt là phí)
+    while (( level <= 2 )) && [[ "$(model_for "$first_line" "$level")" == "$failed_model" ]]; do
+      level=$((level + 1))
+    done
     if (( level > 2 )); then
       echo ""
       fail "⛔ Bước $first_step chưa xong sau khi đã thử tới model mạnh nhất."
@@ -299,16 +335,18 @@ while (( runs < MAX_RUNS )); do
     n=1
   else
     level=$(level_of "$first_line")
+    batch_model=$(model_for "$first_line" "$level")
     while IFS= read -r l; do
       if (( n >= BATCH_MAX )); then break; fi
       if [[ "$(level_of "$l")" != "$level" ]]; then break; fi
+      if [[ "$(model_for "$l" "$level")" != "$batch_model" ]]; then break; fi
       batch_steps[n]=$(sed -E 's/^- \[ \] ([0-9]+)\..*/\1/' <<< "$l")
       batch_lines[n]="$l"
       n=$((n + 1))
     done <<< "$unchecked"
   fi
 
-  model="${MODELS[$level]}"
+  model=$(model_for "$first_line" "$level")
   runs=$((runs + 1))
   steps_csv=$(IFS=,; echo "${batch_steps[*]}" | sed 's/,/, /g')
   if (( n == 1 )); then
@@ -347,6 +385,7 @@ Nếu một bước sau 2 lần sửa vẫn fail: KHÔNG tick checkbox của bư
       warn "  ✗ Bước $s chưa xong"
       failed_step="$s"
       failed_level=$level
+      failed_model="$model"
     else
       echo "  ${DIM}– Bước $s chưa làm (dừng ở bước $failed_step)${RESET}"
     fi
