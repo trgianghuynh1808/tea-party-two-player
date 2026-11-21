@@ -37,6 +37,7 @@ import { DECOR_ROTATE, DecorPanel, PALETTE_DRAG_START } from "./ui/DecorPanel";
 import { OrdersPanel } from "./ui/OrdersPanel";
 import { buildRecipeGuide } from "./ui/RecipeGuide";
 import { ShiftOverlay } from "./ui/ShiftOverlay";
+import { TEST_MODE_PARAM, installTestHook, isTestMode } from "./testHook";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -96,11 +97,12 @@ const forceTouch = new URLSearchParams(location.search).get(FORCE_TOUCH_PARAM) =
 const ROOM_PARAM = "room";
 let invitedRoomId = new URLSearchParams(location.search).get(ROOM_PARAM) ?? undefined;
 
-/** Rewrite the URL: ?room=<id> while in a room (a refresh/share lands back in it), plus ?touch=1 if set. */
+/** Rewrite the URL: ?room=<id> while in a room (a refresh/share lands back in it), plus ?touch=1 / ?test=1 if set. */
 function setUrl(roomId?: string) {
   const params = new URLSearchParams();
   if (roomId) params.set(ROOM_PARAM, roomId);
   if (forceTouch) params.set(FORCE_TOUCH_PARAM, "1");
+  if (isTestMode) params.set(TEST_MODE_PARAM, "1");
   const query = params.toString();
   history.replaceState(null, "", location.pathname + (query ? `?${query}` : ""));
 }
@@ -427,6 +429,7 @@ usernameInput.value = username ?? "";
 
 function startGame(room: Room<BobaShopState>) {
   currentRoom = room;
+  installTestHook(room);
   clearTimeout(lobbyPollTimer);
   setUrl(room.roomId); // a refresh comes straight back into this room
   roomNameInput.value = "";
@@ -530,6 +533,7 @@ function stopGame() {
   game?.destroy(true);
   game = undefined;
   ordersPanel?.destroy();
+  delete window.__GAME__;
   shiftOverlay?.destroy();
   decorPanel?.destroy();
   decorPanel = undefined;
