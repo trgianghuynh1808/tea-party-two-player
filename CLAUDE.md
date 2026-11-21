@@ -21,15 +21,15 @@ When the user approves a plan:
    - Set the `Verify mode:` line at the top of the task file: `none` for refactors, copy/text or config changes with no user-visible behavior; `light` (default) for normal UI/feature changes; `full` only for new player flows, 2-player/sync logic, or risky changes.
 2. Create a task branch from the main branch: `git checkout main && git pull --ff-only && git checkout -b task/<slug>`. If the working tree is dirty, stop and ask the user.
 3. Commit only the task file on that branch: `git add <task file> && git commit -m "plan: <slug>"`.
-4. Hand off: `scripts/handoff.sh <task file>`.
+4. Hand off: `scripts/handoff.sh <task file>`. Remember this path: Autopilot passes it to `scripts/wait-task.sh`.
 5. Unless the user said "manual", continue with **Autopilot** below without waiting for the user.
 
 ### Autopilot
 
 After every hand-off, run the loop below on your own. Run long commands with the maximum Bash timeout (600000 ms).
 
-1. **Wait:** `scripts/wait-task.sh <task file>`.
-   - exit 3 (still running): call it again. Do not do anything else meanwhile.
+1. **Wait:** run `scripts/wait-task.sh <task file>`, where `<task file>` is the exact path you just passed to `scripts/handoff.sh` (e.g. `scripts/wait-task.sh .agents/tasks/2026-01-31-my-slug.md`). Never run it without that argument; if you lost the path, use the newest plan: `ls -t .agents/tasks/*.md | grep -v _TEMPLATE | head -1`.
+   - exit 3 (still running): run the same command again with the same path. Do not do anything else meanwhile.
    - exit 1 (error, e.g. the watcher is not running): stop and tell the user.
    - exit 0 (done): go to step 2.
    - exit 2 (stuck): go to step 5.
@@ -48,11 +48,14 @@ After every hand-off, run the loop below on your own. Run long commands with the
    - Diagnose from the task file ("Trạng thái hiện tại", "Test status", "Verify", "Đã thử mà không được"), `test-results/results.json` and the tail of `.agents/run.log`.
    - Append new unchecked steps to the same task file's Plan, continuing the numbering, each prefixed `Fix:` and following the same rules (path first, label, exact test command). For a stuck step: mark it `- [x] N. ~~...~~ (thay bằng bước M–K)` and replace it with smaller, more explicit steps (include the code snippet or exact change when helpful), labeled one level higher if the cheaper model already failed.
    - Clear the old `VERIFY:` line so the next Verify starts fresh, then commit: `git add <task file> && git commit -m "plan(fix-<n>): <slug>"`.
-   - Hand off again with `scripts/handoff.sh <task file>` and go back to step 1.
+   - Hand off again with `scripts/handoff.sh <task file>` and go back to step 1 (wait with the same task file path).
 
 The user can interrupt at any time; if they do, follow their instructions instead of the loop.
 
-### Review on request
+### Verify / review on request (manual mode)
+
+When the user says "verify": run Autopilot steps 2–4 once (verify, review, decide), but ask before shipping.
+
 
 When the user asks for a review: read the task file (including "Test status" and "Verify") and `git diff main...HEAD`; report bugs, deviations from the plan and failed or missing test cases; do not rewrite correct code; propose fixes as a follow-up plan unless asked to fix directly; end with one line saying whether it is ready to ship.
 
