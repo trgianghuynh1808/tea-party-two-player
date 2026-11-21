@@ -17,6 +17,8 @@
     "typecheck": "npm run typecheck -w server && npm run typecheck -w client"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.1",
+    "@types/node": "^26.6.6",
     "concurrently": "^10.0.7"
   },
   "engines": {
