@@ -4,7 +4,10 @@
 #
 # Cách dùng:
 #   scripts/run-task.sh .agents/tasks/<file>.md
-#   VERBOSE=1 scripts/run-task.sh ...     # hiện toàn bộ output của OpenCode như cũ
+#   VERBOSE=1 scripts/run-task.sh ...       # hiện toàn bộ output của OpenCode như cũ
+#   REUSE_SESSION=0 scripts/run-task.sh ... # mỗi nhóm bước một phiên mới (không --continue)
+#   BATCH_MAX=1 scripts/run-task.sh ...     # mỗi lần chạy chỉ 1 bước (như bản cũ)
+#   ACTIONS=0 scripts/run-task.sh ...       # ẩn các dòng hành động, chỉ hiện commit
 #
 # Màn hình chỉ hiện tóm tắt. Chi tiết đầy đủ nằm trong .agents/run.log
 #   (xem trực tiếp ở ô khác: tail -f .agents/run.log)
@@ -17,6 +20,12 @@ set -euo pipefail
 TASK="${1:?Usage: scripts/run-task.sh .agents/tasks/<file>.md}"
 MAX_RUNS="${MAX_RUNS:-20}"
 VERBOSE="${VERBOSE:-0}"
+BATCH_MAX="${BATCH_MAX:-4}"          # tối đa số bước gom vào một lần chạy
+REUSE_SESSION="${REUSE_SESSION:-1}"  # 1 = nối tiếp phiên OpenCode giữa các lần chạy (giữ context)
+ACTIONS="${ACTIONS:-1}"              # 1 = hiện các hành động (sửa file, chạy lệnh) khi agent làm
+# Dòng nào trong output của OpenCode được coi là "hành động" để hiện lên màn hình
+DEFAULT_ACTION_REGEX='^[[:space:]]*(← |\$ |[|│][[:space:]]*(Edit|Write|Bash|Patch)[[:space:]])'
+ACTION_REGEX="${ACTION_REGEX:-$DEFAULT_ACTION_REGEX}"
 LOG=".agents/run.log"
 
 # Đổi model ở đây nếu cần (xem ID chính xác bằng: opencode models)
@@ -54,27 +63,79 @@ section() {
   ' "$TASK" | head -n "${2:-4}"
 }
 
-# Chạy OpenCode: im lặng + spinner (mặc định) hoặc hiện hết (VERBOSE=1)
+# Ghi từng dòng output vào log kèm giờ và số giây kể từ lúc bắt đầu lần chạy,
+# đồng thời chuyển dòng gốc ra stdout. Phân tích chỗ chậm: scripts/log-gaps.sh
+stamp_tee() {
+  local t0=$SECONDS line
+  while IFS= read -r line; do
+    printf '%s +%ss │ %s\n' "$(date +%H:%M:%S)" "$((SECONDS - t0))" "$line" >> "$LOG"
+    printf '%s\n' "$line"
+  done
+}
+
+# Lọc output của OpenCode: chỉ hiện dòng hành động (sửa file, chạy lệnh)
+# Đổi ACTION_REGEX nếu OpenCode in hành động theo định dạng khác (xem .agents/run.log)
+action_feed() {
+  local cols w line
+  cols=$(tput cols 2>/dev/null || echo 80)
+  w=$((cols - 8))
+  while IFS= read -r line; do
+    if [[ "$line" =~ $ACTION_REGEX ]]; then
+      line="${line#"${line%%[![:space:]]*}"}"        # bỏ khoảng trắng đầu dòng
+      (( ${#line} > w )) && line="${line:0:w}…"
+      printf "\r\033[K    ${DIM}%s${RESET}\n" "$line"
+    fi
+  done
+}
+
+# In các commit mới kèm danh sách file đã sửa (mỗi commit chỉ in một lần)
+print_new_commits() {
+  local head c cols
+  head=$(git rev-parse HEAD 2>/dev/null || echo none)
+  [[ "$head" == "$SEEN" ]] && return 0
+  cols=$(tput cols 2>/dev/null || echo 80)
+  printf "\r\033[K"
+  for c in $(git rev-list --reverse "$SEEN..$head" 2>/dev/null); do
+    echo "  ${GREEN}●${RESET} $(git log -1 --format=%s "$c")"
+    git show --stat=$((cols - 8)) --format= "$c" 2>/dev/null | sed '/^$/d' | sed '$d' \
+      | sed "s/^/  ${DIM}/; s/\$/${RESET}/"
+  done
+  SEEN="$head"
+}
+
+# Chạy OpenCode: tóm tắt + spinner (mặc định) hoặc hiện hết (VERBOSE=1)
 run_agent() {
-  local model="$1" prompt="$2" title="$3"
+  local model="$1" prompt="$2" title="$3" cont="${4:-0}"
+  local args=(run --model "$model")
+  [[ "$cont" == "1" ]] && args+=(--continue)
   echo "" >> "$LOG"
   echo "=== $(date '+%F %T') · $title · $model ===" >> "$LOG"
 
   if [[ "$VERBOSE" == "1" ]]; then
-    opencode run --model "$model" "$prompt" 2>&1 | tee -a "$LOG" || true
+    opencode "${args[@]}" "$prompt" 2>&1 | stamp_tee || true
     return
   fi
 
-  opencode run --model "$model" "$prompt" >> "$LOG" 2>&1 &
-  local pid=$! start=$SECONDS i=0 last
+  SEEN=$(git rev-parse HEAD 2>/dev/null || echo none)
+  local start=$SECONDS i=0 pid
+
+  if [[ "$ACTIONS" == "1" ]]; then
+    ( opencode "${args[@]}" "$prompt" 2>&1 | stamp_tee | action_feed ) &
+  else
+    ( opencode "${args[@]}" "$prompt" 2>&1 | stamp_tee > /dev/null ) &
+  fi
+  pid=$!
+
   while kill -0 "$pid" 2>/dev/null; do
-    last=$(git log -1 --format=%s 2>/dev/null | cut -c1-55)
-    printf "\r  ${CYAN}%s${RESET} %s  ${DIM}commit mới nhất: %s${RESET}\033[K" \
-      "${SPIN[$((i % 10))]}" "$(fmt_time $((SECONDS - start)))" "$last"
+    print_new_commits
+    # Dòng spinner ngắn để không bị xuống dòng (\r chỉ đè được 1 dòng)
+    printf "\r  ${CYAN}%s${RESET} %s ${DIM}đang chạy…${RESET}\033[K" \
+      "${SPIN[$((i % 10))]}" "$(fmt_time $((SECONDS - start)))"
     i=$((i + 1))
     sleep 0.5
   done
   wait "$pid" || true
+  print_new_commits
   printf "\r\033[K"
   LAST_DURATION=$((SECONDS - start))
 }
@@ -151,65 +212,108 @@ echo "${BOLD}📋 $(head -n1 "$TASK" | sed 's/^# //')${RESET}"
 echo "${DIM}$TASK · $total bước · nhánh $branch · chi tiết: tail -f $LOG${RESET}"
 
 # ---------- vòng lặp các bước ----------
+# Gom các bước liên tiếp cùng nhãn thành MỘT lần chạy (một phiên OpenCode),
+# để agent không phải đọc lại context từ đầu ở mỗi bước.
+# Với REUSE_SESSION=1, các lần chạy sau còn nối tiếp phiên trước (--continue),
+# nên context được giữ qua cả các nhóm bước.
+
+level_of() {
+  case "$1" in
+    *"[dễ]"*)  echo 0 ;;
+    *"[khó]"*) echo 2 ;;
+    *)         echo 1 ;;
+  esac
+}
+
 runs=0
-last_step=""
-level=1
+failed_step=""     # bước vừa chạy mà chưa xong → lần sau leo thang
+failed_level=0
 
 while (( runs < MAX_RUNS )); do
-  line=$(grep -m1 -E '^- \[ \] [0-9]+\.' "$TASK" || true)
-  if [[ -z "$line" ]]; then
+  unchecked=$(grep -E '^- \[ \] [0-9]+\.' "$TASK" || true)
+  if [[ -z "$unchecked" ]]; then
     echo ""
     ok "✅ Đã xong mọi bước code."
     set +e; verify; rc=$?; set -e
     exit $rc
   fi
 
-  step=$(sed -E 's/^- \[ \] ([0-9]+)\..*/\1/' <<< "$line")
-  desc=$(sed -E 's/^- \[ \] [0-9]+\. *(\[[^]]*\])? *//' <<< "$line" | cut -c1-90)
+  first_line=$(head -n1 <<< "$unchecked")
+  first_step=$(sed -E 's/^- \[ \] ([0-9]+)\..*/\1/' <<< "$first_line")
 
-  if [[ "$step" != "$last_step" ]]; then
-    case "$line" in
-      *"[dễ]"*)  level=0 ;;
-      *"[khó]"*) level=2 ;;
-      *)         level=1 ;;
-    esac
-  else
-    level=$((level + 1))
+  # Chọn mức model và các bước trong nhóm
+  batch_steps=()
+  batch_lines=()
+  n=0
+  if [[ "$first_step" == "$failed_step" ]]; then
+    level=$((failed_level + 1))
     if (( level > 2 )); then
       echo ""
-      fail "⛔ Bước $step chưa xong sau khi đã thử tới model mạnh nhất."
+      fail "⛔ Bước $first_step chưa xong sau khi đã thử tới model mạnh nhất."
       echo "${BOLD}Đã thử mà không được${RESET}"
       section "Đã thử mà không được" 6 | sed 's/^/  /'
       echo ""
       echo "Chuyển cho Claude, dán:"
-      echo "  ${BOLD}Đọc $TASK và test-results/results.json. Tìm nguyên nhân bước $step và sửa.${RESET}"
+      echo "  ${BOLD}Đọc $TASK và test-results/results.json. Tìm nguyên nhân bước $first_step và sửa.${RESET}"
       exit 1
     fi
-    warn "  ↗  Leo thang bước $step lên [${LABELS[$level]}]"
+    warn "  ↗  Leo thang bước $first_step lên [${LABELS[$level]}]"
+    batch_steps=("$first_step")
+    batch_lines=("$first_line")
+    n=1
+  else
+    level=$(level_of "$first_line")
+    while IFS= read -r l; do
+      if (( n >= BATCH_MAX )); then break; fi
+      if [[ "$(level_of "$l")" != "$level" ]]; then break; fi
+      batch_steps[n]=$(sed -E 's/^- \[ \] ([0-9]+)\..*/\1/' <<< "$l")
+      batch_lines[n]="$l"
+      n=$((n + 1))
+    done <<< "$unchecked"
   fi
 
   model="${MODELS[$level]}"
-  last_step="$step"
   runs=$((runs + 1))
+  steps_csv=$(IFS=,; echo "${batch_steps[*]}" | sed 's/,/, /g')
+  if (( n == 1 )); then
+    range="${batch_steps[0]}"
+  else
+    range="${batch_steps[0]}–${batch_steps[$((n - 1))]}"
+  fi
 
   echo ""
   hr
-  echo "${BOLD}▶ Bước $step/$total${RESET}  ${BLUE}[${LABELS[$level]}]${RESET} ${DIM}${model#opencode-go/}${RESET}"
-  echo "  $desc"
+  echo "${BOLD}▶ Bước $range/$total${RESET}  ${BLUE}[${LABELS[$level]}]${RESET} ${DIM}${model#opencode-go/}${RESET}"
+  for l in "${batch_lines[@]}"; do
+    echo "  $(sed -E 's/^- \[ \] ([0-9]+)\. *(\[[^]]*\])? */\1. /' <<< "$l" | cut -c1-90)"
+  done
 
-  prompt="Đọc AGENTS.md và $TASK. CHỈ làm bước $step, không làm bước khác.
-Khi xong: chạy npm run typecheck và npx playwright test; commit với message rõ ràng;
-tick checkbox của bước $step; cập nhật 'Trạng thái hiện tại' và 'Test status'.
-Nếu sau 2 lần sửa vẫn fail: KHÔNG tick checkbox, ghi nguyên nhân và cách đã thử vào
-'Đã thử mà không được', commit file task, rồi dừng."
+  prompt="Đọc AGENTS.md và $TASK. Làm LẦN LƯỢT các bước $steps_csv, không làm bước nào khác.
+Sau MỖI bước: chạy npm run typecheck và các Playwright spec liên quan (nếu có);
+commit với message rõ ràng; tick checkbox của bước đó; cập nhật 'Trạng thái hiện tại' và 'Test status'.
+Nếu một bước sau 2 lần sửa vẫn fail: KHÔNG tick checkbox của bước đó, ghi nguyên nhân và cách đã thử vào
+'Đã thử mà không được', commit file task, rồi DỪNG (không làm các bước sau)."
 
-  run_agent "$model" "$prompt" "bước $step"
-
-  if grep -qE "^- \[x\] $step\." "$TASK"; then
-    ok "  ✓ Xong · $(fmt_time "${LAST_DURATION:-0}") · $(git log -1 --format=%s | cut -c1-60)"
-  else
-    warn "  ✗ Chưa xong · $(fmt_time "${LAST_DURATION:-0}")"
+  continue_flag=0
+  if [[ "$REUSE_SESSION" == "1" ]] && (( runs > 1 )); then
+    continue_flag=1
   fi
+  run_agent "$model" "$prompt" "bước $range" "$continue_flag"
+
+  # Kết quả từng bước trong nhóm
+  failed_step=""
+  for s in "${batch_steps[@]}"; do
+    if grep -qE "^- \[x\] $s\." "$TASK"; then
+      ok "  ✓ Bước $s xong"
+    elif [[ -z "$failed_step" ]]; then
+      warn "  ✗ Bước $s chưa xong"
+      failed_step="$s"
+      failed_level=$level
+    else
+      echo "  ${DIM}– Bước $s chưa làm (dừng ở bước $failed_step)${RESET}"
+    fi
+  done
+  info "  ⏱  $(fmt_time "${LAST_DURATION:-0}")"
 done
 
 warn "⏸  Đã chạm giới hạn $MAX_RUNS lần chạy. Kiểm tra file task và $LOG."

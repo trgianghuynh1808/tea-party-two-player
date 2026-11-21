@@ -30,5 +30,6 @@ When the user says "ship" (or asks to merge/push) on a task branch:
 2. Squash the branch into one commit on main:
    `git checkout main && git pull --ff-only && git merge --squash task/<slug>`
 3. Commit with one Conventional Commit message summarizing the whole task (e.g. `feat(orders): show container line last in recipe`), with a short body listing the main changes and the test cases added. Do not mention the individual step commits.
+   - If the branch also touches files outside the task plan (e.g. `scripts/`, tooling, `CLAUDE.md`), unstage them (`git reset -q <paths>`) before this commit and commit them separately afterwards (`chore: ...`), so the feature commit stays clean.
 4. `git push origin main`, then delete the task branch: `git branch -D task/<slug>`.
 5. Report the final commit hash and that it was pushed. If the push fails (e.g. remote has new commits), stop and tell the user instead of forcing.
