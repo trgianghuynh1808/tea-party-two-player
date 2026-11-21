@@ -45,8 +45,8 @@ const CONTAINER_ICONS = { plate: "🍽️", bowl: "🥣", glass: "🥤" } as con
 
 /**
  * Tea shop: ingredients in order (→).
- * Restaurant: what to serve it in, then one line per part: its ingredient (picture) ➜ each cooker it goes through
- * (hot ones, which burn food, outlined in red). Readable at a glance; "?" opens the full guide.
+ * Restaurant: one line per part: its ingredient (picture) ➜ each cooker it goes through (hot ones, which burn food,
+ * outlined in red), then what to serve it in. Readable at a glance; "?" opens the full guide.
  */
 function recipeSteps(item: MenuItem): HTMLElement {
   const steps = document.createElement("div");
@@ -63,7 +63,6 @@ function recipeSteps(item: MenuItem): HTMLElement {
   if (!dish) return steps;
   const parts = document.createElement("div");
   parts.className = "parts";
-  parts.append(span("part-into", `${CONTAINER_ICONS[dish.container]} Cầm ${CONTAINERS[dish.container].label.toLowerCase()} đi gom:`));
   for (const part of dish.parts) {
     const parsed = parseFood(part);
     if (!parsed) continue;
@@ -79,6 +78,7 @@ function recipeSteps(item: MenuItem): HTMLElement {
     }
     parts.append(row);
   }
+  parts.append(span("part-into", `${CONTAINER_ICONS[dish.container]} Bày ra ${CONTAINERS[dish.container].label.toLowerCase()}`));
   return parts;
 }
 
