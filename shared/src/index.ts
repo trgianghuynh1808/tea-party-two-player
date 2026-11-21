@@ -104,6 +104,8 @@ export interface MachineOverflowEvent {
 }
 
 export * from "./decor";
+/** Where furniture can go (tea shop / restaurant). */
+export * from "./placement";
 export * from "./world";
 import {
   BUILD_TILE,

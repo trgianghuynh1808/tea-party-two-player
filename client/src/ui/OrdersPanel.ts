@@ -2,8 +2,6 @@ import { Callbacks, type Room } from "@colyseus/sdk";
 import {
   CONTAINERS,
   CustomerKind,
-  DISHES,
-  DRINKS,
   FOODS,
   INGREDIENTS,
   ORDER_DANGER_RATIO,
@@ -16,10 +14,8 @@ import {
   isDrinkServed,
   orderDrinkIds,
   parseFood,
-  type ContainerId,
   type IngredientId,
   type MenuItem,
-  type Venue,
 } from "@boba/shared";
 import type { BobaShopState, Order } from "@boba/shared/schema";
 
@@ -69,52 +65,21 @@ function recipeSteps(item: MenuItem): HTMLElement {
   return steps;
 }
 
-function menuEntry(item: MenuItem): HTMLElement {
-  const el = Object.assign(document.createElement("div"), { className: "menu-item" });
-  const title = Object.assign(document.createElement("div"), { className: "title" });
-  title.append(
-    Object.assign(document.createElement("span"), { textContent: item.name }),
-    Object.assign(document.createElement("span"), { className: "price", textContent: `$${item.price}` }),
-  );
-  el.append(title, recipeSteps(item));
-  return el;
-}
-
-const CONTAINER_TITLES: Record<ContainerId, string> = { plate: "🍽️ Món đĩa", bowl: "🥣 Món tô", glass: "🥤 Đồ uống" };
-
 /**
- * The venue's menu with recipes (static). Used inline in the side panel and in the 📋 modal on phones.
- * Restaurant: a legend of the cooking methods, then the dishes grouped by container.
+ * Live customer orders (synced from room state), each with a short recipe, a "?" for the full cooking guide
+ * (`onHelp(menu id)`) and a countdown bar.
  */
-export function buildMenu(venue: Venue = "shop"): HTMLElement {
-  const menu = Object.assign(document.createElement("div"), { className: "menu" });
-  if (venue === "shop") {
-    for (const drink of DRINKS) menu.append(menuEntry(drink));
-    return menu;
-  }
-  const legend = Object.assign(document.createElement("p"), {
-    className: "hint",
-    textContent:
-      Object.values(PROCESSES)
-        .map((p) => `${p.icon} ${p.station}`)
-        .join(" · ") + ". Lấy đĩa / tô / ly ở kệ, gom đủ phần (thứ tự nào cũng được) rồi mang ra.",
-  });
-  menu.append(legend);
-  for (const container of Object.keys(CONTAINERS) as ContainerId[]) {
-    menu.append(Object.assign(document.createElement("h3"), { className: "menu-group", textContent: CONTAINER_TITLES[container] }));
-    for (const dish of DISHES) if (dish.container === container) menu.append(menuEntry(dish));
-  }
-  return menu;
-}
-
-/** Live customer orders (synced from room state), each with its recipe and a countdown bar. */
 export class OrdersPanel {
   private ordersList: HTMLElement;
   private emptyHint: HTMLElement;
   private cards = new Map<string, { card: HTMLElement; bar: HTMLElement }>();
   private unsubscribers: (() => void)[] = [];
 
-  constructor(root: HTMLElement, room: Room<BobaShopState>) {
+  constructor(
+    root: HTMLElement,
+    room: Room<BobaShopState>,
+    private readonly onHelp: (id: string) => void,
+  ) {
     root.replaceChildren();
 
     root.append(Object.assign(document.createElement("h2"), { textContent: "🧾 Đơn hàng" }));
@@ -157,10 +122,28 @@ export class OrdersPanel {
       const item = Object.assign(document.createElement("div"), { className: "order-drink" });
       const title = Object.assign(document.createElement("div"), { className: "title" });
       const price = kind === CustomerKind.Vip ? drink.price * VIP_PRICE_MULTIPLIER : drink.price;
-      title.append(
-        Object.assign(document.createElement("span"), { textContent: drink.name }),
-        Object.assign(document.createElement("span"), { className: "price", textContent: `$${price}` }),
-      );
+      // Restaurant dishes: a small picture so the order reads at a glance.
+      const dish = getDish(drink.id);
+      const name = Object.assign(document.createElement("span"), { className: "name" });
+      if (dish) {
+        const img = Object.assign(document.createElement("img"), { className: "thumb", alt: "", draggable: false });
+        img.src = `${import.meta.env.BASE_URL}${dish.image}`;
+        name.append(img);
+      }
+      name.append(drink.name);
+      const help = Object.assign(document.createElement("button"), {
+        type: "button",
+        className: "help-btn",
+        textContent: "?",
+        title: `Cách làm ${drink.name}`,
+      });
+      help.addEventListener("click", () => {
+        help.blur(); // keep Space for the game
+        this.onHelp(drink.id);
+      });
+      const right = Object.assign(document.createElement("span"), { className: "title-right" });
+      right.append(Object.assign(document.createElement("span"), { className: "price", textContent: `$${price}` }), help);
+      title.append(name, right);
       item.append(title, recipeSteps(drink));
       card.append(item);
       return item;

@@ -5,7 +5,7 @@ import {
   Messages,
   VIEW_ORDER,
   WALL_BOTTOM,
-  WALL_PLACE_AREA,
+  DECOR_ROOMS,
   WORLD_HEIGHT,
   WORLD_WIDTH,
   canPlaceDecoration,
@@ -185,17 +185,22 @@ export class DecorController {
   ) {
     // Above the floor, wall art and rugs, below stations, furniture and players.
     this.grid = scene.add.graphics().setDepth(FLOOR_DEPTH + 1).setVisible(false);
-    this.drawGrid(WALL_BOTTOM, WORLD_HEIGHT); // floor
-    this.drawGrid(0, WALL_PLACE_AREA.maxY); // where wall art can hang
+    // Tea shop and restaurant: the floor, and the strip of wall where art can hang.
+    for (const room of DECOR_ROOMS) {
+      this.drawGrid(room.floor.minX, room.floor.maxX, room.floor.minY, room.floor.maxY);
+      this.drawGrid(room.wall.minX, room.wall.maxX, room.floor.minY - WALL_BOTTOM, room.wall.maxY);
+    }
     this.footprint = scene.add.rectangle(0, 0, 1, 1, OK_COLOR, 0.3).setDepth(FLOOR_DEPTH + 2).setVisible(false);
 
     this.sellZoneBg = scene.add.rectangle(0, 0, 260, 56, 0xe63946, 0.18).setStrokeStyle(3, BAD_COLOR, 0.7);
     const sellText = scene.add
       .text(0, 0, "🗑 Thả vào đây để bán", { fontFamily: "sans-serif", fontSize: fontSize(15), fontStyle: "bold", color: "#b3261e" })
       .setOrigin(0.5);
+    // Fixed on screen (the restaurant's camera scrolls): hit-tested with screen coordinates.
     this.sellZone = scene.add
       .container(WORLD_WIDTH / 2, WORLD_HEIGHT - 40, [this.sellZoneBg, sellText])
       .setDepth(UI_DEPTH)
+      .setScrollFactor(0, 0, true)
       .setVisible(false);
 
     scene.input.on(Phaser.Input.Events.DRAG_START, this.onDragStart, this);
@@ -363,7 +368,7 @@ export class DecorController {
     this.select(hit.id);
     this.draggingId = hit.id;
     this.dragStart = { x: hit.view.container.x, y: hit.view.container.y, rotation: hit.view.rotation };
-    this.lastDragPointer = { x: pointer.worldX, y: pointer.worldY };
+    this.lastDragPointer = { x: pointer.x, y: pointer.y };
     hit.view.container.setDepth(UI_DEPTH - 1);
     this.sellZone.setVisible(true);
   }
@@ -372,11 +377,11 @@ export class DecorController {
     const hit = this.viewOf(obj);
     if (!hit || this.draggingId !== hit.id) return;
     hit.view.container.setPosition(snapToGrid(dragX), snapToGrid(dragY));
-    this.lastDragPointer = { x: pointer.worldX, y: pointer.worldY };
-    this.previewDrag(hit.view, pointer.worldX, pointer.worldY);
+    this.lastDragPointer = { x: pointer.x, y: pointer.y };
+    this.previewDrag(hit.view, pointer.x, pointer.y);
   }
 
-  /** Outline + floor shading for the piece being dragged, at its current position and rotation. */
+  /** Outline + floor shading for the piece being dragged. `pointerX/Y` = screen position (for the sell zone). */
   private previewDrag(view: DecorView, pointerX: number, pointerY: number) {
     const { x, y } = view.container;
     const overSell = this.isOverSellZone(pointerX, pointerY);
@@ -395,7 +400,7 @@ export class DecorController {
     view.outline.setStrokeStyle(3, SELECT_COLOR); // stays selected for R / ⟳
     this.footprint.setVisible(false);
 
-    if (this.isOverSellZone(pointer.worldX, pointer.worldY)) {
+    if (this.isOverSellZone(pointer.x, pointer.y)) {
       this.room.send(Messages.SellDecoration, { id });
       return;
     }
@@ -416,6 +421,7 @@ export class DecorController {
     this.applyDepth(view);
   }
 
+  /** (x, y) = screen position (the zone doesn't scroll with the camera). */
   private isOverSellZone(x: number, y: number) {
     const z = this.sellZone;
     return Math.abs(x - z.x) <= this.sellZoneBg.width / 2 && Math.abs(y - z.y) <= this.sellZoneBg.height / 2;
@@ -493,8 +499,10 @@ export class DecorController {
     const p = toLayout(clientX, clientY);
     const inside = p.x >= rect.left && p.x <= rect.right && p.y >= rect.top && p.y <= rect.bottom;
     if (!inside) return undefined;
-    const x = snapToGrid(((p.x - rect.left) / rect.width) * WORLD_WIDTH);
-    const y = snapToGrid(((p.y - rect.top) / rect.height) * WORLD_HEIGHT);
+    // Screen -> world: the restaurant's camera may be scrolled.
+    const cam = this.scene.cameras.main;
+    const x = snapToGrid(cam.scrollX + ((p.x - rect.left) / rect.width) * WORLD_WIDTH);
+    const y = snapToGrid(cam.scrollY + ((p.y - rect.top) / rect.height) * WORLD_HEIGHT);
     return { x, y, ok: canPlaceDecoration(this.ghost.def.kind, x, y, this.placed(), undefined, this.ghost.rotation) };
   }
 
@@ -538,11 +546,11 @@ export class DecorController {
     view.container.setDepth(layer === "floor" ? FLOOR_DEPTH : layer === "wall" ? WALL_DECOR_DEPTH : view.container.y);
   }
 
-  /** Veil + cell grid over the band top..bottom (floor or wall). */
-  private drawGrid(top: number, bottom: number) {
-    this.grid.fillStyle(0xffffff, VEIL_ALPHA).fillRect(0, top, WORLD_WIDTH, bottom - top);
+  /** Veil + cell grid over a box (a room's floor or wall). */
+  private drawGrid(left: number, right: number, top: number, bottom: number) {
+    this.grid.fillStyle(0xffffff, VEIL_ALPHA).fillRect(left, top, right - left, bottom - top);
     this.grid.lineStyle(1, 0x3d2c29, GRID_LINE_ALPHA);
-    for (let x = 0; x <= WORLD_WIDTH; x += GRID_CELL) this.grid.lineBetween(x, top, x, bottom);
-    for (let y = top; y <= bottom; y += GRID_CELL) this.grid.lineBetween(0, y, WORLD_WIDTH, y);
+    for (let x = left; x <= right; x += GRID_CELL) this.grid.lineBetween(x, top, x, bottom);
+    for (let y = top; y <= bottom; y += GRID_CELL) this.grid.lineBetween(left, y, right, y);
   }
 }

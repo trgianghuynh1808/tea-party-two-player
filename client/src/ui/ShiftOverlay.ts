@@ -87,18 +87,13 @@ export class ShiftOverlay {
     card.append(
       el("h2", "", "☀️ Sẵn sàng mở quán?"),
       el("p", "", "Chọn nơi mở ca, làm đúng món khách gọi trước khi họ bỏ về."),
-      ...Object.values(VENUES).map((v) => el("p", "hint", `${v.icon} ${v.name}: ${v.shiftSeconds / 60} phút · ${goals(v)}`)),
       el(
         "p",
         "hint",
-        `Càng về cuối ca khách càng đông và ít kiên nhẫn. Khách bỏ về: −$${MISSED_ORDER_PENALTY} và mất combo. ` +
-          "Ly để quên trên máy sẽ bị tràn, đồ ăn để quên trên bếp sẽ cháy. Coi chừng khách 👑 VIP, 🧐 khó tính và 👨‍👩‍👧 nhóm!",
+        `Khách bỏ về −$${MISSED_ORDER_PENALTY} và mất combo. Ly để quên bị tràn, đồ ăn để quên bị cháy. ` +
+          "Coi chừng khách 👑 VIP, 🧐 khó tính, 👨‍👩‍👧 nhóm!",
       ),
-      el(
-        "p",
-        "hint",
-        `Quán dùng nội thất của ${state.hostName || "chủ phòng"}. Hết ca, doanh thu chia đều cho mọi người trong phòng (rời phòng giữa ca thì không được chia).`,
-      ),
+      el("p", "hint", `Nội thất của ${state.hostName || "chủ phòng"} · doanh thu chia đều khi hết ca (rời giữa ca thì mất phần).`),
       el(
         "p",
         players >= 2 ? "ready" : "hint",
@@ -142,13 +137,21 @@ export class ShiftOverlay {
     );
   }
 
-  /** One start button per venue, the one the player is standing in first. */
+  /** One compact card per venue (the one the player is standing in is highlighted), then a small "hide" link. */
   private actions(startLabel: string): HTMLElement {
     const row = el("div", "actions");
-    const venues = Object.values(VENUES).sort((a, b) => Number(b.id === this.here) - Number(a.id === this.here));
-    const buttons = venues.map((v) => {
-      const start = el("button", v.id === this.here ? "btn primary" : "btn", `${v.icon} ${startLabel}: ${v.name}`);
+    const picks = el("div", "venue-picks");
+    const buttons = Object.values(VENUES).map((v) => {
+      const start = el("button", `venue-pick${v.id === this.here ? " here" : ""}`);
       start.type = "button";
+      start.title = `${startLabel}: ${v.name} (${v.shiftSeconds / 60} phút, ${goals(v)})`;
+      start.append(
+        el("span", "venue-icon", v.icon),
+        el("span", "venue-name", v.name),
+        el("span", "venue-meta", `⏱ ${v.shiftSeconds / 60} phút`),
+        el("span", "venue-meta", `⭐ $${v.stars.join(" · $")}`),
+        el("span", "venue-go", `▶ ${startLabel}`),
+      );
       start.addEventListener("click", () => {
         for (const b of buttons) b.disabled = true;
         start.blur(); // keep Space from re-clicking the button while playing
@@ -157,9 +160,10 @@ export class ShiftOverlay {
       });
       return start;
     });
-    row.append(...buttons);
+    picks.append(...buttons);
+    row.append(picks);
 
-    const hide = el("button", "btn ghost-dark", "Ẩn bảng");
+    const hide = el("button", "link-btn", "Ẩn bảng để đi dạo");
     hide.type = "button";
     hide.addEventListener("click", () => {
       this.collapsed = true;

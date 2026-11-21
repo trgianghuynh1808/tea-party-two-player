@@ -72,14 +72,6 @@ body.in-game {
   font-size: 13px;
 }
 
-.btn.ghost-dark {
-  width: auto;
-  background: transparent;
-  color: #6b5b57;
-  border-color: #d8cbb9;
-  white-space: nowrap;
-}
-
 /* Small icon + label buttons in the side panel header and modal */
 .tool {
   display: inline-flex;
@@ -562,10 +554,6 @@ h1 {
   gap: 6px;
 }
 
-.compact-only {
-  display: none !important;
-}
-
 .side-panel h2 {
   margin: 0 0 8px;
   font-size: 16px;
@@ -577,39 +565,202 @@ h1 {
   font-size: 13px;
 }
 
-.orders,
-.menu {
+.orders {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.order,
-.menu-item {
+.order {
   padding: 8px;
   border: 2px solid #3d2c29;
   border-radius: 8px;
   background: #fff;
 }
 
-.menu-item {
-  border-color: #d8cbb9;
-}
-
-/* Restaurant menu: dishes grouped by plate / bowl / glass */
-.menu-group {
-  margin: 6px 0 0;
-  font-size: 14px;
-  color: #6b5b57;
-}
-
-.order .title,
-.menu-item .title {
+.order .title {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 6px;
   font-size: 13px;
   font-weight: 700;
+}
+
+.order .title .name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* Restaurant dish picture in front of its name */
+.order .thumb {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+}
+
+.order .title-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+/* "?" on an order: opens the cooking guide */
+.help-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid #457b9d;
+  border-radius: 50%;
+  background: #e8f1f8;
+  color: #1d4e6e;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.help-btn:hover {
+  background: #457b9d;
+  color: #fff;
+}
+
+/* ---------------------------------------------------------------- Cooking guide (modal) */
+
+.guide {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 560px;
+}
+
+.guide-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.guide-dish {
+  width: 88px;
+  height: 72px;
+  object-fit: contain;
+}
+
+.guide-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.guide-title strong {
+  font-size: 18px;
+}
+
+.guide-price {
+  color: #2a9d8f;
+  font-weight: 700;
+}
+
+.guide-sub {
+  color: #8a7a76;
+  font-size: 13px;
+}
+
+.guide-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.guide-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid #e3d6c4;
+}
+
+.guide-num {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #3d2c29;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 24px;
+  text-align: center;
+}
+
+.guide-flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.guide-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 64px;
+  padding: 4px 6px;
+  border: 2px solid #e3d6c4;
+  border-radius: 8px;
+  background: #fdf9f3;
+  text-align: center;
+}
+
+/* Hot cookers: food burns if left there */
+.guide-box.hot {
+  border-color: #e76f51;
+  background: #fff1ec;
+}
+
+.guide-box.into {
+  border-style: dashed;
+}
+
+.guide-icon {
+  font-size: 26px;
+  line-height: 36px;
+}
+
+.guide-food {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+}
+
+.guide-caption {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.guide-arrow {
+  color: #b0a29e;
+  font-size: 16px;
+}
+
+.guide-tips {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: #6b5b57;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 /* Special customers (see CUSTOMERS in shared/src/menu.ts) */
@@ -782,8 +933,93 @@ h1 {
 
 .actions {
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+/* Shift card: one compact card per venue (tea shop / restaurant). */
+.venue-picks {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 8px;
-  margin-top: 16px;
+  width: 100%;
+}
+
+.venue-pick {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 6px;
+  border: 2px solid #d8cbb9;
+  border-radius: 10px;
+  background: #fff;
+  color: #3d2c29;
+  font: inherit;
+  cursor: pointer;
+  transition: transform 0.05s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.venue-pick:hover:not(:disabled) {
+  border-color: #e76f51;
+  box-shadow: 0 2px 8px rgba(231, 111, 81, 0.25);
+}
+
+.venue-pick:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.venue-pick:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+/* Where the player is standing: suggested first. */
+.venue-pick.here {
+  border-color: #e76f51;
+  background: #fff4ef;
+}
+
+.venue-icon {
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.venue-name {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.venue-meta {
+  font-size: 11px;
+  color: #8a7a76;
+}
+
+.venue-go {
+  margin-top: 4px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #3d2c29;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.venue-pick.here .venue-go {
+  background: #e76f51;
+}
+
+.link-btn {
+  padding: 2px 6px;
+  border: none;
+  background: none;
+  color: #8a7a76;
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 /* ---------------------------------------------------------------- Modal */
@@ -1088,14 +1324,6 @@ body.force-landscape .rotate-hint {
     border-radius: 6px;
   }
 
-  .compact-only {
-    display: inline-flex !important;
-  }
-
-  .wide-only {
-    display: none !important;
-  }
-
   .room-code {
     font-size: 11px;
   }
@@ -1186,9 +1414,20 @@ body.force-landscape .rotate-hint {
     margin-top: 10px;
   }
 
-  .actions .btn {
-    padding: 9px 12px;
-    font-size: 14px;
+  .venue-pick {
+    padding: 6px 4px;
+  }
+
+  .venue-icon {
+    font-size: 18px;
+  }
+
+  .venue-name {
+    font-size: 13px;
+  }
+
+  .venue-meta {
+    font-size: 10px;
   }
 
   /* Lobby on short screens */

@@ -8,15 +8,6 @@ const TILE_KEY = "restaurant-tile";
 /** The kitchen is tiled; the dining room (right of this local x) has the wooden floor. */
 const DINING_X = 990;
 
-/** Pot plants and lanterns around the dining room (local coordinates, catalog kinds). */
-const DINING_DECOR: { kind: string; x: number; y: number }[] = [
-  { kind: "fern_large", x: 1010, y: 690 },
-  { kind: "banana_plant", x: 1375, y: 280 },
-  { kind: "fiddle_leaf", x: 1010, y: 280 },
-  { kind: "plant_tall_stand", x: 1370, y: 690 },
-  { kind: "lantern_lit", x: 1180, y: 300 },
-];
-
 /**
  * The restaurant's interior (static): tiled kitchen and wooden dining room, back wall with a tiled splashback
  * behind the cookers, the sign over the dining room, the dining tables and the doormat out to the yard.
@@ -40,7 +31,6 @@ export class RestaurantView {
     this.drawWall();
     this.drawExit();
     for (const piece of RESTAURANT_FURNITURE) addStaticDecoration(scene, piece);
-    for (const d of DINING_DECOR) addStaticDecoration(scene, { kind: d.kind, x: R.x + d.x, y: R.y + d.y });
   }
 
   private makeTextures() {

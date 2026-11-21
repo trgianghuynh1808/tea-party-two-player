@@ -27,7 +27,6 @@ import {
   type Area,
   type RoomInfo,
   type RoomsResponse,
-  type Venue,
 } from "@boba/shared";
 import type { BobaShopState } from "@boba/shared/schema";
 import { FORCE_TOUCH_PARAM, isTouchDevice } from "./input/TouchControls";
@@ -35,7 +34,8 @@ import { AREA_EVENT, BUILD_MODE_EVENT, BUILD_TOOL_EVENT, DECORATE_MODE_EVENT, Sh
 import { BuildPanel } from "./ui/BuildPanel";
 import { initForceLandscape, patchPhaserForRotation } from "./forceLandscape";
 import { DECOR_ROTATE, DecorPanel, PALETTE_DRAG_START } from "./ui/DecorPanel";
-import { OrdersPanel, buildMenu } from "./ui/OrdersPanel";
+import { OrdersPanel } from "./ui/OrdersPanel";
+import { buildRecipeGuide } from "./ui/RecipeGuide";
 import { ShiftOverlay } from "./ui/ShiftOverlay";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -57,14 +57,12 @@ const roomTitle = $<HTMLElement>("room-title");
 const playerCountLabel = $<HTMLElement>("player-count");
 const copyLinkBtn = $<HTMLButtonElement>("copy-link-btn");
 const leaveBtn = $<HTMLButtonElement>("leave-btn");
-const menuBtn = $<HTMLButtonElement>("menu-btn");
 const decorateBtn = $<HTMLButtonElement>("decorate-btn");
 const fullscreenBtn = $<HTMLButtonElement>("fullscreen-btn");
 const ordersRoot = $<HTMLElement>("orders-panel");
 const decorRoot = $<HTMLElement>("decor-panel");
 const buildBtn = $<HTMLButtonElement>("build-btn");
 const buildRoot = $<HTMLElement>("build-panel");
-const menuInline = $<HTMLElement>("menu-inline");
 const shiftOverlayRoot = $<HTMLElement>("shift-overlay");
 const modal = $<HTMLElement>("modal");
 const modalTitle = $<HTMLElement>("modal-title");
@@ -90,8 +88,7 @@ let buildPanel: BuildPanel | undefined;
 let building = false;
 /** Last build tool picked (the panel is rebuilt for every room). */
 let buildTool = "floor_wood";
-/** Whose menu the side panel / 📋 modal show: the venue of the running shift, else where the player stands. */
-let menuVenue: Venue = "shop";
+
 
 // Keep the ?touch=1 debug flag across URL rewrites so a refresh still forces touch controls.
 const forceTouch = new URLSearchParams(location.search).get(FORCE_TOUCH_PARAM) === "1";
@@ -453,7 +450,11 @@ function startGame(room: Room<BobaShopState>) {
   });
   patchPhaserForRotation(game);
   game.scene.add("ShopScene", ShopScene, true, data);
-  ordersPanel = new OrdersPanel(ordersRoot, room);
+  // "?" on an order: how to make that drink / dish.
+  ordersPanel = new OrdersPanel(ordersRoot, room, (id) => {
+    const guide = buildRecipeGuide(id);
+    if (guide) openModal("📖 Cách làm", guide);
+  });
   shiftOverlay = new ShiftOverlay(shiftOverlayRoot, room);
   decorPanel = new DecorPanel(
     decorRoot,
@@ -481,12 +482,15 @@ function startGame(room: Room<BobaShopState>) {
     const playing = room.state.phase === GamePhase.Playing;
     const host = room.state.hostName || "chủ phòng";
     const inYard = area === "yard";
-    decorateBtn.disabled = playing || !amHost || area !== "shop";
+    // Decorating happens inside a building: the tea shop or the restaurant.
+    decorateBtn.disabled = playing || !amHost || inYard;
     decorateBtn.title = !amHost
       ? `Quán này dùng nội thất của ${host}, chỉ chủ phòng mới trang trí được`
-      : area !== "shop"
-        ? "Vào trong tiệm trà để trang trí"
-        : "Trang trí quán (ngoài giờ ca)";
+      : inYard
+        ? "Vào trong tiệm trà hoặc nhà hàng để trang trí"
+        : area === "restaurant"
+          ? "Trang trí nhà hàng (ngoài giờ ca)"
+          : "Trang trí quán (ngoài giờ ca)";
     if (decorateBtn.disabled && decorating) setDecorating(false);
     // Guests build on the host's land too, paid from their own wallet (empty cells only).
     buildBtn.disabled = !inYard;
@@ -497,25 +501,12 @@ function startGame(room: Room<BobaShopState>) {
         : `Xây giúp ${host} trên đất trống, trả bằng ví của bạn`;
     if (buildBtn.disabled && building) setBuilding(false);
   };
-  // The menu follows the running shift's venue, or else the place the player is in.
-  const updateMenu = () => {
-    const place = room.state.phase === GamePhase.Playing ? room.state.venue : area;
-    const venue: Venue = place === "restaurant" ? "restaurant" : place === "shop" ? "shop" : menuVenue;
-    if (venue === menuVenue && menuInline.childElementCount) return;
-    menuVenue = venue;
-    renderInlineMenu();
-  };
   game.events.on(AREA_EVENT, (next: Area) => {
     area = next;
     updateDecorateBtn();
-    updateMenu();
     shiftOverlay?.setArea(next);
   });
-  $state.listen("phase", () => {
-    updateDecorateBtn();
-    updateMenu();
-  });
-  $state.listen("venue", updateMenu);
+  $state.listen("phase", updateDecorateBtn);
   $state.listen("hostName", updateDecorateBtn);
   $state.onAdd("players", (player, sessionId) => {
     if (sessionId !== room.sessionId) return;
@@ -596,7 +587,6 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !modal.hidden) closeModal();
 });
 
-menuBtn.addEventListener("click", () => openModal(`📋 Menu ${menuVenue === "restaurant" ? "nhà hàng" : "tiệm trà"}`, buildMenu(menuVenue)));
 
 // ---------------------------------------------------------------- Decorate mode (between shifts only)
 
@@ -664,12 +654,5 @@ if (isTouchDevice() && document.documentElement.requestFullscreen) {
 // Phones always play in landscape (lock where possible, else the page is turned with CSS).
 initForceLandscape();
 
-// Full menu shown inline in the side panel on large screens (hidden on phones; 📋 opens it in a modal).
-function renderInlineMenu() {
-  const menuTitle = document.createElement("h2");
-  menuTitle.textContent = menuVenue === "restaurant" ? "📋 Menu nhà hàng" : "📋 Menu tiệm trà";
-  menuInline.replaceChildren(menuTitle, buildMenu(menuVenue));
-}
-renderInlineMenu();
 
 showLobby();

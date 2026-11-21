@@ -1,6 +1,5 @@
 // Decorations (furniture): catalog + placement rules shared by server (validation) and client (drag preview).
 
-import { STATIONS, WALL_BOTTOM } from "./menu";
 
 export type DecorationLayer =
   /** Lies on the floor (rugs): other furniture can be placed on top of it. */
@@ -277,14 +276,8 @@ export const refundFor = (def: DecorationDef) => Math.floor(def.price * DECORATI
 /** Furniture snaps to this grid (world pixels). */
 export const DECOR_GRID = 10;
 
-/** Floor furniture stays on the shop floor, below the back wall. */
-const PLACE_AREA = { minX: 0, minY: WALL_BOTTOM, maxX: 960, maxY: 600 };
 /** Height of the skirting board at the foot of the wall: nothing hangs over it. */
 export const WALL_SKIRTING = 12;
-/** Wall pieces hang between the ceiling edge and the skirting board. */
-export const WALL_PLACE_AREA = { minX: 0, minY: 4, maxX: 960, maxY: WALL_BOTTOM - WALL_SKIRTING };
-/** Minimum gap between furniture and stations so machines stay easy to see and reach. */
-const STATION_MARGIN = 6;
 
 export const snapToGrid = (v: number) => Math.round(v / DECOR_GRID) * DECOR_GRID;
 
@@ -296,63 +289,7 @@ export interface PlacedDecoration {
   rotation?: number;
 }
 
-interface Rect {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-}
-
-const rectOf = (x: number, y: number, w: number, h: number, margin = 0): Rect => ({
-  left: x - w / 2 - margin,
-  top: y - h / 2 - margin,
-  right: x + w / 2 + margin,
-  bottom: y + h / 2 + margin,
-});
-
-const overlaps = (a: Rect, b: Rect) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
-
-/**
- * Can a decoration of `kind`, turned to `rotation`, be placed with its center at (x, y)?
- * `others` = furniture already in the shop; `ignoreId` = the piece being moved.
- */
-export function canPlaceDecoration(
-  kind: string,
-  x: number,
-  y: number,
-  others: Iterable<PlacedDecoration>,
-  ignoreId?: string,
-  rotation = 0,
-): boolean {
-  const def = getDecorationDef(kind);
-  if (!def || !Number.isFinite(x) || !Number.isFinite(y)) return false;
-
-  const size = footprintOf(def, rotation);
-  const r = rectOf(x, y, size.width, size.height);
-  const area = def.layer === "wall" ? WALL_PLACE_AREA : PLACE_AREA;
-  if (r.left < area.minX || r.top < area.minY || r.right > area.maxX || r.bottom > area.maxY) {
-    return false;
-  }
-
-  // Wall pieces hang behind the machines (drawn below them), so stations don't block them.
-  // Rugs lie flat on the floor and are drawn below everything (depth), so they may slide under
-  // counters, tables and machines; standing furniture must keep clear of them.
-  if (def.layer === "object") {
-    for (const s of STATIONS) {
-      if (overlaps(r, rectOf(s.x, s.y, s.width, s.height, STATION_MARGIN))) return false;
-    }
-  }
-
-  for (const o of others) {
-    if (o.id === ignoreId) continue;
-    const od = getDecorationDef(o.kind);
-    // Furniture may sit on a rug, but rugs don't stack and furniture doesn't stack.
-    if (!od || od.layer !== def.layer) continue;
-    const os = footprintOf(od, o.rotation ?? 0);
-    if (overlaps(r, rectOf(o.x, o.y, os.width, os.height))) return false;
-  }
-  return true;
-}
+// Where pieces may go (tea shop or restaurant) is checked by canPlaceDecoration in placement.ts.
 
 // ---------------------------------------------------------------- Persistence
 

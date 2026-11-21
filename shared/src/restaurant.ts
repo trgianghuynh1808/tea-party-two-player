@@ -372,11 +372,23 @@ function diningTable(n: number, x: number, y: number): PlacedDecoration[] {
   ];
 }
 
+/** Pot plants and a lantern around the dining room. */
+const diningDecor = (kind: string, x: number, y: number): PlacedDecoration => ({ id: `r_decor_${kind}`, kind, ...at(x, y) });
+
+/**
+ * The restaurant's own furniture (fixed: the host can't move it, but can add their own pieces around it).
+ * Customers sit on these chairs; seats the host adds next to a table are used too.
+ */
 export const RESTAURANT_FURNITURE: PlacedDecoration[] = [
   ...diningTable(1, 1080, 400),
   ...diningTable(2, 1280, 400),
   ...diningTable(3, 1080, 580),
   ...diningTable(4, 1280, 580),
+  diningDecor("fern_large", 1010, 690),
+  diningDecor("banana_plant", 1375, 280),
+  diningDecor("fiddle_leaf", 1010, 280),
+  diningDecor("plant_tall_stand", 1370, 690),
+  diningDecor("lantern_lit", 1180, 300),
 ];
 
 /** Where players stand when a restaurant shift starts. */

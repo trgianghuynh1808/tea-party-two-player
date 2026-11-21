@@ -39,7 +39,8 @@ To play from another machine on the same LAN, open the **Network** URL printed b
   Leaving mid-shift forfeits your share. Wallets carry over between shifts and rooms.
 - The counters (**Bàn**) in the middle hold one cup each: put a cup down / pick it up with Space to pass it to your teammate.
 - Customers order drinks (see the **Đơn hàng** panel). Each order has a timer; serve it before it runs out.
-- Every drink has its own recipe (ordered steps), shown in the **Menu** panel.
+- Every drink has its own recipe (ordered steps), shown on its order card; the **?** next to it opens a step-by-step
+  cooking guide (`client/src/ui/RecipeGuide.ts`).
 - Each machine adds one ingredient. Machines marked ⏱ take time: put the cup down, wait for "Xong!", press Space again to pick it up.
 - Machines refuse steps that don't lead to any drink on the menu. Throw a cup in the trash bin to start over.
 - Delivering pays the drink price, plus a $5 tip per drink if served with more than half of the time left.
@@ -78,8 +79,7 @@ Phones always play in landscape (`client/src/forceLandscape.ts`):
   (`body.force-landscape`), so turning the phone sideways shows the game the right way up. Phaser input and the
   furniture drag use `toLayout` / `layoutRect` to read touches through the turn.
 
-The game area scales to fit the screen; on small screens the side panel only shows orders,
-and 📋 Menu / 🛒 Shop open as pop-ups.
+The game area scales to fit the screen; the side panel shows the orders, and cooking guides (**?**) open as pop-ups.
 In build mode one finger either builds or steers: the **🚶 Đi lại / 🔨 Xây tiếp** button (top right of the game)
 switches between dragging to build and the joystick. Picking a material switches back to building.
 
