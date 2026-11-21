@@ -266,21 +266,24 @@ export function describeKitchenItem(item: string): string {
 // Local coordinates inside RESTAURANT (0,0 = top-left of the room). The back wall is y 0..WALL_BOTTOM.
 // The kitchen is grouped by purpose so two players can split the work by zone:
 // - Cook zone (x <= 510): cooking ingredient crates in three columns (x = 31, 129, 227), then two
-//   columns of cooking machines (x = 340, 468) ending in the plate/bowl shelves; trash at the bottom.
+//   columns of cooking machines (x = 340, 468) ending in the plate/bowl shelves; trash tucked
+//   between the two machine columns at the bottom.
 // - Shared zone (x = 585..712): one column of handover counters plus the crates both zones draw
 //   from (milk, strawberry) beside them.
 // - Drink zone (x >= 745): drink crates (x = 790), then the blender, coffee machine, glass shelf and
 //   second chop board in one column (x = 903).
 // - Right: the dining room, furnished by the host (decorate mode), with the door at the bottom.
-// Every adjacent pair of columns along x has a 44px aisle (the player is 36px wide); crates in one
-// column keep a 40px vertical gap.
+// Every adjacent pair of columns along x has a 44px aisle, and stations stacked in one column
+// (crates, machines, shelves, counters) keep a 40px vertical gap, so the player (36px wide) fits
+// between them.
 
 const at = (x: number, y: number) => ({ x: RESTAURANT.x + x, y: RESTAURANT.y + y });
 // First row of every wall-side column (station centers), just below the back wall.
 const TOP_Y = WALL_BOTTOM + 50;
 const CRATE_PITCH = 88;
-const COOK_MACHINE_PITCH = 75;
-const DRINK_MACHINE_PITCH = 90;
+const COOK_MACHINE_PITCH = 100;
+const DRINK_MACHINE_PITCH = 100;
+const COUNTER_PITCH = 98;
 // Zone columns (local x of the station centers); adjacent columns keep a 44px aisle.
 const COOK_CRATE_X = [31, 129, 227];
 const COOK_MACHINE_X = [340, 468];
@@ -371,7 +374,7 @@ export const RESTAURANT_STATIONS: StationDef[] = [
       id: `r_counter_${i + 1}`,
       type: StationType.Counter,
       label: "Bàn",
-      ...at(COUNTER_X, 200 + i * 66),
+      ...at(COUNTER_X, 200 + i * COUNTER_PITCH),
       width: 58,
       height: 58,
       color: 0xc9a27e,
@@ -388,7 +391,7 @@ export const RESTAURANT_STATIONS: StationDef[] = [
   shelf("glass", DRINK_MACHINE_X, TOP_Y + DRINK_MACHINES.length * DRINK_MACHINE_PITCH),
   cooker("chop", 2, DRINK_MACHINE_X, TOP_Y + (DRINK_MACHINES.length + 1) * DRINK_MACHINE_PITCH),
   { id: "r_delivery", type: StationType.DeliveryCounter, label: "Mang đi", ...at(820, 640), width: 150, height: 80, color: 0x90be6d },
-  { id: "r_trash", type: StationType.Trash, label: "Thùng rác", ...at(330, 712), width: 52, height: 52, color: 0x9e9e9e },
+  { id: "r_trash", type: StationType.Trash, label: "Thùng rác", ...at(404, 730), width: 52, height: 52, color: 0x9e9e9e },
 ];
 
 const KITCHEN_STATION_IDS = new Set(RESTAURANT_STATIONS.map((s) => s.id));
@@ -399,4 +402,4 @@ const KITCHEN_STATION_IDS = new Set(RESTAURANT_STATIONS.map((s) => s.id));
 export const isKitchenStation = (def: StationDef) => KITCHEN_STATION_IDS.has(def.id);
 
 /** Where players stand when a restaurant shift starts. */
-export const RESTAURANT_SPAWN_POINTS = [at(470, 630), at(560, 630)];
+export const RESTAURANT_SPAWN_POINTS = [at(470, 740), at(560, 740)];

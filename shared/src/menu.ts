@@ -114,12 +114,12 @@ const machine = (id: IngredientId, x: number, label: string, processSeconds = 0)
 export const STATIONS: StationDef[] = [
   { id: "cup_shelf", type: StationType.CupShelf, label: "Kệ ly", x: 76, y: MACHINE_Y, width: MACHINE_W, height: MACHINE_H, color: 0x8ecae6 },
   // Short labels so they stay readable on phones (the world is rendered at ~0.6× there).
-  machine("black_tea", 196, "Trà đen", 1.5),
-  machine("green_tea", 316, "Trà xanh", 1.5),
-  machine("milk", 436, "Sữa"),
-  machine("pearl", 556, "Trân châu"),
-  machine("cheese_foam", 676, "Kem cheese", 1),
-  machine("passion", 796, "Chanh dây"),
+  machine("black_tea", 206, "Trà đen", 1.5),
+  machine("green_tea", 336, "Trà xanh", 1.5),
+  machine("milk", 466, "Sữa"),
+  machine("pearl", 596, "Trân châu"),
+  machine("cheese_foam", 726, "Kem cheese", 1),
+  machine("passion", 856, "Chanh dây"),
   // Horizontal market stall in the bottom-right corner (art is ~1.9:1, see client/public/assets/stations/stall_checkered.png).
   { id: "delivery_counter", type: StationType.DeliveryCounter, label: "Giao hàng", x: 850, y: 450, width: 180, height: 95, color: 0x90be6d },
   { id: "trash", type: StationType.Trash, label: "Thùng rác", x: 52, y: 420, width: 56, height: 56, color: 0x9e9e9e },
@@ -129,7 +129,7 @@ export const STATIONS: StationDef[] = [
       id: `counter_${i + 1}`,
       type: StationType.Counter,
       label: "Bàn",
-      x: 340 + i * 60,
+      x: 260 + i * 100,
       y: 300,
       width: 58,
       height: 58,

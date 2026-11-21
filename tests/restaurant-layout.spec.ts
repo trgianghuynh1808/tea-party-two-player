@@ -6,8 +6,11 @@ import {
   RESTAURANT_STATIONS,
   STATIONS,
   WALL_BOTTOM,
+  WORLD_HEIGHT,
+  WORLD_WIDTH,
   findNearestStationDef,
   resolveCollisions,
+  StationType,
   type Direction,
   type StationDef,
 } from "@boba/shared";
@@ -293,11 +296,16 @@ test("T6: two players can collaborate across the one-way prep -> handover -> coo
       );
 
     // Player 1 (cook side): pick potato from aisle x=80 -> chop on r_chop_1 -> place on handover counter r_counter_1.
+    // The trash at (404, 730) blocks the bottom lane between the machine columns, so reach the prep
+    // side via the machine gap (aisle x=533, y=220), aisle x=276 and the bottom lane.
     await walkRestaurantPath(
       page1,
       [
-        [404, 630],
-        [404, 742],
+        [533, 740],
+        [533, 220],
+        [404, 220],
+        [276, 220],
+        [276, 742],
         [80, 742],
         [80, 170],
       ],
@@ -309,8 +317,10 @@ test("T6: two players can collaborate across the one-way prep -> handover -> coo
     await walkRestaurantPath(
       page1,
       [
-        [80, 742],
-        [404, 742],
+        [80, 214],
+        [276, 214],
+        [276, 220],
+        [404, 220],
         [404, 170],
       ],
       "left",
@@ -323,8 +333,8 @@ test("T6: two players can collaborate across the one-way prep -> handover -> coo
     await walkRestaurantPath(
       page1,
       [
-        [404, 600],
-        [533, 600],
+        [404, 220],
+        [533, 220],
         [533, 200],
       ],
       "right",
@@ -337,7 +347,7 @@ test("T6: two players can collaborate across the one-way prep -> handover -> coo
     await walkRestaurantPath(
       page2,
       [
-        [533, 630],
+        [533, 740],
         [533, 200],
       ],
       "right",
@@ -345,14 +355,14 @@ test("T6: two players can collaborate across the one-way prep -> handover -> coo
     await interact(page2);
     await expect.poll(() => heldOf(page2)).toBe("food:potato.chop");
 
-    await walkRestaurantPath(page2, [[533, 395]], "left");
-    await interact(page2);
     await walkRestaurantPath(page2, [[533, 470]], "left");
+    await interact(page2);
+    await walkRestaurantPath(page2, [[533, 570]], "left");
     await interact(page2);
     await expect.poll(() => heldOf(page2)).toBe("plate");
 
     await expect.poll(() => stationItemOf(page2, "r_deepfry_1")).toBe("food:potato.chop.deepfry");
-    await walkRestaurantPath(page2, [[533, 395]], "left");
+    await walkRestaurantPath(page2, [[533, 470]], "left");
     await interact(page2);
     await expect.poll(() => heldOf(page2)).toBe("plate:potato.chop.deepfry");
   } finally {
@@ -459,10 +469,88 @@ test("T10: adjacent crates in the same column leave a 40px vertical gap; no stat
   }
 });
 
+test("T1: restaurant machines, shelves and counters in one column leave a 40px vertical gap", () => {
+  const MIN_GAP = 40;
+  // Machines (both cook columns, both chop boards, the drink machines) and the container shelves
+  // stack in columns; the handover counters stack in their own column.
+  const MACHINE_ID = /^r_(?:fry|boil|grill|bake|deepfry|blend|brew|chop)_\d+$/;
+  const stacks = [
+    RESTAURANT_STATIONS.filter((s) => MACHINE_ID.test(s.id) || s.id.startsWith("r_shelf_")),
+    byIdPrefix("r_counter_"),
+  ];
+  for (const stack of stacks) {
+    expect(stack.length).toBeGreaterThan(0);
+    const columns = new Map<number, StationDef[]>();
+    for (const s of stack) {
+      const x = local(s).x;
+      const column = columns.get(x);
+      if (column) column.push(s);
+      else columns.set(x, [s]);
+    }
+    for (const [x, column] of columns) {
+      expect(column.length, `column x=${x} has at least two stations`).toBeGreaterThanOrEqual(2);
+      column.sort((a, b) => local(a).y - local(b).y);
+      for (let i = 1; i < column.length; i++) {
+        const gap = rectOf(column[i]).top - rectOf(column[i - 1]).bottom;
+        expect(gap, `column x=${x}: ${column[i - 1].id} <-> ${column[i].id} vertical gap`).toBeGreaterThanOrEqual(MIN_GAP);
+      }
+    }
+  }
+  // The whole kitchen stays collision-free and on the floor (y <= 760).
+  for (const s of RESTAURANT_STATIONS) {
+    expect(rectOf(s).bottom, `${s.id} stays on the floor`).toBeLessThanOrEqual(RESTAURANT.height);
+  }
+  for (let i = 0; i < RESTAURANT_STATIONS.length; i++) {
+    for (let j = i + 1; j < RESTAURANT_STATIONS.length; j++) {
+      const a = RESTAURANT_STATIONS[i];
+      const b = RESTAURANT_STATIONS[j];
+      expect(rectsOverlap(rectOf(a), rectOf(b)), `${a.id} overlaps ${b.id}`).toBe(false);
+    }
+  }
+});
+
+test("T2: tea shop machines leave a 30px gap and counters a 40px gap, clear of the delivery counter", () => {
+  const shopRectOf = (s: StationDef): Rect => ({
+    left: s.x - s.width / 2,
+    top: s.y - s.height / 2,
+    right: s.x + s.width / 2,
+    bottom: s.y + s.height / 2,
+  });
+
+  const machines = STATIONS.filter((s) => s.type === StationType.Machine || s.type === StationType.CupShelf).sort(
+    (a, b) => a.x - b.x,
+  );
+  expect(machines.length, "cup shelf + six machines").toBe(7);
+  for (let i = 1; i < machines.length; i++) {
+    const gap = shopRectOf(machines[i]).left - shopRectOf(machines[i - 1]).right;
+    expect(gap, `${machines[i - 1].id} <-> ${machines[i].id} gap`).toBeGreaterThanOrEqual(30);
+  }
+
+  const counters = STATIONS.filter((s) => s.type === StationType.Counter).sort((a, b) => a.x - b.x);
+  expect(counters.length, "five handover counters").toBe(5);
+  for (let i = 1; i < counters.length; i++) {
+    const gap = shopRectOf(counters[i]).left - shopRectOf(counters[i - 1]).right;
+    expect(gap, `${counters[i - 1].id} <-> ${counters[i].id} gap`).toBeGreaterThanOrEqual(40);
+  }
+
+  // Nothing overlaps (the delivery counter in particular) and every station fits the 960x600 frame.
+  expect(STATIONS.find((s) => s.type === StationType.DeliveryCounter), "delivery counter exists").toBeDefined();
+  for (let i = 0; i < STATIONS.length; i++) {
+    const a = shopRectOf(STATIONS[i]);
+    expect(a.left, `${STATIONS[i].id} inside the frame`).toBeGreaterThanOrEqual(0);
+    expect(a.right, `${STATIONS[i].id} inside the frame`).toBeLessThanOrEqual(WORLD_WIDTH);
+    expect(a.top, `${STATIONS[i].id} inside the frame`).toBeGreaterThanOrEqual(0);
+    expect(a.bottom, `${STATIONS[i].id} inside the frame`).toBeLessThanOrEqual(WORLD_HEIGHT);
+    for (let j = i + 1; j < STATIONS.length; j++) {
+      expect(rectsOverlap(a, shopRectOf(STATIONS[j])), `${STATIONS[i].id} overlaps ${STATIONS[j].id}`).toBe(false);
+    }
+  }
+});
+
 test("T11: the station in the player's facing direction wins over the plain nearest one", () => {
-  // The 15px gap between r_boil_1 (local 468,170) and r_boil_2 (local 468,245): r_boil_1 is nearer,
-  // so without facing it wins and only facing "down" picks r_boil_2.
-  const boilGap = { x: RESTAURANT.x + 468, y: RESTAURANT.y + 205 };
+  // The 40px gap between r_boil_1 (local 468,170) and r_boil_2 (local 468,270): from (468, 212) r_boil_1
+  // is nearer (12 vs 28), so without facing it wins; only FACING_BIAS lets facing "down" pick r_boil_2.
+  const boilGap = { x: RESTAURANT.x + 468, y: RESTAURANT.y + 212 };
   expect(findNearestStationDef(boilGap)?.id).toBe("r_boil_1");
   expect(findNearestStationDef(boilGap, "up")?.id).toBe("r_boil_1");
   expect(findNearestStationDef(boilGap, "down")?.id).toBe("r_boil_2");
@@ -504,15 +592,20 @@ test("T9: a player can walk into the vertical gaps between crates to pick shrimp
       return g.state.players.get(g.room.sessionId).heldItem;
     });
 
-  // Column 1 (x = 31): along the bottom edge (the y = 630 row is now blocked by the rice crate at
-  // x = 129, y = 610), up aisle 1 (x = 76), then step into the 40px vertical gap between the
-  // shrimp (y = 434) and egg (y = 522) crates.
+  // Column 1 (x = 31): the trash at (404, 730) blocks the bottom lane between the machine columns,
+  // so cross via the machine gap (aisle x=533, y=220), aisle x=276 and the bottom lane, then up
+  // aisle 1 (x = 80) and step into the 40px vertical gap between the shrimp (y = 434) and egg
+  // (y = 522) crates.
   await walkRestaurantPath(
     page,
     [
-      [470, 742],
-      [76, 742],
-      [76, 477],
+      [533, 740],
+      [533, 220],
+      [404, 220],
+      [276, 220],
+      [276, 742],
+      [80, 742],
+      [80, 477],
       [31, 477],
     ],
     "left",
@@ -520,29 +613,37 @@ test("T9: a player can walk into the vertical gaps between crates to pick shrimp
   await interact();
   await expect.poll(heldOf).toBe("food:shrimp");
 
-  // Discard at the trash (330, 712), now at the bottom of the prep zone.
+  // Discard at the trash (404, 730), now between the two machine columns: stand above it in the
+  // machine aisle and face down (the bowl shelf is nearer but behind the player).
   await walkRestaurantPath(
     page,
     [
-      [76, 477],
-      [76, 742],
-      [280, 742],
+      [80, 477],
+      [80, 742],
+      [276, 742],
+      [276, 220],
+      [404, 220],
+      [404, 660],
     ],
     "down",
   );
   await interact();
   await expect.poll(heldOf).toBe("");
 
-  // Column 2 (x = 129): up aisle 2 (x = 174), then step into the vertical gap between the
-  // tomato (y = 258) and lettuce (y = 346) crates.
+  // Column 2 (x = 129): back up aisle 276, step into the crate gap y=214 at its top, then down
+  // aisle 3 (x = 174) and into the 40px gap between the tomato (y = 258) and lettuce (y = 346)
+  // crates; facing "up" picks the tomato.
   await walkRestaurantPath(
     page,
     [
-      [174, 742],
-      [174, 301],
-      [129, 301],
+      [404, 220],
+      [276, 220],
+      [276, 214],
+      [174, 214],
+      [174, 302],
+      [129, 302],
     ],
-    "left",
+    "up",
   );
   await interact();
   await expect.poll(heldOf).toBe("food:tomato");
@@ -572,11 +673,16 @@ test("T12: the server picks the crate the player faces, one independent room per
       });
 
     // Both players stand in the 40px gap between the shrimp (local 31,434) and egg (local 31,522) crates,
-    // ~20px from each: only the facing direction tells the two picks apart.
+    // ~19/21px from each: only the facing direction tells the two picks apart. The way in crosses via
+    // the machine gap (the trash at (404, 730) blocks the bottom lane).
     const crateGapPath: [number, number][] = [
-      [470, 742],
-      [76, 742],
-      [76, 477],
+      [533, 740],
+      [533, 220],
+      [404, 220],
+      [276, 220],
+      [276, 742],
+      [80, 742],
+      [80, 477],
       [31, 477],
     ];
     await walkRestaurantPath(page1, crateGapPath, "up");
