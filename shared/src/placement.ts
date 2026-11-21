@@ -4,7 +4,7 @@
 
 import { WALL_SKIRTING, footprintOf, getDecorationDef, type PlacedDecoration } from "./decor";
 import { STATIONS, WALL_BOTTOM, type StationDef } from "./menu";
-import { RESTAURANT_FURNITURE, RESTAURANT_STATIONS } from "./restaurant";
+import { RESTAURANT_STATIONS } from "./restaurant";
 import { RESTAURANT, areaOf } from "./world";
 
 export interface PlaceBox {
@@ -22,21 +22,18 @@ export interface DecorRoom {
   /** Wall pieces hang between the ceiling edge and the skirting board. */
   wall: PlaceBox;
   stations: StationDef[];
-  /** Fixed furniture of the room (the restaurant's dining tables and plants): nothing goes on top of it. */
-  fixed: PlacedDecoration[];
 }
 
-const room = (area: DecorRoom["area"], x: number, y: number, width: number, height: number, stations: StationDef[], fixed: PlacedDecoration[]): DecorRoom => ({
+const room = (area: DecorRoom["area"], x: number, y: number, width: number, height: number, stations: StationDef[]): DecorRoom => ({
   area,
   floor: { minX: x, minY: y + WALL_BOTTOM, maxX: x + width, maxY: y + height },
   wall: { minX: x, minY: y + 4, maxX: x + width, maxY: y + WALL_BOTTOM - WALL_SKIRTING },
   stations,
-  fixed,
 });
 
 export const DECOR_ROOMS: DecorRoom[] = [
-  room("shop", 0, 0, 960, 600, STATIONS, []),
-  room("restaurant", RESTAURANT.x, RESTAURANT.y, RESTAURANT.width, RESTAURANT.height, RESTAURANT_STATIONS, RESTAURANT_FURNITURE),
+  room("shop", 0, 0, 960, 600, STATIONS),
+  room("restaurant", RESTAURANT.x, RESTAURANT.y, RESTAURANT.width, RESTAURANT.height, RESTAURANT_STATIONS),
 ];
 
 /** The room a position is in (undefined outdoors). */
@@ -97,7 +94,7 @@ export function canPlaceDecoration(
     }
   }
 
-  for (const o of [...others, ...place.fixed]) {
+  for (const o of others) {
     if (o.id === ignoreId) continue;
     const od = getDecorationDef(o.kind);
     // Furniture may sit on a rug, but rugs don't stack and furniture doesn't stack.

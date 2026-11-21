@@ -63,7 +63,7 @@ function recipeSteps(item: MenuItem): HTMLElement {
   if (!dish) return steps;
   const parts = document.createElement("div");
   parts.className = "parts";
-  parts.append(span("part-into", `${CONTAINER_ICONS[dish.container]} Bày ra ${CONTAINERS[dish.container].label.toLowerCase()}, gồm:`));
+  parts.append(span("part-into", `${CONTAINER_ICONS[dish.container]} Cầm ${CONTAINERS[dish.container].label.toLowerCase()} đi gom:`));
   for (const part of dish.parts) {
     const parsed = parseFood(part);
     if (!parsed) continue;

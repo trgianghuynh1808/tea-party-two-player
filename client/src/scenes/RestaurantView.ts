@@ -1,6 +1,5 @@
 import Phaser from "phaser";
-import { RESTAURANT, RESTAURANT_EXIT_ZONE, RESTAURANT_FURNITURE, WALL_BOTTOM, WALL_SKIRTING } from "@boba/shared";
-import { addStaticDecoration } from "./DecorController";
+import { RESTAURANT, RESTAURANT_EXIT_ZONE, WALL_BOTTOM, WALL_SKIRTING } from "@boba/shared";
 
 const FLOOR_DEPTH = -1000;
 const WALL_DEPTH = -900;
@@ -30,7 +29,6 @@ export class RestaurantView {
     }
     this.drawWall();
     this.drawExit();
-    for (const piece of RESTAURANT_FURNITURE) addStaticDecoration(scene, piece);
   }
 
   private makeTextures() {

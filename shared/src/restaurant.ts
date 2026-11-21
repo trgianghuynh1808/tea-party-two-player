@@ -10,7 +10,6 @@
 // - Like the tea shop, every step is checked against the menu: you can't cook or plate something no dish uses.
 
 import { type MenuItem, StationType, WALL_BOTTOM, type StationDef } from "./menu";
-import type { PlacedDecoration } from "./decor";
 import { RESTAURANT } from "./world";
 
 // ---------------------------------------------------------------- Cooking methods
@@ -268,7 +267,7 @@ export function describeKitchenItem(item: string): string {
 // - Back wall: dish shelves and the cookers.
 // - Left wall and a long island: ingredient crates.
 // - Middle: counters to put things down and assemble dishes; take-away counter; trash in the corner.
-// - Right: the dining room (tables + chairs below), with the door at the bottom.
+// - Right: the dining room, furnished by the host (decorate mode), with the door at the bottom.
 
 const at = (x: number, y: number) => ({ x: RESTAURANT.x + x, y: RESTAURANT.y + y });
 const BACK_Y = WALL_BOTTOM + 25;
@@ -365,38 +364,6 @@ const KITCHEN_STATION_IDS = new Set(RESTAURANT_STATIONS.map((s) => s.id));
  * but follow the kitchen rules (plates, bowls, glasses) — see planKitchen.
  */
 export const isKitchenStation = (def: StationDef) => KITCHEN_STATION_IDS.has(def.id);
-
-/** The dining room's tables and chairs (fixed, not part of anyone's decorations). Chairs face their table. */
-function diningTable(n: number, x: number, y: number): PlacedDecoration[] {
-  const p = (dx: number, dy: number) => at(x + dx, y + dy);
-  return [
-    { id: `r_table_${n}`, kind: "table", ...p(0, 0), rotation: 0 },
-    // Chair views: 0 front, 1 left, 2 back, 3 right (the way the sitter faces).
-    { id: `r_seat_${n}_l`, kind: "chair", ...p(-46, 0), rotation: 3 },
-    { id: `r_seat_${n}_r`, kind: "chair", ...p(46, 0), rotation: 1 },
-    // Behind the table: the sitter faces the room, the table is drawn in front of them.
-    { id: `r_seat_${n}_t`, kind: "chair", ...p(0, -44), rotation: 0 },
-  ];
-}
-
-/** Pot plants and a lantern around the dining room. */
-const diningDecor = (kind: string, x: number, y: number): PlacedDecoration => ({ id: `r_decor_${kind}`, kind, ...at(x, y) });
-
-/**
- * The restaurant's own furniture (fixed: the host can't move it, but can add their own pieces around it).
- * Customers sit on these chairs; seats the host adds next to a table are used too.
- */
-export const RESTAURANT_FURNITURE: PlacedDecoration[] = [
-  ...diningTable(1, 1080, 400),
-  ...diningTable(2, 1280, 400),
-  ...diningTable(3, 1080, 580),
-  ...diningTable(4, 1280, 580),
-  diningDecor("fern_large", 1010, 690),
-  diningDecor("banana_plant", 1375, 280),
-  diningDecor("fiddle_leaf", 1010, 280),
-  diningDecor("plant_tall_stand", 1370, 690),
-  diningDecor("lantern_lit", 1180, 300),
-];
 
 /** Where players stand when a restaurant shift starts. */
 export const RESTAURANT_SPAWN_POINTS = [at(420, 610), at(560, 610)];

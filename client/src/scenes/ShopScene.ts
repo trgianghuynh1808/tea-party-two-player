@@ -18,7 +18,6 @@ import {
   WORLD_HEIGHT,
   WORLD_WIDTH,
   directionFromInput,
-  allFurniture,
   areaOf,
   doorAt,
   isProcess,
@@ -985,7 +984,7 @@ export class ShopScene extends Phaser.Scene {
     const local = room ? this.players.get(room.sessionId) : undefined;
     // The first state patch may not have arrived yet during the first frames.
     const state = room?.state;
-    const tables = state?.orders && state.decorations ? tablesWaiting(allFurniture(state.decorations), state.orders) : [];
+    const tables = state?.orders && state.decorations ? tablesWaiting(state.decorations, state.orders) : [];
     const beds = state?.decorations ? bedSpots(state.decorations, state.tiles?.entries()) : [];
     // In bed the action key only gets up: nothing to highlight.
     const target = local && !local.bedId ? findInteractTarget(local.container, tables, beds) : undefined;

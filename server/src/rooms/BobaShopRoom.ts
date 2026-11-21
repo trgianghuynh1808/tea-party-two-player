@@ -35,7 +35,6 @@ import {
   RECONNECT_GRACE_SECONDS,
   REPLACED_CLOSE_CODE,
   PROCESSES,
-  RESTAURANT_FURNITURE,
   RESTAURANT_SPAWN_POINTS,
   ARRIVAL_SPAWN_POINTS,
   ServerEvents,
@@ -53,7 +52,6 @@ import {
   bedSpots,
   bedExitPoint,
   findBedSpot,
-  allFurniture,
   areaOf,
   doorAt,
   isProcess,
@@ -658,10 +656,9 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
    * `hasSeating` = false when the shop has no seat next to a table at all: customers then order take-away at the counter.
    */
   private freeSeating(): { hasSeating: boolean; free: Map<string, string[]> } {
-    // Tea shop: the host's furniture in the shop. Restaurant: its dining room plus the host's pieces placed there.
+    // The host's furniture in the venue of the shift (tea shop or restaurant).
     const venue = this.state.venue === "restaurant" ? "restaurant" : "shop";
-    const mine = [...this.state.decorations].filter((d) => areaOf(d) === venue);
-    const seatTable = seatTableMap(venue === "restaurant" ? [...RESTAURANT_FURNITURE, ...mine] : mine);
+    const seatTable = seatTableMap([...this.state.decorations].filter((d) => areaOf(d) === venue));
     const taken = new Set(this.seatCooldowns.keys());
     for (const o of this.state.orders) for (const id of o.seats ? o.seats.split(",") : []) taken.add(id);
     const free = new Map<string, string[]>();
@@ -861,7 +858,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     // In bed: the action key gets up.
     if (player.bedId) return this.getUp(client.sessionId, player);
     const orders = this.state.orders;
-    const target = findInteractTarget(player, tablesWaiting(allFurniture(this.state.decorations), orders), bedSpots(this.state.decorations, this.state.tiles.entries()));
+    const target = findInteractTarget(player, tablesWaiting(this.state.decorations, orders), bedSpots(this.state.decorations, this.state.tiles.entries()));
     if (!target) return fail("Không có quầy nào gần đây");
 
     if (target.type === "bed") {

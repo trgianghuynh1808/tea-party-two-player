@@ -143,20 +143,19 @@ function addToContainer(container: string, key: string): string | undefined {
   return canAddPart(c, parts, key) ? makeContainer(c, [...parts, key]) : undefined;
 }
 
-/** Combine what's in hand with what's on a counter / finished on a cooker (plate + food either way). */
-function combine(held: string, there: string): { held: string; station: string; label: string } | undefined {
-  const heldKey = foodKey(held);
+/**
+ * Plating: the player brings the container to the food (on a counter, or finished on a cooker) and scoops it in.
+ * Food is never carried to a container.
+ */
+function scoop(held: string, there: string): { held: string; station: string; label: string } | undefined {
   const thereKey = foodKey(there);
-  if (thereKey !== undefined) {
-    const next = addToContainer(held, thereKey);
-    if (next) return { held: next, station: "", label: `Cho ${describePart(thereKey)} vào ${CONTAINERS[containerOf(held)!].label.toLowerCase()}` };
-  }
-  if (heldKey !== undefined) {
-    const next = addToContainer(there, heldKey);
-    if (next) return { held: "", station: next, label: `Cho ${describePart(heldKey)} vào ${CONTAINERS[containerOf(there)!].label.toLowerCase()}` };
-  }
-  return undefined;
+  const next = thereKey !== undefined ? addToContainer(held, thereKey) : undefined;
+  if (!next || thereKey === undefined) return undefined;
+  return { held: next, station: "", label: `Lấy ${describePart(thereKey).toLowerCase()} vào ${CONTAINERS[containerOf(held)!].label.toLowerCase()}` };
 }
+
+/** Holding food where a container is (shelf, plate on a counter): plating works the other way round. */
+const BRING_CONTAINER = "Để món lại trên bếp / bàn, rồi cầm đĩa / tô / ly tới lấy";
 
 /** Why `key` can't be added to `container` (or "" if it can). */
 function containerRefusal(container: string, key: string): string {
@@ -191,13 +190,7 @@ export function planKitchen(def: StationDef, ctx: InteractionContext): Interacti
       const c = def.container as ContainerId;
       const label = CONTAINERS[c].label;
       if (held === EMPTY_HAND) return set(`Lấy ${label.toLowerCase()}`, c, there);
-      // Holding a finished part: serve it onto a new container.
-      if (heldKey !== undefined) {
-        const next = addToContainer(c, heldKey);
-        if (next) return set(`Bày ra ${label.toLowerCase()}`, next, there);
-        return fail(containerRefusal(c, heldKey));
-      }
-      return fail("Tay đang cầm đồ rồi");
+      return fail(heldKey !== undefined ? BRING_CONTAINER : "Tay đang cầm đồ rồi");
     }
 
     case StationType.Cooker: {
@@ -207,7 +200,7 @@ export function planKitchen(def: StationDef, ctx: InteractionContext): Interacti
       if (there !== EMPTY_HAND) {
         if (ctx.stationProgress < 1) return fail(`${p.station} đang ${p.done}, chờ chút...`);
         if (held === EMPTY_HAND) return set(`Lấy ${describeKitchenItem(there)}`, there, EMPTY_HAND);
-        const both = heldContainer && combine(held, there);
+        const both = heldContainer && scoop(held, there);
         if (both) return set(both.label, both.held, both.station);
         return fail(heldContainer ? containerRefusal(held, foodKey(there) ?? "") : "Tay đang cầm đồ, không lấy ra được");
       }
@@ -222,9 +215,10 @@ export function planKitchen(def: StationDef, ctx: InteractionContext): Interacti
       if (held === EMPTY_HAND && there === EMPTY_HAND) return fail("Bàn đang trống");
       if (held === EMPTY_HAND) return set("Nhặt lên", there, EMPTY_HAND);
       if (there === EMPTY_HAND) return set("Đặt xuống", EMPTY_HAND, held);
-      const both = combine(held, there);
+      const both = heldContainer && scoop(held, there);
       if (both) return set(both.label, both.held, both.station);
-      return fail("Bàn đã có đồ rồi");
+      if (heldContainer && foodKey(there) !== undefined) return fail(containerRefusal(held, foodKey(there)!));
+      return fail(heldKey !== undefined && containerOf(there) ? BRING_CONTAINER : "Bàn đã có đồ rồi");
     }
 
     case StationType.Trash:

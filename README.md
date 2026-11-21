@@ -62,11 +62,15 @@ Add or change drinks, ingredients and machines in `shared/src/menu.ts`; shift le
   customers come to that venue only; combo, special customers, tips and the split work the same.
 - Kitchen: crates hand out raw ingredients; cookers process one ingredient each (🔪 board, 🍳 pan, 🍲 pot, 🔥 grill,
   ♨️ oven, 🍟 fryer, 🌀 blender, ☕ coffee machine). Hot cookers burn food left too long (it must go in the trash).
-- Shelves hand out plates, bowls and glasses. Put finished parts in any order (counter, cooker or crate while holding the
-  container, or hold the food at a shelf). A container matching a dish exactly is served at the table or the take-away counter.
+- Shelves hand out plates, bowls and glasses. Plating goes one way only: take the container to the food (a cooker with
+  finished food, a counter, or the crate of a part used raw) and press to scoop it in, in any order. Food can't be
+  carried to a container. A container matching a dish exactly is served at the table or the take-away counter.
 - Trash empties a container but keeps it. Harder dishes appear later in the shift.
 
-Menu, ingredients, cooking methods, kitchen layout and dining tables live in `shared/src/restaurant.ts`. Food art is cut
+- The dining room starts empty: the host furnishes it in decorate mode (saved with the rest of their furniture).
+  Customers sit on seats placed next to a table there; with no seats, everyone orders take-away at **Mang đi**.
+
+Menu, ingredients, cooking methods and the kitchen layout live in `shared/src/restaurant.ts`. Food art is cut
 from `client/assets-src/sheets/food/` by `client/assets-src/tools/cut_food.py` (boxes in `food_cuts.json`).
 Interaction rules live in `shared/src/interaction.ts` (`planInteraction`), used by the server to apply actions and by the client to preview them.
 

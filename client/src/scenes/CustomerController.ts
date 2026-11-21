@@ -4,7 +4,6 @@ import {
   CustomerKind,
   ORDER_DANGER_RATIO,
   RESTAURANT,
-  RESTAURANT_FURNITURE,
   WORLD_HEIGHT,
   areaOf,
   directionFromInput,
@@ -196,7 +195,7 @@ export class CustomerController {
   private leaving = new Set<Customer>();
 
   private decoration(id: string): PlacedDecoration | undefined {
-    return this.room.state.decorations?.find((d) => d.id === id) ?? RESTAURANT_FURNITURE.find((d) => d.id === id);
+    return this.room.state.decorations?.find((d) => d.id === id);
   }
 
   private createCustomer(character: CharacterDef, drinkItem: string, badge: string): Customer {

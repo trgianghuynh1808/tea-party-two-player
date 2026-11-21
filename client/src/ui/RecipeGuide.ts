@@ -65,41 +65,41 @@ function dishGuide(dish: DishDef): HTMLElement {
   const icon = CONTAINER_ICONS[dish.container];
   const many = dish.parts.length > 1;
   root.append(
-    header(dish.name, dish.price, image(dish.image, "guide-dish"), many ? `${c.label} · ${dish.parts.length} phần, làm phần nào trước cũng được` : c.label),
+    header(dish.name, dish.price, image(dish.image, "guide-dish"), many ? `${c.label} · ${dish.parts.length} phần, gom phần nào trước cũng được` : c.label),
   );
 
-  // Hands hold one thing: cook a part first, take it to the shelf (it's served onto a new container there),
-  // put that container down on a counter, then bring the other parts to it.
+  // Cook each part and leave it where it is; then take the container around and scoop every part into it.
   const steps = el("ol", "guide-steps");
   let n = 1;
   let burns = false;
-  dish.parts.forEach((part, i) => {
+  const gather = [box(icon, `Lấy ${cl} ở ${c.shelf}`)];
+  for (const part of dish.parts) {
     const parsed = parseFood(part);
-    if (!parsed) return;
+    if (!parsed) continue;
     const food = FOODS[parsed.food];
-    const boxes = [box(image(food.image, "guide-food"), `Thùng ${food.label}`)];
-    for (const step of parsed.steps) {
-      const p = PROCESSES[step];
-      burns ||= p.burns;
-      boxes.push(box(p.icon, `${p.station} ${p.seconds}s`, p.burns ? "hot" : ""));
+    const last = parsed.steps[parsed.steps.length - 1];
+    if (last) {
+      const boxes = [box(image(food.image, "guide-food"), `Thùng ${food.label}`)];
+      for (const step of parsed.steps) {
+        const p = PROCESSES[step];
+        burns ||= p.burns;
+        boxes.push(box(p.icon, `${p.station} ${p.seconds}s`, p.burns ? "hot" : ""));
+      }
+      boxes.push(box("⏳", "Để đó chờ lấy"));
+      steps.append(stepRow(n++, ...boxes));
     }
-    boxes.push(i === 0 ? box(icon, `Cầm tới ${c.shelf}: bày ra ${cl}`, "into") : box(icon, `Bấm vào ${cl} trên Bàn`, "into"));
-    steps.append(stepRow(n++, ...boxes));
-    if (i === 0 && many) steps.append(stepRow(n++, box("🪑", `Đặt ${cl} lên Bàn cho rảnh tay`)));
-  });
-  steps.append(stepRow(n, box("🛎️", `${many ? `Nhặt ${cl} lên, mang` : "Mang"} ra bàn khách / quầy Mang đi`)));
+    // Raw parts are scooped straight from their crate.
+    gather.push(box(image(food.image, "guide-food"), last ? `Bấm vào ${PROCESSES[last].station}` : `Bấm vào thùng ${food.label}`, "into"));
+  }
+  steps.append(stepRow(n++, ...gather), stepRow(n, box("🛎️", "Mang ra bàn khách / quầy Mang đi")));
   root.append(steps);
 
   const tips = el("ul", "guide-tips");
   tips.append(
-    el("li", "", "✋ Tay chỉ cầm được 1 thứ: nấu xong phần nào thì bày phần đó ra, chưa cần lấy đồ đựng trước."),
-    el(
-      "li",
-      "",
-      `💡 Cách khác: đang cầm ${cl} mà bấm vào bếp / thớt có món đã xong, hoặc thùng nguyên liệu dùng nguyên (Sữa, Bánh mì) là cho thẳng vào.`,
-    ),
+    el("li", "", `✋ Món không mang tới ${cl} được: cầm ${cl} tới chỗ có món (bếp, thớt, Bàn, thùng nguyên liệu) rồi bấm để lấy.`),
+    el("li", "", `🪑 Chưa kịp lấy thì nhặt món ra đặt lên Bàn, lát cầm ${cl} tới lấy. Đang cầm ${cl} mà cần rảnh tay thì đặt ${cl} lên Bàn.`),
   );
-  if (burns) tips.append(el("li", "", `🔥 Ô viền đỏ là bếp nóng: nấu xong để quá ${BURN_SECONDS} giây sẽ cháy.`));
+  if (burns) tips.append(el("li", "", `🔥 Ô viền đỏ là bếp nóng: nấu xong mà ${BURN_SECONDS} giây chưa lấy sẽ cháy.`));
   tips.append(el("li", "", "🗑 Bỏ nhầm thì đổ vào thùng rác: đồ ăn mất, đĩa / tô / ly được giữ lại."));
   root.append(tips);
   return root;

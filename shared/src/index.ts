@@ -23,7 +23,7 @@ import { STATIONS, WALL_BOTTOM, type StationDef } from "./menu";
 /** The restaurant's kitchen, menu and dining room; venue rules (tea shop / restaurant). */
 export * from "./restaurant";
 export * from "./venues";
-import { RESTAURANT_FURNITURE, RESTAURANT_STATIONS } from "./restaurant";
+import { RESTAURANT_STATIONS } from "./restaurant";
 import type { Venue } from "./venues";
 
 // Message payloads (client -> server)
@@ -181,11 +181,6 @@ export function stationsAt(p: Vec2): StationDef[] {
 
 /** Every station of both venues (the server keeps one synced Station per entry). */
 export const ALL_STATIONS: StationDef[] = [...STATIONS, ...RESTAURANT_STATIONS];
-
-/** The host's furniture plus the restaurant's fixed tables and chairs (where customers can sit). */
-export function allFurniture<T extends PlacedDecoration>(decorations: Iterable<T>): (T | PlacedDecoration)[] {
-  return [...decorations, ...RESTAURANT_FURNITURE];
-}
 
 /** Push a player circle out of stations (inside) or the buildings and built walls (outdoors), and clamp it inside its area. */
 export function resolveCollisions(pos: Vec2, tiles?: TileGetter): Vec2 {
