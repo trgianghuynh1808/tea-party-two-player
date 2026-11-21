@@ -10,6 +10,8 @@
 #   ACTIONS=0 scripts/run-task.sh ...       # ẩn các dòng hành động, chỉ hiện commit
 #   VERIFY_MODE=full scripts/run-task.sh ...# none | light (mặc định) | full — ghi đè "Verify mode:" trong file task
 #   VERIFY_AGENT=claude scripts/run-task.sh ...# để Claude làm Verify (tiết kiệm quota OpenCode)
+#   AUTOPILOT=0|1 scripts/run-task.sh ...   # chỉ ảnh hưởng thông báo cuối: 1 = Claude đang chờ (Autopilot, watch-tasks.sh tự đặt),
+#                                           #   0 = chạy tay, in hướng dẫn "mở Claude → /clear → gõ verify". Mặc định 0.
 #
 # Màn hình chỉ hiện tóm tắt. Chi tiết đầy đủ nằm trong .agents/run.log
 #   (xem trực tiếp ở ô khác: tail -f .agents/run.log)
@@ -34,7 +36,7 @@ DEFAULT_VERIFY_MODEL="opencode-go/gemini-4-argon"
 DEFAULT_VERIFY_URL="http://localhost:5173"
 DEFAULT_CHECK_HINT="lệnh typecheck/lint và các test liên quan theo mục Commands trong AGENTS.md"
 DEFAULT_VERIFY_HINT=""
-DEFAULT_VERIFY_AGENT="opencode"   # opencode = OpenCode tự Verify · claude = để Claude Verify khi bạn gõ "verify"
+DEFAULT_VERIFY_AGENT="claude"     # claude = Claude Verify (Autopilot) · opencode = OpenCode tự Verify ngay sau khi code xong
 
 CONFIG=".agents/config.sh"
 # shellcheck source=/dev/null
@@ -58,6 +60,7 @@ CHECK_HINT="${CHECK_HINT:-$DEFAULT_CHECK_HINT}"
 VERIFY_HINT="${VERIFY_HINT:-$DEFAULT_VERIFY_HINT}"
 VERIFY="${VERIFY:-1}"                  # 0 = bỏ qua bước Verify trên trình duyệt
 VERIFY_AGENT="${VERIFY_AGENT:-$DEFAULT_VERIFY_AGENT}"
+AUTOPILOT="${AUTOPILOT:-0}"            # 1 = chạy qua watch-tasks.sh (Claude đang chờ bằng wait-task.sh)
 
 # ---------- giao diện ----------
 if [[ -t 1 ]]; then
@@ -209,10 +212,18 @@ Nhiệm vụ (Verify LIGHT, làm nhanh, không suy luận thêm kịch bản):
   echo ""
 
   if grep -q '^VERIFY: PASS' "$TASK"; then
-    ok "✅ Verify PASS. Tiếp theo: mở Claude → gõ review → nếu ổn gõ ship (squash + push)."
+    if [[ "$AUTOPILOT" == "1" ]]; then
+      ok "✅ Verify PASS. Claude sẽ tự review và ship."
+    else
+      ok "✅ Verify PASS. Tiếp theo: mở Claude → gõ review → nếu ổn gõ ship (squash + push)."
+    fi
     return 0
   elif grep -q '^VERIFY: FAIL' "$TASK"; then
-    fail "⛔ Verify FAIL. Mở Claude → gõ review để xem cách sửa."
+    if [[ "$AUTOPILOT" == "1" ]]; then
+      fail "⛔ Verify FAIL. Claude sẽ tự xử lý."
+    else
+      fail "⛔ Verify FAIL. Mở Claude → gõ review để xem cách sửa."
+    fi
     return 1
   else
     warn "⚠️  Agent không ghi kết quả Verify. Xem chi tiết: less -R $LOG"
@@ -295,11 +306,19 @@ while (( runs < MAX_RUNS )); do
     mode="${VERIFY_MODE:-$(grep -m1 -oE 'Verify mode: *(none|light|full)' "$TASK" | sed -E 's/.*: *//' || true)}"
     mode="${mode:-light}"
     if [[ "$VERIFY" != "1" || "$mode" == "none" ]]; then
-      ok "   (Verify mode: none) Tiếp theo: mở Claude → gõ review."
+      if [[ "$AUTOPILOT" == "1" ]]; then
+        ok "   (Verify mode: none) Claude sẽ tự review."
+      else
+        ok "   (Verify mode: none) Tiếp theo: mở Claude → gõ review."
+      fi
       exit 0
     fi
     if [[ "$VERIFY_AGENT" == "claude" ]]; then
-      ok "   Verify $mode giao cho Claude. Tiếp theo: mở Claude → /clear → gõ verify (Claude verify + review luôn)."
+      if [[ "$AUTOPILOT" == "1" ]]; then
+        ok "   Đã xong, Claude sẽ tự verify ($mode) + review."
+      else
+        ok "   Verify $mode giao cho Claude. Tiếp theo: mở Claude → /clear → gõ verify (Claude verify + review luôn)."
+      fi
       exit 0
     fi
     set +e; verify "$mode"; rc=$?; set -e

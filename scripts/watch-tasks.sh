@@ -50,7 +50,7 @@ while true; do
     notify "Giao task lỗi" "Không thấy file $task"
   else
     set_status "$task" running
-    if scripts/run-task.sh "$task"; then
+    if AUTOPILOT=1 scripts/run-task.sh "$task"; then
       set_status "$task" done
       notify "OpenCode đã xong ✅" "$(basename "$task") — Claude tiếp tục"
     else
