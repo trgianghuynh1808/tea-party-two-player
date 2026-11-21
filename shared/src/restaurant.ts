@@ -281,8 +281,12 @@ export function describeKitchenItem(item: string): string {
 // The kitchen hugs the edges so the middle of the room stays open as the dining area:
 // - Crate row: all 21 ingredient crates in one horizontal line under the back wall (y = TOP_Y) —
 //   cooking ingredients first, then the shared ones, then the drink ones.
-// - Machine columns: the cookers stacked vertically along the left and right edges (from y = 270,
-//   70px apart), so every machine is reached from the open middle.
+// - Left galley: the savory cookers in two parallel columns along the left edge — an outer column
+//   against the wall and an inner column beside it — each 4 rows from y = 270 with 90px pitch
+//   (60px machines, 30px gaps). A 70px aisle (x 102..172) runs between the two columns, so a player
+//   standing in it reaches both.
+// - Right column: only the drink-side machines (chop board, blender, coffee machine) stacked at
+//   x = 1340, so every machine is reached from the open middle.
 // - Bottom row: trash, plate/bowl shelves, the six handover counters, the take-away counter and the
 //   glass shelf in one horizontal line (center y = 715), leaving x 640..760 free for the door at the
 //   bottom centre.
@@ -292,12 +296,14 @@ const at = (x: number, y: number) => ({ x: RESTAURANT.x + x, y: RESTAURANT.y + y
 const TOP_Y = WALL_BOTTOM + 50;
 /** Horizontal pitch of the crate row (54px crates, so 8px gaps). */
 const CRATE_PITCH_X = 62;
-/** Local x of the two machine columns, hugging the left and right edges. */
-const LEFT_MACHINE_X = 60;
+/** Local x of the left galley's two columns: the outer column hugs the wall, the inner one sits beside it (70px aisle between). */
+const LEFT_OUTER_X = 60;
+const LEFT_INNER_X = 214;
+/** Local x of the right machine column, hugging the right edge. */
 const RIGHT_MACHINE_X = 1340;
-/** Top machine y, then the vertical pitch down each column (60px machines, 10px gaps). */
+/** Top machine y, then the vertical pitch down each column (60px machines, 30px gaps). */
 const MACHINE_TOP_Y = 270;
-const MACHINE_PITCH_Y = 70;
+const MACHINE_PITCH_Y = 90;
 /** Center y of the bottom row (the 80px-tall take-away counter sits at y = 705). */
 const BOTTOM_Y = 715;
 
@@ -344,19 +350,22 @@ const COOK_CRATES: FoodId[] = [
 const SHARED_CRATES: FoodId[] = ["milk", "strawberry"];
 /** Crate row: drink ingredients. */
 const DRINK_CRATES: FoodId[] = ["coffee", "orange", "lemon", "chocolate"];
-/** Left machine column (top to bottom): the chop board, the pans, the grill, the pots. */
-const LEFT_MACHINES: [ProcessId, number][] = [
+/** Left galley, outer column (top to bottom): the chop board, the pans, a pot. */
+const LEFT_OUTER: [ProcessId, number][] = [
   ["chop", 1],
   ["fry", 1],
   ["fry", 2],
-  ["grill", 1],
   ["boil", 1],
-  ["boil", 2],
 ];
-/** Right machine column (top to bottom): the oven, the fryer, then the drink-side machines. */
-const RIGHT_MACHINES: [ProcessId, number][] = [
+/** Left galley, inner column (top to bottom): the oven, the fryer, the grill, the second pot. */
+const LEFT_INNER: [ProcessId, number][] = [
   ["bake", 1],
   ["deepfry", 1],
+  ["grill", 1],
+  ["boil", 2],
+];
+/** Right column (top to bottom): the drink-side machines. */
+const RIGHT_MACHINES: [ProcessId, number][] = [
   ["chop", 2],
   ["blend", 1],
   ["brew", 1],
@@ -367,9 +376,12 @@ export const RESTAURANT_STATIONS: StationDef[] = [
   ...COOK_CRATES.map((f, i) => crate(f, 40 + i * CRATE_PITCH_X, TOP_Y)),
   ...SHARED_CRATES.map((f, i) => crate(f, 986 + i * CRATE_PITCH_X, TOP_Y)),
   ...DRINK_CRATES.map((f, i) => crate(f, 1126 + i * CRATE_PITCH_X, TOP_Y)),
-  // Machine columns along the left and right edges.
-  ...LEFT_MACHINES.map(([process, n], i) =>
-    cooker(process, n, LEFT_MACHINE_X, MACHINE_TOP_Y + i * MACHINE_PITCH_Y),
+  // Machine columns: the left galley's outer and inner columns, then the right drink-side column.
+  ...LEFT_OUTER.map(([process, n], i) =>
+    cooker(process, n, LEFT_OUTER_X, MACHINE_TOP_Y + i * MACHINE_PITCH_Y),
+  ),
+  ...LEFT_INNER.map(([process, n], i) =>
+    cooker(process, n, LEFT_INNER_X, MACHINE_TOP_Y + i * MACHINE_PITCH_Y),
   ),
   ...RIGHT_MACHINES.map(([process, n], i) =>
     cooker(process, n, RIGHT_MACHINE_X, MACHINE_TOP_Y + i * MACHINE_PITCH_Y),

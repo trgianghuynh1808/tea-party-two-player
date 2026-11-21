@@ -5,7 +5,7 @@ const FLOOR_DEPTH = -1000;
 const WALL_DEPTH = -900;
 const TILE_KEY = "restaurant-tile";
 /** The dining area (local px): the wooden floor in the open middle; tiles everywhere else. */
-const DINING_RECT = { left: 150, top: 230, right: 1250, bottom: 660 };
+const DINING_RECT = { left: 280, top: 230, right: 1250, bottom: 660 };
 
 /**
  * The restaurant's interior (static): tile floor all around the edges and the wooden dining room in the
