@@ -596,6 +596,13 @@ h1 {
   border-color: #d8cbb9;
 }
 
+/* Restaurant menu: dishes grouped by plate / bowl / glass */
+.menu-group {
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: #6b5b57;
+}
+
 .order .title,
 .menu-item .title {
   display: flex;

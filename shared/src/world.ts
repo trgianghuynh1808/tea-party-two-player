@@ -37,6 +37,84 @@ export const SHOP_ENTRY_SPAWN = { x: 480, y: 530 };
 /** The shop's own lot (building + front yard): nothing can be built there. */
 export const SHOP_LOT: Rect = { left: 0, top: YARD.y, right: 520, bottom: YARD.y + 440 };
 
+// ---------------------------------------------------------------- Restaurant (left of the tea shop)
+//
+// Outside, the ground goes on to the left of the build grid (x < 0): the restaurant stands there on its own lot
+// (nobody can build on it, it's outside YARD). Inside, it's a third box next to the tea shop (y above the yard),
+// bigger than the screen so the camera scrolls with the player.
+
+/** Everything outdoors players can walk on: the build grid (YARD) plus the restaurant's street on its left. */
+export const OUTDOOR = { x: -1000, y: YARD.y, width: YARD.width + 1000, height: YARD.height } as const;
+/** The restaurant seen from outside (blocks movement); its door is in the middle of the front wall. */
+export const RESTAURANT_BUILDING: Rect = { left: -900, top: YARD.y + 40, right: -340, bottom: YARD.y + 320 };
+export const RESTAURANT_DOOR_X = (RESTAURANT_BUILDING.left + RESTAURANT_BUILDING.right) / 2;
+/** Stepping on the doormat in front of the restaurant goes inside. */
+export const RESTAURANT_ENTER_ZONE: Rect = {
+  left: RESTAURANT_DOOR_X - 26,
+  top: RESTAURANT_BUILDING.bottom,
+  right: RESTAURANT_DOOR_X + 26,
+  bottom: RESTAURANT_BUILDING.bottom + 28,
+};
+/** Where a player coming out of the restaurant appears. */
+export const RESTAURANT_YARD_SPAWN = { x: RESTAURANT_DOOR_X, y: RESTAURANT_BUILDING.bottom + 70 };
+
+/**
+ * Where players appear when they join a room: outdoors on the path between the restaurant and the tea shop,
+ * so they can pick which place to open.
+ */
+export const ARRIVAL_SPAWN_POINTS = [
+  { x: (RESTAURANT_BUILDING.right + SHOP_BUILDING.left) / 2 - 40, y: YARD.y + 380 },
+  { x: (RESTAURANT_BUILDING.right + SHOP_BUILDING.left) / 2 + 40, y: YARD.y + 380 },
+];
+
+/** The restaurant's interior (world px). Its back wall is the strip of WALL_BOTTOM px at the top, like the shop's. */
+export const RESTAURANT = { x: 1400, y: 0, width: 1400, height: 760 } as const;
+/** Inside: the way out is a doormat on the bottom edge, in the dining room. */
+export const RESTAURANT_EXIT_ZONE: Rect = {
+  left: RESTAURANT.x + 1140,
+  top: RESTAURANT.y + RESTAURANT.height - 24,
+  right: RESTAURANT.x + 1220,
+  bottom: RESTAURANT.y + RESTAURANT.height,
+};
+/** Where a player walking into the restaurant appears. */
+export const RESTAURANT_ENTRY_SPAWN = { x: RESTAURANT.x + 1180, y: RESTAURANT.y + RESTAURANT.height - 70 };
+
+/** Where a position is: inside the tea shop, inside the restaurant, or outdoors. */
+export type Area = "shop" | "restaurant" | "yard";
+export function areaOf(p: { x: number; y: number }): Area {
+  if (isInYard(p)) return "yard";
+  return p.x >= RESTAURANT.x - 200 ? "restaurant" : "shop";
+}
+
+/** A door between outdoors and a building: the doormats on both sides and where you appear. */
+export interface DoorDef {
+  inside: "shop" | "restaurant";
+  enter: Rect;
+  exit: Rect;
+  insideSpawn: { x: number; y: number };
+  outsideSpawn: { x: number; y: number };
+}
+export const DOORS: DoorDef[] = [
+  { inside: "shop", enter: SHOP_ENTER_ZONE, exit: SHOP_EXIT_ZONE, insideSpawn: SHOP_ENTRY_SPAWN, outsideSpawn: YARD_SPAWN },
+  {
+    inside: "restaurant",
+    enter: RESTAURANT_ENTER_ZONE,
+    exit: RESTAURANT_EXIT_ZONE,
+    insideSpawn: RESTAURANT_ENTRY_SPAWN,
+    outsideSpawn: RESTAURANT_YARD_SPAWN,
+  },
+];
+
+/** The door whose doormat (outside, or inside) is under `p` (with `margin` px of slack). */
+export function doorAt(p: { x: number; y: number }, margin = 0): { door: DoorDef; outside: boolean } | undefined {
+  const area = areaOf(p);
+  for (const door of DOORS) {
+    if (area === "yard" && inRect(p, door.enter, margin)) return { door, outside: true };
+    if (area === door.inside && inRect(p, door.exit, margin)) return { door, outside: false };
+  }
+  return undefined;
+}
+
 export const inRect = (p: { x: number; y: number }, r: Rect, margin = 0) =>
   p.x >= r.left - margin && p.x <= r.right + margin && p.y >= r.top - margin && p.y <= r.bottom + margin;
 

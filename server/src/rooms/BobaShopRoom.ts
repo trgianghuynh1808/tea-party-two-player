@@ -1,13 +1,13 @@
 import { Room, ServerError, type Client, type Deferred } from "colyseus";
 import {
-  DRINKS,
+  ALL_STATIONS,
+  BURN_SECONDS,
+  BURNT_ITEM,
   EMPTY_CUP,
   EMPTY_HAND,
   FAST_SERVICE_TIP,
   GamePhase,
   JoinError,
-  SHIFT_SECONDS,
-  MAX_ACTIVE_ORDERS,
   MAX_PLAYERS,
   CustomerKind,
   GROUP_EXTRA_TIME_PER_DRINK,
@@ -16,11 +16,12 @@ import {
   PICKY_FAST_BONUS,
   VIP_DURATION_SECONDS,
   VIP_PRICE_MULTIPLIER,
-  baseOrderDuration,
   comboBonusRate,
   getCustomer,
+  getMenuItem,
+  getVenue,
+  isVenue,
   orderDrinkIds,
-  orderSpawnInterval,
   pendingDrinkIds,
   pendingDrinksAt,
   pendingOrderDrinkIds,
@@ -33,7 +34,10 @@ import {
   CHARACTERS,
   RECONNECT_GRACE_SECONDS,
   REPLACED_CLOSE_CODE,
-  STATIONS,
+  PROCESSES,
+  RESTAURANT_FURNITURE,
+  RESTAURANT_SPAWN_POINTS,
+  ARRIVAL_SPAWN_POINTS,
   ServerEvents,
   StationType,
   defaultCharacterOf,
@@ -49,23 +53,29 @@ import {
   bedSpots,
   bedExitPoint,
   findBedSpot,
+  allFurniture,
+  areaOf,
+  doorAt,
+  isProcess,
+  makeFood,
+  venueMenu,
+  venueOrderDuration,
+  venueSpawnInterval,
   type BedSpot,
   PLAYER_SPEED,
   resolveCollisions,
   cupContents,
-  getDrink,
   makeCup,
   PLAYER_RADIUS,
-  SHOP_ENTER_ZONE,
-  SHOP_ENTRY_SPAWN,
-  SHOP_EXIT_ZONE,
-  YARD_SPAWN,
   cellRect,
+  foodKey,
   inRect,
   isInYard,
   type BuildTilesMessage,
   type DeliveredEvent,
-  type DrinkDef,
+  type MenuItem,
+  type StartShiftMessage,
+  type Venue,
   type MachineOverflowEvent,
   type OrderExpiredEvent,
   type JoinOptions,
@@ -77,12 +87,13 @@ import { openShop, shopOf, type Piece, type SharedShop, type ShopEvent } from ".
 
 const FIRST_ORDER_DELAY_SECONDS = 2;
 /** Override shift length for quick testing, e.g. SHIFT_SECONDS=20 npm run dev. */
-const SHIFT_DURATION = Number(process.env.SHIFT_SECONDS) || SHIFT_SECONDS;
+const shiftDuration = (venue: string) => Number(process.env.SHIFT_SECONDS) || getVenue(venue).shiftSeconds;
 const DELIVERY_CLEAR_SECONDS = 0.8;
 const SPAWN_POINTS = [
   { x: 300, y: 400 },
   { x: 500, y: 400 },
 ];
+const spawnPoints = (venue: string) => (venue === "restaurant" ? RESTAURANT_SPAWN_POINTS : SPAWN_POINTS);
 
 /**
  * Movement anti-teleport: each player earns travel budget at PLAYER_SPEED * MOVE_BUDGET_SLACK per second,
@@ -180,8 +191,8 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
       const player = this.state.players.get(client.sessionId);
       if (player?.bedId) this.getUp(client.sessionId, player);
     },
-    start_shift: () => {
-      if (this.state.phase !== GamePhase.Playing) this.startShift();
+    start_shift: (_client: Client, payload?: StartShiftMessage) => {
+      if (this.state.phase !== GamePhase.Playing) this.startShift(isVenue(payload?.venue) ? payload.venue : "shop");
     },
   };
 
@@ -200,7 +211,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     this.state.roomName = normalizeRoomTitle(options.roomName, `Phòng của ${host}`);
     this.updateListing();
 
-    for (const def of STATIONS) {
+    for (const def of ALL_STATIONS) {
       const station = new Station();
       station.id = def.id;
       station.type = def.type;
@@ -324,7 +335,8 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
   private createPlayer(options: Partial<JoinOptions>): Player {
     const usedColors = new Set([...this.state.players.values()].map((p) => p.colorIndex));
     const colorIndex = usedColors.has(0) ? 1 : 0;
-    const spawn = SPAWN_POINTS[colorIndex];
+    // New players start outdoors, between the two places they can open.
+    const spawn = ARRIVAL_SPAWN_POINTS[colorIndex];
     const player = new Player();
     player.x = spawn.x;
     player.y = spawn.y;
@@ -481,14 +493,16 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
   }
 
   /** Reset the kitchen and start a new timed shift. Players' wallets are kept. */
-  private startShift() {
+  private startShift(venue: Venue) {
+    this.state.venue = venue;
     this.state.orders.clear();
     this.seatCooldowns.clear();
     this.state.stations.forEach((station) => this.clearStation(station));
     this.deliveryTimers.clear();
 
     this.state.players.forEach((player, sessionId) => {
-      const spawn = SPAWN_POINTS[player.colorIndex] ?? SPAWN_POINTS[0];
+      const spawns = spawnPoints(venue);
+      const spawn = spawns[player.colorIndex] ?? spawns[0];
       player.x = spawn.x;
       player.y = spawn.y;
       player.teleportSeq++;
@@ -503,7 +517,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     this.state.missedCount = 0;
     this.state.combo = 0;
     this.state.bestCombo = 0;
-    this.state.shiftTimeLeft = SHIFT_DURATION;
+    this.state.shiftTimeLeft = shiftDuration(venue);
     this.orderSpawnTimer = FIRST_ORDER_DELAY_SECONDS;
     this.state.phase = GamePhase.Playing;
   }
@@ -540,7 +554,8 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
    * During a shift, a finished cup left on the machine spills after MACHINE_OVERFLOW_SECONDS.
    */
   private updateMachines(dt: number) {
-    for (const def of STATIONS) {
+    this.updateCookers(dt);
+    for (const def of ALL_STATIONS) {
       if (def.type !== StationType.Machine || !def.ingredient || !def.processSeconds) continue;
       const station = this.state.stations.get(def.id);
       if (!station || station.item === EMPTY_HAND) continue;
@@ -561,6 +576,35 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     }
   }
 
+  /**
+   * Restaurant cookers: the placed ingredient gets the cooker's method when progress reaches 1. Hot cookers
+   * then burn it if nobody takes it within BURN_SECONDS during a shift (it stays there as burnt food).
+   */
+  private updateCookers(dt: number) {
+    for (const def of ALL_STATIONS) {
+      if (def.type !== StationType.Cooker || !def.process || !isProcess(def.process)) continue;
+      const station = this.state.stations.get(def.id);
+      const key = station && foodKey(station.item);
+      if (!station || key === undefined || station.item === BURNT_ITEM) continue;
+      const process = PROCESSES[def.process];
+
+      if (station.progress < 1) {
+        station.progress = Math.min(1, station.progress + dt / process.seconds);
+        if (station.progress >= 1) station.item = makeFood(`${key}.${def.process}`);
+        continue;
+      }
+
+      if (!process.burns || this.state.phase !== GamePhase.Playing) continue;
+      station.overflow = Math.min(1, station.overflow + dt / BURN_SECONDS);
+      if (station.overflow >= 1) {
+        station.item = BURNT_ITEM;
+        station.overflow = 0;
+        const event: MachineOverflowEvent = { machine: def.label, burnt: true };
+        this.broadcast(ServerEvents.MachineOverflow, event);
+      }
+    }
+  }
+
   private clearStation(station: Station) {
     station.item = EMPTY_HAND;
     station.progress = 0;
@@ -569,7 +613,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
 
   /** Fraction of the current shift already played (0..1). */
   private shiftProgress() {
-    return 1 - this.state.shiftTimeLeft / SHIFT_DURATION;
+    return 1 - this.state.shiftTimeLeft / shiftDuration(this.state.venue);
   }
 
   private updateOrders(dt: number) {
@@ -592,8 +636,9 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     this.orderSpawnTimer -= dt;
     if (this.orderSpawnTimer <= 0) {
       const progress = this.shiftProgress();
-      this.orderSpawnTimer = orderSpawnInterval(progress);
-      if (this.state.orders.length < MAX_ACTIVE_ORDERS) {
+      const venue = getVenue(this.state.venue);
+      this.orderSpawnTimer = venueSpawnInterval(venue.id, progress);
+      if (this.state.orders.length < venue.maxOrders) {
         const order = this.createOrder(progress);
         if (order) this.state.orders.push(order);
         // Every seat is taken: the next customer comes as soon as one frees up.
@@ -613,7 +658,8 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
    * `hasSeating` = false when the shop has no seat next to a table at all: customers then order take-away at the counter.
    */
   private freeSeating(): { hasSeating: boolean; free: Map<string, string[]> } {
-    const seatTable = seatTableMap(this.state.decorations);
+    // Tea shop: the host's furniture. Restaurant: its own dining room.
+    const seatTable = seatTableMap(this.state.venue === "restaurant" ? RESTAURANT_FURNITURE : this.state.decorations);
     const taken = new Set(this.seatCooldowns.keys());
     for (const o of this.state.orders) for (const id of o.seats ? o.seats.split(",") : []) taken.add(id);
     const free = new Map<string, string[]>();
@@ -627,7 +673,8 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
   /** A new customer (or group) walks in; undefined when there is no free seat for them. */
   private createOrder(progress: number): Order | undefined {
     let kind = pickCustomerKind(progress);
-    const randomDrink = () => DRINKS[Math.floor(Math.random() * DRINKS.length)].id;
+    const menu = venueMenu(this.state.venue, progress);
+    const randomDrink = () => menu[Math.floor(Math.random() * menu.length)].id;
     let count = kind === CustomerKind.Group ? (progress >= 0.6 && Math.random() < 0.5 ? 3 : 2) : 1;
 
     // A group sits together at one table: fewer friends come if no table has room for all of them.
@@ -650,7 +697,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
       seats = spot.seats;
     }
 
-    const base = baseOrderDuration(progress);
+    const base = venueOrderDuration(this.state.venue, progress);
     const duration =
       kind === CustomerKind.Vip ? VIP_DURATION_SECONDS : Math.round(base * (1 + GROUP_EXTRA_TIME_PER_DRINK * (count - 1)));
 
@@ -675,7 +722,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
 
     const drinks = orderDrinkIds(order.drinks);
     const customer = getCustomer(order.kind);
-    const drinkLabel = drinks.length === 1 ? (getDrink(drinks[0])?.name ?? drinks[0]) : `${drinks.length} món`;
+    const drinkLabel = drinks.length === 1 ? (getMenuItem(drinks[0])?.name ?? drinks[0]) : `${drinks.length} món`;
     const event: OrderExpiredEvent = {
       label: order.kind === CustomerKind.Normal ? drinkLabel : `${customer.label}: ${drinkLabel}`,
       penalty: MISSED_ORDER_PENALTY,
@@ -714,8 +761,8 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     }
     move.budget -= dist;
 
-    // Positions only change area through the door (server teleport), never by walking.
-    if (isInYard({ y }) !== isInYard(player)) {
+    // Positions only change area through a door (server teleport), never by walking.
+    if (areaOf({ x, y }) !== areaOf(player)) {
       player.teleportSeq++;
       return;
     }
@@ -767,14 +814,15 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     });
   }
 
-  /** Through the shop's door: from the doormat outside to inside, or from the exit inside to the yard. */
+  /** Through a door (tea shop or restaurant): from the doormat outside to inside, or from the exit inside to the yard. */
   private handleUseDoor(client: Client) {
     const player = this.state.players.get(client.sessionId);
     if (!player) return;
     // A little slack: the client reports positions every 50 ms.
-    const outside = isInYard(player);
-    if (!inRect(player, outside ? SHOP_ENTER_ZONE : SHOP_EXIT_ZONE, 24)) return;
-    const spawn = outside ? SHOP_ENTRY_SPAWN : YARD_SPAWN;
+    const at = doorAt(player, 24);
+    if (!at) return;
+    const outside = at.outside;
+    const spawn = outside ? at.door.insideSpawn : at.door.outsideSpawn;
     player.bedId = "";
     player.x = spawn.x;
     player.y = spawn.y;
@@ -811,7 +859,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     // In bed: the action key gets up.
     if (player.bedId) return this.getUp(client.sessionId, player);
     const orders = this.state.orders;
-    const target = findInteractTarget(player, tablesWaiting(this.state.decorations, orders), bedSpots(this.state.decorations, this.state.tiles.entries()));
+    const target = findInteractTarget(player, tablesWaiting(allFurniture(this.state.decorations), orders), bedSpots(this.state.decorations, this.state.tiles.entries()));
     if (!target) return fail("Không có quầy nào gần đây");
 
     if (target.type === "bed") {
@@ -829,7 +877,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
       const tableId = target.table.id;
       const plan = planServeTable({ phase: this.state.phase, held: player.heldItem, orderedDrinkIds: pendingDrinksAt(orders, tableId) });
       if (!plan.ok) return fail(plan.reason);
-      if (plan.kind === "deliver") this.deliver(client, player, plan.drink, tableId);
+      if (plan.kind === "deliver") this.deliver(client, player, plan.item, tableId);
       return;
     }
 
@@ -871,16 +919,25 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
       case "trash":
         player.heldItem = EMPTY_HAND;
         return;
+      case "set":
+        // Restaurant kitchen: the plan says what ends up in hand and on the station.
+        player.heldItem = plan.held;
+        if (plan.station !== station.item || plan.start) {
+          station.item = plan.station;
+          station.progress = 0;
+          station.overflow = 0;
+        }
+        return;
       case "deliver":
         // The cup stays on the counter for a moment (take-away).
         station.item = player.heldItem;
         this.deliveryTimers.set(station.id, DELIVERY_CLEAR_SECONDS);
-        return this.deliver(client, player, plan.drink, "");
+        return this.deliver(client, player, plan.item, "");
     }
   }
 
   /** Serve a drink to an order at `tableId` ("" = take-away at the counter). */
-  private deliver(client: Client, player: Player, drink: DrinkDef, tableId: string) {
+  private deliver(client: Client, player: Player, drink: MenuItem, tableId: string) {
     // Serve the most urgent order there still waiting for this drink (the plan already checked one exists).
     let index = -1;
     this.state.orders.forEach((o, i) => {
@@ -910,7 +967,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
   /** Whole order delivered: compute the pay (customer rules + fast tip + combo) and add it. */
   private payOrder(order: Order, drinks: string[]): { amount: number; notes: string[] } {
     const notes: string[] = [];
-    const base = drinks.reduce((sum, id) => sum + (getDrink(id)?.price ?? 0), 0);
+    const base = drinks.reduce((sum, id) => sum + (getMenuItem(id)?.price ?? 0), 0);
     const fast = order.timeLeft > order.duration / 2;
     let amount = base;
 

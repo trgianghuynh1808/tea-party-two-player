@@ -20,6 +20,11 @@ export * from "./characters";
 
 export * from "./menu";
 import { STATIONS, WALL_BOTTOM, type StationDef } from "./menu";
+/** The restaurant's kitchen, menu and dining room; venue rules (tea shop / restaurant). */
+export * from "./restaurant";
+export * from "./venues";
+import { RESTAURANT_FURNITURE, RESTAURANT_STATIONS } from "./restaurant";
+import type { Venue } from "./venues";
 
 // Message payloads (client -> server)
 /**
@@ -43,6 +48,7 @@ export const Messages = {
   BuyDecoration: "buy_decoration",
   MoveDecoration: "move_decoration",
   SellDecoration: "sell_decoration",
+  /** Open a shift: StartShiftMessage (which venue). */
   StartShift: "start_shift",
   /** Go through the shop's door (inside <-> yard). The player must stand in the door zone. */
   UseDoor: "use_door",
@@ -51,6 +57,10 @@ export const Messages = {
   /** Get out of bed (sent when a player lying down tries to walk). */
   LeaveBed: "leave_bed",
 } as const;
+
+export interface StartShiftMessage {
+  venue: Venue;
+}
 
 export interface BuildTilesMessage {
   /** Tile kind (see BUILD_TILES) or ERASE_TOOL. */
@@ -89,18 +99,23 @@ export interface OrderExpiredEvent {
 
 export interface MachineOverflowEvent {
   machine: string;
+  /** Restaurant: the food burnt (it stays on the cooker as burnt food) instead of a cup spilling. */
+  burnt?: boolean;
 }
 
 export * from "./decor";
 export * from "./world";
 import {
   BUILD_TILE,
+  OUTDOOR,
   PROP_ART_DROP,
+  RESTAURANT,
+  RESTAURANT_BUILDING,
   SHOP_BUILDING,
   YARD,
+  areaOf,
   blockingRects,
   getBuildTile,
-  isInYard,
   parseTileKey,
   propAnchor,
   tileKey,
@@ -156,25 +171,40 @@ function pushOutOfRect(x: number, y: number, rLeft: number, rTop: number, rRight
   return { x: x + (ox / dist) * push, y: y + (oy / dist) * push };
 }
 
-/** Push a player circle out of stations (inside) or the shop building and built walls (yard), and clamp it inside its area. */
+/** Stations of the room a position is in (none outdoors). */
+export function stationsAt(p: Vec2): StationDef[] {
+  const area = areaOf(p);
+  return area === "shop" ? STATIONS : area === "restaurant" ? RESTAURANT_STATIONS : [];
+}
+
+/** Every station of both venues (the server keeps one synced Station per entry). */
+export const ALL_STATIONS: StationDef[] = [...STATIONS, ...RESTAURANT_STATIONS];
+
+/** The host's furniture plus the restaurant's fixed tables and chairs (where customers can sit). */
+export function allFurniture<T extends PlacedDecoration>(decorations: Iterable<T>): (T | PlacedDecoration)[] {
+  return [...decorations, ...RESTAURANT_FURNITURE];
+}
+
+/** Push a player circle out of stations (inside) or the buildings and built walls (outdoors), and clamp it inside its area. */
 export function resolveCollisions(pos: Vec2, tiles?: TileGetter): Vec2 {
-  if (isInYard(pos)) return resolveYardCollisions(pos, tiles);
+  const area = areaOf(pos);
+  if (area === "yard") return resolveYardCollisions(pos, tiles);
   let { x, y } = pos;
 
-  for (const s of STATIONS) {
+  for (const s of area === "shop" ? STATIONS : RESTAURANT_STATIONS) {
     ({ x, y } = pushOutOfRect(x, y, s.x - s.width / 2, s.y - s.height / 2, s.x + s.width / 2, s.y + s.height / 2));
   }
 
-  x = Math.max(PLAYER_RADIUS, Math.min(WORLD_WIDTH - PLAYER_RADIUS, x));
   // Players can't walk up the back wall (their feet stay on the floor).
-  y = Math.max(WALL_BOTTOM, Math.min(WORLD_HEIGHT - PLAYER_RADIUS, y));
+  const box = area === "shop" ? { x: 0, y: 0, width: WORLD_WIDTH, height: WORLD_HEIGHT } : RESTAURANT;
+  x = Math.max(box.x + PLAYER_RADIUS, Math.min(box.x + box.width - PLAYER_RADIUS, x));
+  y = Math.max(box.y + WALL_BOTTOM, Math.min(box.y + box.height - PLAYER_RADIUS, y));
   return { x, y };
 }
 
 function resolveYardCollisions(pos: Vec2, tiles?: TileGetter): Vec2 {
   let { x, y } = pos;
-  const b = SHOP_BUILDING;
-  ({ x, y } = pushOutOfRect(x, y, b.left, b.top, b.right, b.bottom));
+  for (const b of [SHOP_BUILDING, RESTAURANT_BUILDING]) ({ x, y } = pushOutOfRect(x, y, b.left, b.top, b.right, b.bottom));
   if (tiles) {
     // Only the cells the player circle can touch.
     const c0 = Math.floor((x - PLAYER_RADIUS - YARD.x) / BUILD_TILE);
@@ -187,8 +217,8 @@ function resolveYardCollisions(pos: Vec2, tiles?: TileGetter): Vec2 {
       }
     }
   }
-  x = Math.max(YARD.x + PLAYER_RADIUS, Math.min(YARD.x + YARD.width - PLAYER_RADIUS, x));
-  y = Math.max(YARD.y + PLAYER_RADIUS, Math.min(YARD.y + YARD.height - PLAYER_RADIUS, y));
+  x = Math.max(OUTDOOR.x + PLAYER_RADIUS, Math.min(OUTDOOR.x + OUTDOOR.width - PLAYER_RADIUS, x));
+  y = Math.max(OUTDOOR.y + PLAYER_RADIUS, Math.min(OUTDOOR.y + OUTDOOR.height - PLAYER_RADIUS, y));
   return { x, y };
 }
 
@@ -209,7 +239,7 @@ export function distanceToStation(p: Vec2, s: StationDef): number {
 export function findNearestStationDef(p: Vec2): StationDef | undefined {
   let best: StationDef | undefined;
   let bestDist = INTERACT_RANGE;
-  for (const def of STATIONS) {
+  for (const def of stationsAt(p)) {
     const d = distanceToStation(p, def);
     if (d <= bestDist) {
       bestDist = d;
@@ -303,7 +333,7 @@ export function bedExitPoint(bed: BedSpot, tiles?: TileGetter): Vec2 {
 export function findInteractTarget(p: Vec2, tables: Iterable<PlacedDecoration>, beds: Iterable<BedSpot> = []): InteractTarget | undefined {
   let best: InteractTarget | undefined;
   let bestDist = INTERACT_RANGE;
-  for (const def of STATIONS) {
+  for (const def of stationsAt(p)) {
     const d = distanceToStation(p, def);
     if (d <= bestDist) {
       bestDist = d;

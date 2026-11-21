@@ -1,16 +1,25 @@
 import { Callbacks, type Room } from "@colyseus/sdk";
 import {
+  CONTAINERS,
   CustomerKind,
+  DISHES,
   DRINKS,
+  FOODS,
   INGREDIENTS,
   ORDER_DANGER_RATIO,
+  PROCESSES,
   VIP_PRICE_MULTIPLIER,
   getCustomer,
+  getDish,
   getDrink,
+  getMenuItem,
   isDrinkServed,
   orderDrinkIds,
-  type DrinkDef,
+  parseFood,
+  type ContainerId,
   type IngredientId,
+  type MenuItem,
+  type Venue,
 } from "@boba/shared";
 import type { BobaShopState, Order } from "@boba/shared/schema";
 
@@ -24,34 +33,76 @@ function chipTextColor(color: number): string {
   return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? "#3d2c29" : "#ffffff";
 }
 
-function recipeSteps(drink: DrinkDef): HTMLElement {
+function chip(text: string, color: number): HTMLElement {
+  const el = document.createElement("span");
+  el.className = "chip";
+  el.textContent = text;
+  el.style.background = hex(color);
+  el.style.color = chipTextColor(color);
+  return el;
+}
+
+const separator = (text: string) => Object.assign(document.createElement("span"), { className: "arrow", textContent: text });
+
+/** Tea shop: ingredients in order (→). Restaurant: the container, then each part with its cooking steps (+, any order). */
+function recipeSteps(item: MenuItem): HTMLElement {
   const steps = document.createElement("div");
   steps.className = "steps";
-  drink.steps.forEach((id: IngredientId, i) => {
-    if (i > 0) steps.append(Object.assign(document.createElement("span"), { className: "arrow", textContent: "→" }));
-    const ing = INGREDIENTS[id];
-    const chip = document.createElement("span");
-    chip.className = "chip";
-    chip.textContent = ing.label;
-    chip.style.background = hex(ing.color);
-    chip.style.color = chipTextColor(ing.color);
-    steps.append(chip);
+  const drink = getDrink(item.id);
+  if (drink) {
+    drink.steps.forEach((id: IngredientId, i) => {
+      if (i > 0) steps.append(separator("→"));
+      steps.append(chip(INGREDIENTS[id].label, INGREDIENTS[id].color));
+    });
+    return steps;
+  }
+  const dish = getDish(item.id);
+  if (!dish) return steps;
+  steps.append(chip(CONTAINERS[dish.container].label, 0xe9e4dc), separator(":"));
+  dish.parts.forEach((part, i) => {
+    const parsed = parseFood(part);
+    if (!parsed) return;
+    if (i > 0) steps.append(separator("+"));
+    const how = parsed.steps.map((step) => PROCESSES[step].icon).join("");
+    steps.append(chip(`${FOODS[parsed.food].label}${how ? " " + how : ""}`, FOODS[parsed.food].color));
   });
   return steps;
 }
 
-/** All drinks with their recipes (static). Used inline in the side panel and in the 📋 modal on phones. */
-export function buildMenu(): HTMLElement {
+function menuEntry(item: MenuItem): HTMLElement {
+  const el = Object.assign(document.createElement("div"), { className: "menu-item" });
+  const title = Object.assign(document.createElement("div"), { className: "title" });
+  title.append(
+    Object.assign(document.createElement("span"), { textContent: item.name }),
+    Object.assign(document.createElement("span"), { className: "price", textContent: `$${item.price}` }),
+  );
+  el.append(title, recipeSteps(item));
+  return el;
+}
+
+const CONTAINER_TITLES: Record<ContainerId, string> = { plate: "🍽️ Món đĩa", bowl: "🥣 Món tô", glass: "🥤 Đồ uống" };
+
+/**
+ * The venue's menu with recipes (static). Used inline in the side panel and in the 📋 modal on phones.
+ * Restaurant: a legend of the cooking methods, then the dishes grouped by container.
+ */
+export function buildMenu(venue: Venue = "shop"): HTMLElement {
   const menu = Object.assign(document.createElement("div"), { className: "menu" });
-  for (const drink of DRINKS) {
-    const item = Object.assign(document.createElement("div"), { className: "menu-item" });
-    const title = Object.assign(document.createElement("div"), { className: "title" });
-    title.append(
-      Object.assign(document.createElement("span"), { textContent: drink.name }),
-      Object.assign(document.createElement("span"), { className: "price", textContent: `$${drink.price}` }),
-    );
-    item.append(title, recipeSteps(drink));
-    menu.append(item);
+  if (venue === "shop") {
+    for (const drink of DRINKS) menu.append(menuEntry(drink));
+    return menu;
+  }
+  const legend = Object.assign(document.createElement("p"), {
+    className: "hint",
+    textContent:
+      Object.values(PROCESSES)
+        .map((p) => `${p.icon} ${p.station}`)
+        .join(" · ") + ". Lấy đĩa / tô / ly ở kệ, gom đủ phần (thứ tự nào cũng được) rồi mang ra.",
+  });
+  menu.append(legend);
+  for (const container of Object.keys(CONTAINERS) as ContainerId[]) {
+    menu.append(Object.assign(document.createElement("h3"), { className: "menu-group", textContent: CONTAINER_TITLES[container] }));
+    for (const dish of DISHES) if (dish.container === container) menu.append(menuEntry(dish));
   }
   return menu;
 }
@@ -85,8 +136,8 @@ export class OrdersPanel {
 
   private addOrder($: ReturnType<typeof Callbacks.get<BobaShopState>>, order: Order) {
     const drinks = orderDrinkIds(order.drinks)
-      .map((id) => getDrink(id))
-      .filter((d): d is DrinkDef => !!d);
+      .map((id) => getMenuItem(id))
+      .filter((d): d is MenuItem => !!d);
     if (!drinks.length) return;
     const kind = order.kind as CustomerKind;
     const customer = getCustomer(kind);

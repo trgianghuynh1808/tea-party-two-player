@@ -47,7 +47,7 @@ export class Decoration extends Schema {
 export class Order extends Schema {
   @type("string") id: string = "";
   @type("string") kind: string = "normal"; // see CustomerKind in @boba/shared
-  @type("string") drinks: string = ""; // comma-separated drink ids (see DRINKS / orderDrinkIds)
+  @type("string") drinks: string = ""; // comma-separated menu ids: drinks or dishes (see getMenuItem / orderDrinkIds)
   @type("number") servedMask: number = 0; // bit i set = drink i already delivered
   @type("number") timeLeft: number = 0; // seconds
   @type("number") duration: number = 0; // seconds
@@ -73,6 +73,8 @@ export class BobaShopState extends Schema {
 
   // Shift (round) state
   @type("string") phase: string = "waiting"; // see GamePhase in @boba/shared
+  /** Where the current / last shift is played: "shop" (tea shop) or "restaurant" (see Venue in @boba/shared). */
+  @type("string") venue: string = "shop";
   @type("number") shiftTimeLeft: number = 0; // seconds
   @type("number") shiftEarnings: number = 0;
   @type("number") servedCount: number = 0;

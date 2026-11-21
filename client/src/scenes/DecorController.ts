@@ -97,6 +97,17 @@ function buildDecorVisual(
   return { objects: [shape], width: size.width, halfHeight: size.height / 2, hasArt: false };
 }
 
+/**
+ * Fixed furniture that isn't part of anyone's decorations (the restaurant's dining room): drawn like a placed
+ * piece, depth-sorted by its position like the rest of the furniture.
+ */
+export function addStaticDecoration(scene: Phaser.Scene, piece: { kind: string; x: number; y: number; rotation?: number }) {
+  const def = getDecorationDef(piece.kind);
+  if (!def) return undefined;
+  const visual = buildDecorVisual(scene, def, normalizeRotation(def, piece.rotation));
+  return scene.add.container(piece.x, piece.y, visual.objects).setDepth(piece.y);
+}
+
 /** Breeze from an air conditioner: a few soft wavy strokes drifting down from its vent and fading out. */
 const BREEZE_STROKES = 3;
 const BREEZE_DRIFT = 22; // px travelled downwards per puff

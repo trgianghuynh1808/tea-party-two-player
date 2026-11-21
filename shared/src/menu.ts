@@ -27,10 +27,14 @@ export const INGREDIENTS: Record<IngredientId, IngredientDef> = {
 
 // ---------------------------------------------------------------- Drinks
 
-export interface DrinkDef {
+/** Anything a customer can order (tea shop drinks, restaurant dishes): see getMenuItem. */
+export interface MenuItem {
   id: string;
   name: string;
   price: number;
+}
+
+export interface DrinkDef extends MenuItem {
   steps: IngredientId[]; // ordered recipe
   color: number; // cup color when finished
 }
@@ -54,6 +58,13 @@ export enum StationType {
   Trash = "trash",
   /** Empty counter: put a cup down / pick it up, e.g. to hand it to your teammate. */
   Counter = "counter",
+  // Restaurant kitchen (see restaurant.ts)
+  /** Ingredient crate: take one raw ingredient. */
+  Crate = "crate",
+  /** Cooking appliance (board, pan, pot, oven...): processes one ingredient over time. */
+  Cooker = "cooker",
+  /** Stack of plates / bowls / glasses. */
+  Shelf = "shelf",
 }
 
 export interface StationDef {
@@ -69,6 +80,12 @@ export interface StationDef {
   ingredient?: IngredientId;
   /** Machines only: 0 = instant; > 0 = cup is placed on the machine and must be picked up when done. */
   processSeconds?: number;
+  /** Restaurant crates: ingredient handed out (FoodId). */
+  food?: string;
+  /** Restaurant cookers: cooking method (ProcessId); timing comes from PROCESSES. */
+  process?: string;
+  /** Restaurant shelves: container handed out (ContainerId). */
+  container?: string;
 }
 
 /**

@@ -4,14 +4,17 @@ import {
   BUILD_TILE,
   BUILD_TILES,
   CONNECT,
+  OUTDOOR,
   PROP_ART_DROP,
   PROP_SCALE,
+  RESTAURANT_BUILDING,
+  RESTAURANT_DOOR_X,
+  RESTAURANT_ENTER_ZONE,
   SHOP_BUILDING,
   SHOP_DOOR_X,
   SHOP_ENTER_ZONE,
   SHOP_LOT,
   WALL_THICKNESS,
-  YARD,
   cellRect,
   connectMask,
   floorAt,
@@ -125,9 +128,11 @@ export class YardView {
     for (const key of scene.textures.getTextureKeys()) {
       if (key.startsWith("build-")) scene.textures.get(key).setFilter(Phaser.Textures.FilterMode.NEAREST);
     }
-    scene.add.tileSprite(YARD.x, YARD.y, YARD.width, YARD.height, GRASS_KEY).setOrigin(0).setDepth(GROUND_DEPTH);
+    scene.add.tileSprite(OUTDOOR.x, OUTDOOR.y, OUTDOOR.width, OUTDOOR.height, GRASS_KEY).setOrigin(0).setDepth(GROUND_DEPTH);
     this.drawShopLot();
     this.drawShopFront();
+    this.drawRestaurantLot();
+    this.drawRestaurantFront();
 
     // A change also changes how the neighbours connect (walls) or trim their floor: redraw the 3x3 block.
     const $ = Callbacks.get(room);
@@ -262,6 +267,119 @@ export class YardView {
       })
       .setOrigin(0.5)
       .setDepth(FLOOR_DEPTH + 1);
+  }
+
+  // ---------------------------------------------------------------- The restaurant, left of the shop
+
+  /** Paved square in front of the restaurant and a path over to the shop's front yard. */
+  private drawRestaurantLot() {
+    const b = RESTAURANT_BUILDING;
+    const g = this.scene.add.graphics().setDepth(FLOOR_DEPTH - 10);
+    const top = b.bottom - 10;
+    const pathY = SHOP_LOT.bottom - 90;
+    // Stone square in front of the door, then a path to the shop's lot.
+    g.fillStyle(0xd8d2c4).fillRoundedRect(b.left - 20, top, b.right - b.left + 40, 150, 16);
+    g.fillStyle(0xcbb08a).fillRect(b.right + 20, pathY, SHOP_LOT.left - b.right + 10, 56);
+    g.lineStyle(1, 0xb5ad9c, 0.8);
+    for (let x = b.left - 4; x < b.right + 20; x += 28) g.lineBetween(x, top + 6, x, top + 144);
+    for (let y = top + 24; y < top + 150; y += 28) g.lineBetween(b.left - 16, y, b.right + 16, y);
+    g.lineStyle(2, 0xa39a87, 0.8).strokeRoundedRect(b.left - 20, top, b.right - b.left + 40, 150, 16);
+    // Signpost on the shop's side pointing to the restaurant.
+    this.scene.add
+      .text(SHOP_LOT.left + 30, pathY - 22, "⬅ 🍽️ Nhà hàng", {
+        fontFamily: "sans-serif",
+        fontSize: "15px",
+        fontStyle: "bold",
+        color: "#3d2c29",
+        backgroundColor: "#fdf6ecd9",
+        padding: { x: 6, y: 3 },
+      })
+      .setOrigin(0, 0.5)
+      .setDepth(FLOOR_DEPTH + 1);
+  }
+
+  private drawRestaurantFront() {
+    const b = RESTAURANT_BUILDING;
+    const w = b.right - b.left;
+    const roofBottom = b.top + 96;
+    const g = this.scene.add.graphics().setDepth(b.bottom);
+    const door = RESTAURANT_DOOR_X;
+
+    // Brick facade.
+    g.fillStyle(0xb5654a).fillRect(b.left, roofBottom, w, b.bottom - roofBottom);
+    g.lineStyle(1, 0x8d4a35, 0.7);
+    for (let y = roofBottom + 12, row = 0; y < b.bottom - 12; y += 12, row++) {
+      g.lineBetween(b.left, y, b.right, y);
+      for (let x = b.left + (row % 2) * 16; x < b.right; x += 32) g.lineBetween(x, y, x, y + 12);
+    }
+    g.fillStyle(0x5b3a29).fillRect(b.left, b.bottom - 12, w, 12);
+
+    // Dark slate roof with a cream trim.
+    g.fillStyle(0x3f4a52).fillRect(b.left - 16, b.top, w + 32, roofBottom - b.top);
+    g.fillStyle(0x2f383f);
+    for (let y = b.top + 14; y < roofBottom; y += 14) g.fillRect(b.left - 16, y, w + 32, 3);
+    g.fillStyle(0xf1e6d6).fillRect(b.left - 16, roofBottom - 6, w + 32, 6);
+
+    // Green awning.
+    for (let x = b.left - 6, i = 0; x < b.right + 6; x += 20, i++) {
+      g.fillStyle(i % 2 ? 0xfdf6ec : 0x2a9d8f).fillRect(x, roofBottom, 20, 22);
+      g.fillStyle(i % 2 ? 0xfdf6ec : 0x2a9d8f).fillCircle(x + 10, roofBottom + 22, 10);
+    }
+
+    // Big windows with warm light and diners' silhouettes, on both sides of the door.
+    for (const wx of [b.left + 110, b.right - 110]) {
+      g.fillStyle(0x5b3a29).fillRect(wx - 80, b.top + 140, 160, 92);
+      g.fillStyle(0xffe8b0).fillRect(wx - 74, b.top + 146, 148, 80);
+      g.fillStyle(0xf4c983).fillRect(wx - 74, b.top + 196, 148, 30);
+      g.fillStyle(0xd4a373).fillCircle(wx - 34, b.top + 186, 8).fillCircle(wx + 30, b.top + 188, 8);
+      g.fillStyle(0xffffff, 0.45).fillTriangle(wx - 74, b.top + 146, wx - 40, b.top + 146, wx - 74, b.top + 186);
+      g.fillStyle(0x5b3a29).fillRect(wx - 2, b.top + 146, 4, 80).fillRect(wx - 74, b.top + 184, 148, 4);
+      // Flower box.
+      g.fillStyle(0x8d5a3b).fillRect(wx - 82, b.top + 230, 164, 10);
+      for (let fx = wx - 74; fx < wx + 80; fx += 14) g.fillStyle(fx % 28 ? 0xe76f51 : 0xffd166).fillCircle(fx, b.top + 228, 5);
+    }
+
+    // Double door (open, warm light inside) and a doormat in front of it.
+    const doorTop = b.bottom - 104;
+    g.fillStyle(0x3d2c29).fillRect(door - 40, doorTop - 8, 80, 112);
+    g.fillStyle(0xffe8b0).fillRect(door - 34, doorTop, 68, 104);
+    g.fillStyle(0x6d4c41).fillRect(door - 34, doorTop, 14, 104).fillRect(door + 20, doorTop, 14, 104);
+    g.fillStyle(0xffd166).fillCircle(door - 24, doorTop + 56, 2).fillCircle(door + 24, doorTop + 56, 2);
+    const mat = RESTAURANT_ENTER_ZONE;
+    this.scene.add
+      .rectangle((mat.left + mat.right) / 2, (mat.top + mat.bottom) / 2 + 2, mat.right - mat.left, mat.bottom - mat.top - 4, 0x2a9d8f)
+      .setStrokeStyle(2, 0x1f6f66)
+      .setDepth(FLOOR_DEPTH + 2);
+
+    // Sign on the roof.
+    g.fillStyle(0x3d2c29).fillRoundedRect(door - 120, b.top + 22, 240, 46, 10);
+    g.lineStyle(3, 0xd4a373).strokeRoundedRect(door - 120, b.top + 22, 240, 46, 10);
+    this.scene.add
+      .text(door, b.top + 45, "🍽️ Nhà hàng", { fontFamily: "sans-serif", fontSize: "24px", fontStyle: "bold", color: "#fdf6ec" })
+      .setOrigin(0.5)
+      .setDepth(b.bottom + 1);
+    this.scene.add
+      .text(door, mat.bottom + 14, "Bước lên thảm để vào nhà hàng", {
+        fontFamily: "sans-serif",
+        fontSize: "12px",
+        color: "#3d2c29",
+        backgroundColor: "#fdf6ecd9",
+        padding: { x: 4, y: 1 },
+      })
+      .setOrigin(0.5)
+      .setDepth(FLOOR_DEPTH + 3);
+
+    // Lanterns and potted plants by the door.
+    for (const [x, key, height] of [
+      [door - 70, "decor-lantern_lit", 48],
+      [door + 70, "decor-lantern_lit", 48],
+      [b.left + 20, "decor-banana_plant", 90],
+      [b.right - 20, "decor-banana_plant", 90],
+    ] as const) {
+      if (!this.scene.textures.exists(key)) continue;
+      const img = this.scene.add.image(x, b.bottom + 6, key).setOrigin(0.5, 1);
+      img.setScale(height / img.height).setDepth(b.bottom + 6);
+    }
   }
 
   private drawShopFront() {

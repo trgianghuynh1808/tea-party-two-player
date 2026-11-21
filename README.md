@@ -52,7 +52,21 @@ To play from another machine on the same LAN, open the **Network** URL printed b
   you up in front of it. One player per bed; starting a shift, selling / erasing or moving the bed gets the sleeper
   up / moves them with it (`BedSpot`, `bedSpots`, `findBedSpot` in `shared/src/index.ts`).
 
-Add or change drinks, ingredients, machines, shift length and star thresholds in `shared/src/menu.ts`.
+Add or change drinks, ingredients and machines in `shared/src/menu.ts`; shift length, pace and star thresholds per venue in `shared/src/venues.ts`.
+
+### Restaurant
+
+- Outside, walk left from the tea shop to the restaurant (🍽️); its doormat leads into a bigger, scrolling kitchen + dining room.
+- The shift card offers two start buttons: **Tiệm trà** or **Nhà hàng** (the place you're standing in is first). The shift's
+  customers come to that venue only; combo, special customers, tips and the split work the same.
+- Kitchen: crates hand out raw ingredients; cookers process one ingredient each (🔪 board, 🍳 pan, 🍲 pot, 🔥 grill,
+  ♨️ oven, 🍟 fryer, 🌀 blender, ☕ coffee machine). Hot cookers burn food left too long (it must go in the trash).
+- Shelves hand out plates, bowls and glasses. Put finished parts in any order (counter, cooker or crate while holding the
+  container, or hold the food at a shelf). A container matching a dish exactly is served at the table or the take-away counter.
+- Trash empties a container but keeps it. Harder dishes appear later in the shift.
+
+Menu, ingredients, cooking methods, kitchen layout and dining tables live in `shared/src/restaurant.ts`. Food art is cut
+from `client/assets-src/sheets/food/` by `client/assets-src/tools/cut_food.py` (boxes in `food_cuts.json`).
 Interaction rules live in `shared/src/interaction.ts` (`planInteraction`), used by the server to apply actions and by the client to preview them.
 
 ## Mobile

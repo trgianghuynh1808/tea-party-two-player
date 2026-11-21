@@ -3,14 +3,17 @@ import type { Room } from "@colyseus/sdk";
 import {
   CustomerKind,
   ORDER_DANGER_RATIO,
+  RESTAURANT,
+  RESTAURANT_FURNITURE,
   WORLD_HEIGHT,
+  areaOf,
   directionFromInput,
   footprintBox,
   getCustomer,
-  getDrink,
+  getMenuItem,
   isDrinkServed,
-  makeCup,
   orderDrinkIds,
+  servedItemFor,
   type CharacterDef,
   type PlacedDecoration,
 } from "@boba/shared";
@@ -21,8 +24,9 @@ import { CHARACTER_BODY_PX, DIRECTION_ROW, WALK_COLUMNS, WALK_FPS, characterKey,
 /** Customers are a bit smaller than the players so the two are easy to tell apart. */
 const CUSTOMER_SCALE = 0.9;
 const BODY_PX = CHARACTER_BODY_PX * CUSTOMER_SCALE;
-/** Customers come in from (and leave through) the bottom edge of the shop. */
-const DOOR_Y = WORLD_HEIGHT + BODY_PX;
+/** Customers come in from (and leave through) the bottom edge of the room their table is in. */
+const doorY = (seat: { x: number; y: number }) =>
+  (areaOf(seat) === "restaurant" ? RESTAURANT.y + RESTAURANT.height : WORLD_HEIGHT) + BODY_PX;
 const WALK_SPEED = 130; // px per second
 /** Seated: feet this far above the bottom of the seat's footprint, so they look sat on it. */
 const SEAT_LIFT = 10;
@@ -86,11 +90,11 @@ export class CustomerController {
     order.seats.split(",").forEach((seatId, i) => {
       const seat = this.decoration(seatId);
       const seatBox = seat && footprintBox(seat);
-      const drink = getDrink(drinks[i]);
+      const drink = getMenuItem(drinks[i]);
       if (!seat || !seatBox || !drink) return;
       // Kind badge (VIP, picky, group) on the first customer of the party.
       const badge = i === 0 && order.kind !== CustomerKind.Normal ? getCustomer(order.kind).icon : "";
-      const customer = this.createCustomer(characterOf(looks[i] ?? ""), makeCup(drink.steps), badge);
+      const customer = this.createCustomer(characterOf(looks[i] ?? ""), servedItemFor(drink.id), badge);
       customers.push(customer);
 
       const seatX = seat.x;
@@ -108,7 +112,7 @@ export class CustomerController {
         customer.container.setPosition(seatX, seatY);
         this.sitDown(customer);
       } else {
-        customer.container.setPosition(seatX, DOOR_Y);
+        customer.container.setPosition(seatX, doorY(seat));
         this.walkTo(customer, seatX, seatY, "up", () => this.sitDown(customer));
       }
     });
@@ -162,7 +166,7 @@ export class CustomerController {
         if (!c.container.active) return;
         c.tableCup.setItem("");
         mood.destroy();
-        this.walkTo(c, c.container.x, DOOR_Y, "down", () => this.destroyCustomer(c));
+        this.walkTo(c, c.container.x, doorY(c.container), "down", () => this.destroyCustomer(c));
       });
     }
   }
@@ -192,7 +196,7 @@ export class CustomerController {
   private leaving = new Set<Customer>();
 
   private decoration(id: string): PlacedDecoration | undefined {
-    return this.room.state.decorations?.find((d) => d.id === id);
+    return this.room.state.decorations?.find((d) => d.id === id) ?? RESTAURANT_FURNITURE.find((d) => d.id === id);
   }
 
   private createCustomer(character: CharacterDef, drinkItem: string, badge: string): Customer {
@@ -206,14 +210,14 @@ export class CustomerController {
     const bubbleY = -BODY_PX - 12;
     const bg = scene.add.graphics();
     bg.fillStyle(0xffffff, 0.95).lineStyle(1.5, 0x3d2c29, 0.6);
-    bg.fillRoundedRect(-17, -36, 34, 36, 7).strokeRoundedRect(-17, -36, 34, 36, 7);
+    bg.fillRoundedRect(-21, -36, 42, 36, 7).strokeRoundedRect(-21, -36, 42, 36, 7);
     bg.fillTriangle(-5, -1, 5, -1, 0, 6);
     const cup = new CupView(scene, 0, -6, BUBBLE_CUP_HEIGHT);
     cup.setItem(drinkItem);
     const barBack = scene.add.rectangle(-PATIENCE_BAR_WIDTH / 2, -40, PATIENCE_BAR_WIDTH, 4, 0x3d2c29, 0.25).setOrigin(0, 0.5);
     const patienceBar = scene.add.rectangle(-PATIENCE_BAR_WIDTH / 2, -40, PATIENCE_BAR_WIDTH, 4, 0x2a9d8f).setOrigin(0, 0.5);
     const bubbleParts: Phaser.GameObjects.GameObject[] = [bg, cup, barBack, patienceBar];
-    if (badge) bubbleParts.push(scene.add.text(19, -34, badge, { fontFamily: "sans-serif", fontSize: "14px" }).setOrigin(0, 0));
+    if (badge) bubbleParts.push(scene.add.text(23, -34, badge, { fontFamily: "sans-serif", fontSize: "14px" }).setOrigin(0, 0));
     const bubble = scene.add.container(0, bubbleY, bubbleParts).setVisible(false);
 
     const container = scene.add.container(0, 0, [sprite, bubble]).setAlpha(0);

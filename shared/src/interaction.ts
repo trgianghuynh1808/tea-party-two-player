@@ -11,9 +11,29 @@ import {
   isValidPartial,
   makeCup,
   matchDrink,
-  type DrinkDef,
+  type MenuItem,
   type StationDef,
 } from "./menu";
+import {
+  BURNT,
+  CONTAINERS,
+  FOODS,
+  PROCESSES,
+  canAddPart,
+  containerOf,
+  containerParts,
+  describeKitchenItem,
+  describePart,
+  foodKey,
+  isProcess,
+  isUsefulFood,
+  makeContainer,
+  makeFood,
+  matchDish,
+  type ContainerId,
+  type FoodId,
+} from "./restaurant";
+import { matchServed } from "./venues";
 
 export interface InteractionContext {
   phase: string;
@@ -41,7 +61,9 @@ export type InteractionPlan =
       /** Put the held cup down on a counter. */
       | { kind: "put_down" }
       | { kind: "trash" }
-      | { kind: "deliver"; drink: DrinkDef }
+      | { kind: "deliver"; item: MenuItem }
+      /** Restaurant kitchen: what the player holds and what's on the station afterwards. `start` = a cooker starts working. */
+      | { kind: "set"; held: string; station: string; start?: boolean }
     ));
 
 const fail = (reason: string): InteractionPlan => ({ ok: false, reason });
@@ -95,9 +117,131 @@ export function planInteraction(def: StationDef, ctx: InteractionContext): Inter
       if (!ctx.orderedDrinkIds.includes(drink.id)) {
         return fail(ctx.seatedDrinkIds?.includes(drink.id) ? "Khách đang ngồi bàn, mang tới tận bàn nhé" : `Không có khách gọi ${drink.name}`);
       }
-      return { ok: true, kind: "deliver", drink, label: `Giao ${drink.name}` };
+      return { ok: true, kind: "deliver", item: drink, label: `Giao ${drink.name}` };
+    }
+
+    default:
+      return planKitchen(def, ctx);
+  }
+}
+
+// ---------------------------------------------------------------- Restaurant kitchen
+
+const set = (label: string, held: string, station: string, start = false): InteractionPlan => ({ ok: true, kind: "set", label, held, station, start });
+
+/**
+ * Put a finished part (`key`) into a container item, if some dish wants it there.
+ * Returns the new container item, or undefined.
+ */
+function addToContainer(container: string, key: string): string | undefined {
+  const c = containerOf(container);
+  if (!c || key === BURNT) return undefined;
+  const parts = containerParts(container);
+  return canAddPart(c, parts, key) ? makeContainer(c, [...parts, key]) : undefined;
+}
+
+/** Combine what's in hand with what's on a counter / finished on a cooker (plate + food either way). */
+function combine(held: string, there: string): { held: string; station: string; label: string } | undefined {
+  const heldKey = foodKey(held);
+  const thereKey = foodKey(there);
+  if (thereKey !== undefined) {
+    const next = addToContainer(held, thereKey);
+    if (next) return { held: next, station: "", label: `Cho ${describePart(thereKey)} vào ${CONTAINERS[containerOf(held)!].label.toLowerCase()}` };
+  }
+  if (heldKey !== undefined) {
+    const next = addToContainer(there, heldKey);
+    if (next) return { held: "", station: next, label: `Cho ${describePart(heldKey)} vào ${CONTAINERS[containerOf(there)!].label.toLowerCase()}` };
+  }
+  return undefined;
+}
+
+/** Why `key` can't be added to `container` (or "" if it can). */
+function containerRefusal(container: string, key: string): string {
+  const c = containerOf(container)!;
+  if (key === BURNT) return "Đồ cháy rồi, bỏ vào thùng rác thôi";
+  // Some dish needs it after more cooking: tell the player it isn't ready yet.
+  const somewhere = (["plate", "bowl", "glass"] as const).some((k) => addToContainer(k, key));
+  if (!somewhere && isUsefulFood(key)) return `${describePart(key)} chưa nấu xong`;
+  return `Không món nào cho ${describePart(key)} vào ${CONTAINERS[c].label.toLowerCase()} này`;
+}
+
+export function planKitchen(def: StationDef, ctx: InteractionContext): InteractionPlan {
+  const { held, stationItem: there } = ctx;
+  const heldKey = foodKey(held);
+  const heldContainer = containerOf(held);
+
+  switch (def.type) {
+    case StationType.Crate: {
+      const id = def.food as FoodId;
+      const label = FOODS[id].label;
+      if (held === EMPTY_HAND) return set(`Lấy ${label}`, makeFood(id), there);
+      // Holding a container: add the raw ingredient straight in (milk in a glass, bread on a plate...).
+      if (heldContainer) {
+        const next = addToContainer(held, id);
+        if (next) return set(`Cho ${label} vào ${CONTAINERS[heldContainer].label.toLowerCase()}`, next, there);
+        return fail(`${label} chưa cho vào ${CONTAINERS[heldContainer].label.toLowerCase()} được, phải nấu trước`);
+      }
+      return fail("Tay đang cầm đồ rồi");
+    }
+
+    case StationType.Shelf: {
+      const c = def.container as ContainerId;
+      const label = CONTAINERS[c].label;
+      if (held === EMPTY_HAND) return set(`Lấy ${label.toLowerCase()}`, c, there);
+      // Holding a finished part: serve it onto a new container.
+      if (heldKey !== undefined) {
+        const next = addToContainer(c, heldKey);
+        if (next) return set(`Bày ra ${label.toLowerCase()}`, next, there);
+        return fail(containerRefusal(c, heldKey));
+      }
+      return fail("Tay đang cầm đồ rồi");
+    }
+
+    case StationType.Cooker: {
+      const process = def.process;
+      if (!process || !isProcess(process)) return fail("Máy hỏng");
+      const p = PROCESSES[process];
+      if (there !== EMPTY_HAND) {
+        if (ctx.stationProgress < 1) return fail(`${p.station} đang ${p.done}, chờ chút...`);
+        if (held === EMPTY_HAND) return set(`Lấy ${describeKitchenItem(there)}`, there, EMPTY_HAND);
+        const both = heldContainer && combine(held, there);
+        if (both) return set(both.label, both.held, both.station);
+        return fail(heldContainer ? containerRefusal(held, foodKey(there) ?? "") : "Tay đang cầm đồ, không lấy ra được");
+      }
+      if (heldContainer) return fail(`Chỉ cho nguyên liệu lên ${p.station.toLowerCase()}, không cho cả ${CONTAINERS[heldContainer].label.toLowerCase()}`);
+      if (heldKey === undefined) return fail(`Cầm nguyên liệu tới để ${p.verb.toLowerCase()}`);
+      if (heldKey === BURNT) return fail("Đồ cháy rồi, bỏ vào thùng rác thôi");
+      if (!isUsefulFood(`${heldKey}.${process}`)) return fail(`Không món nào cần ${p.verb.toLowerCase()} ${describePart(heldKey).toLowerCase()}`);
+      return set(`${p.verb} ${describePart(heldKey).toLowerCase()}`, EMPTY_HAND, held, true);
+    }
+
+    case StationType.Counter: {
+      if (held === EMPTY_HAND && there === EMPTY_HAND) return fail("Bàn đang trống");
+      if (held === EMPTY_HAND) return set("Nhặt lên", there, EMPTY_HAND);
+      if (there === EMPTY_HAND) return set("Đặt xuống", EMPTY_HAND, held);
+      const both = combine(held, there);
+      if (both) return set(both.label, both.held, both.station);
+      return fail("Bàn đã có đồ rồi");
+    }
+
+    case StationType.Trash:
+      if (held === EMPTY_HAND) return fail("Tay đang trống");
+      // A container is emptied and kept; food is thrown away.
+      if (heldContainer && containerParts(held).length) return set(`Đổ bỏ (giữ ${CONTAINERS[heldContainer].label.toLowerCase()})`, heldContainer, there);
+      return set(heldContainer ? `Bỏ ${CONTAINERS[heldContainer].label.toLowerCase()}` : "Bỏ đi", EMPTY_HAND, there);
+
+    case StationType.DeliveryCounter: {
+      const dish = matchDish(held);
+      if (!dish) return fail(heldContainer ? "Món chưa đủ, xem lại công thức" : "Cần bày món ra đĩa / tô / ly trước");
+      if (there !== EMPTY_HAND) return fail("Quầy đang bận, chờ chút");
+      if (ctx.phase !== GamePhase.Playing) return fail("Chưa mở ca, bấm Bắt đầu ca để đón khách");
+      if (!ctx.orderedDrinkIds.includes(dish.id)) {
+        return fail(ctx.seatedDrinkIds?.includes(dish.id) ? "Khách đang ngồi bàn, mang tới tận bàn nhé" : `Không có khách gọi ${dish.name}`);
+      }
+      return { ok: true, kind: "deliver", item: dish, label: `Giao ${dish.name}` };
     }
   }
+  return fail("Không dùng được");
 }
 
 /** Lying down in a bed. `occupied` = someone else is already lying in it. */
@@ -115,10 +259,10 @@ export type InteractPlanSimple = { ok: false; reason: string } | { ok: true; lab
 /** Serving a table: `orderedDrinkIds` = drinks still awaited by the customers sitting at it. */
 export function planServeTable(ctx: Pick<InteractionContext, "phase" | "held" | "orderedDrinkIds">): InteractionPlan {
   if (ctx.phase === GamePhase.Ended) return fail("Ca đã kết thúc, bấm Chơi ca mới");
-  if (!isCup(ctx.held)) return fail("Cần cầm ly nước đã pha xong");
-  const drink = matchDrink(cupContents(ctx.held));
-  if (!drink) return fail("Món chưa pha xong");
+  if (ctx.held === EMPTY_HAND) return fail("Cần cầm món đã làm xong");
+  const item = matchServed(ctx.held);
+  if (!item) return fail("Món chưa làm xong");
   if (ctx.phase !== GamePhase.Playing) return fail("Chưa mở ca");
-  if (!ctx.orderedDrinkIds.includes(drink.id)) return fail(`Bàn này không gọi ${drink.name}`);
-  return { ok: true, kind: "deliver", drink, label: `Mang ${drink.name} ra bàn` };
+  if (!ctx.orderedDrinkIds.includes(item.id)) return fail(`Bàn này không gọi ${item.name}`);
+  return { ok: true, kind: "deliver", item, label: `Mang ${item.name} ra bàn` };
 }

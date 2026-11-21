@@ -7,18 +7,23 @@ import {
   StationType,
   Messages,
   POSITION_SEND_INTERVAL_MS,
-  STATIONS,
+  ALL_STATIONS,
+  BURNT_ITEM,
+  OUTDOOR,
+  PROCESSES,
+  RESTAURANT,
   ServerEvents,
   WALL_BOTTOM,
   WALL_SKIRTING,
   WORLD_HEIGHT,
   WORLD_WIDTH,
   directionFromInput,
-  inRect,
-  isInYard,
-  SHOP_ENTER_ZONE,
+  allFurniture,
+  areaOf,
+  doorAt,
+  isProcess,
+  getVenue,
   SHOP_EXIT_ZONE,
-  YARD,
   findInteractTarget,
   footprintBox,
   pendingDrinksAt,
@@ -31,12 +36,13 @@ import {
   GET_UP_LABEL,
   tablesWaiting,
   stepMovement,
-  describeItem,
+  describeAnyItem,
   pendingOrderDrinkIds,
   comboBonusRate,
   type DeliveredEvent,
   type MachineOverflowEvent,
   type OrderExpiredEvent,
+  type Area,
   type CharacterDef,
   type Direction,
   type StationDef,
@@ -44,10 +50,12 @@ import {
 import { KeyboardState } from "../input/KeyboardState";
 import { SCREEN_UI, TouchControls, isTouchDevice } from "../input/TouchControls";
 import { DECOR_ROTATE, PALETTE_DRAG_START, type PaletteDragStart } from "../ui/DecorPanel";
-import { CupView, preloadCupTextures } from "./CupView";
+import { CupView, foodTextureKey, preloadCupTextures } from "./CupView";
 import { DecorController, bedPillowPoint, preloadDecorTextures } from "./DecorController";
 import { CustomerController } from "./CustomerController";
 import { YardView, preloadBuildTextures } from "./YardView";
+import { RestaurantView } from "./RestaurantView";
+import { KITCHEN_ART_RISE, kitchenStationTexture, makeKitchenStationTextures } from "./KitchenArt";
 import { BuildController } from "./BuildController";
 import { CHARACTER_BODY_PX, DIRECTION_ROW, FEET_Y, HEAD_Y, WALK_COLUMNS, WALK_FPS, characterKey, characterOf } from "./characterArt";
 
@@ -65,7 +73,7 @@ export const DECORATE_MODE_EVENT = "decorate-mode";
 export const BUILD_MODE_EVENT = "build-mode";
 /** game.events event from the build panel: payload = tool (tile kind or ERASE_TOOL). */
 export const BUILD_TOOL_EVENT = "build-tool";
-/** game.events event from the scene: payload = true when the local player is in the yard, false inside the shop. */
+/** game.events event from the scene: payload = Area the local player is in ("shop" | "restaurant" | "yard"). */
 export const AREA_EVENT = "area-changed";
 /** Don't send UseDoor again while waiting for the server's teleport. */
 const DOOR_RESEND_MS = 700;
@@ -220,7 +228,7 @@ export class ShopScene extends Phaser.Scene {
   private yard?: YardView;
   private build?: BuildController;
   /** Area the camera currently shows (undefined until the local player exists). */
-  private inYard?: boolean;
+  private area?: Area;
   private lastDoorAt = 0;
   private lastLeaveBedAt = 0;
   /** Walls in the yard for movement prediction (same rule as the server). */
@@ -283,6 +291,8 @@ export class ShopScene extends Phaser.Scene {
     this.drawFloor();
     this.drawWall();
     this.drawExit();
+    makeKitchenStationTextures(this);
+    new RestaurantView(this, fs, FLOOR_TEXTURE);
     this.createStations();
     this.createHud();
     this.tableHighlight = this.add.rectangle(0, 0, 1, 1).setStrokeStyle(3, 0xffd166).setVisible(false);
@@ -420,7 +430,7 @@ export class ShopScene extends Phaser.Scene {
       this.toast(`Khách bỏ về (${msg.label}) −$${msg.penalty} · mất combo`, "#e76f51");
     });
     room.onMessage(ServerEvents.MachineOverflow, (msg: MachineOverflowEvent) => {
-      this.toast(`Máy ${msg.machine} bị tràn, mất ly!`, "#e63946");
+      this.toast(msg.burnt ? `${msg.machine}: đồ ăn bị cháy! Bỏ vào thùng rác` : `Máy ${msg.machine} bị tràn, mất ly!`, "#e63946");
     });
     room.onMessage(ServerEvents.InteractFailed, (msg: { reason: string }) => {
       this.toast(msg.reason, "#e63946");
@@ -518,30 +528,29 @@ export class ShopScene extends Phaser.Scene {
     }
   }
 
-  /** Standing on the doormat (outside) or at the exit (inside): ask the server to go through the door. */
+  /** Standing on a doormat (outside) or at an exit (inside): ask the server to go through the door. */
   private checkDoor(local: PlayerView) {
-    const pos = local.container;
-    const zone = isInYard(pos) ? SHOP_ENTER_ZONE : SHOP_EXIT_ZONE;
     const now = performance.now();
-    if (!inRect(pos, zone) || now - this.lastDoorAt < DOOR_RESEND_MS) return;
+    if (!doorAt(local.container) || now - this.lastDoorAt < DOOR_RESEND_MS) return;
     this.lastDoorAt = now;
     this.room!.send(Messages.UseDoor);
   }
 
-  /** Point the camera at the area the local player is in (shop: fixed view; yard: scrolls with the player). */
+  /** Point the camera at the area the local player is in (shop: fixed view; restaurant and yard: scroll with the player). */
   private updateArea() {
     const local = this.room ? this.players.get(this.room.sessionId) : undefined;
     if (!local) return;
-    const inYard = isInYard(local.container);
-    if (inYard === this.inYard) return;
-    this.inYard = inYard;
+    const area = areaOf(local.container);
+    if (area === this.area) return;
+    this.area = area;
     const cam = this.cameras.main;
-    if (inYard) cam.setBounds(YARD.x, YARD.y, YARD.width, YARD.height);
-    else cam.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    const box = area === "yard" ? OUTDOOR : area === "restaurant" ? RESTAURANT : { x: 0, y: 0, width: WORLD_WIDTH, height: WORLD_HEIGHT };
+    cam.setBounds(box.x, box.y, box.width, box.height);
     cam.centerOn(local.container.x, local.container.y);
     this.lastActionKey = ""; // refresh the action hint
-    this.game.events.emit(AREA_EVENT, inYard);
+    this.game.events.emit(AREA_EVENT, area);
   }
+
 
   // ---------------------------------------------------------------- Views
 
@@ -577,7 +586,7 @@ export class ShopScene extends Phaser.Scene {
   }
 
   private createStations() {
-    for (const def of STATIONS) {
+    for (const def of ALL_STATIONS) {
       const highlight = this.add
         .rectangle(def.x, def.y, def.width + 12, def.height + 12)
         .setStrokeStyle(3, 0xffd166)
@@ -589,12 +598,16 @@ export class ShopScene extends Phaser.Scene {
         const icon = this.add.image(def.x, def.y, stationIconKey(def.id));
         icon.setScale(iconDef.height / icon.height).setDepth(def.y + def.height / 2);
       }
+      this.addKitchenIcons(def);
       // Phones: icon only, the seconds would make neighbouring labels overlap at the larger font size.
-      const timed = def.processSeconds ? (FONT_SCALE > 1 ? " ⏱" : ` ⏱${def.processSeconds}s`) : "";
+      const seconds = def.processSeconds || (def.process && isProcess(def.process) ? PROCESSES[def.process].seconds : 0);
+      const timed = seconds ? (FONT_SCALE > 1 ? " ⏱" : ` ⏱${seconds}s`) : "";
+      const crate = def.type === StationType.Crate;
+      const labelTop = def.y - def.height / 2 - (kitchenStationTexture(def) && !crate ? KITCHEN_ART_RISE : 0);
       this.add
-        .text(def.x, def.y - def.height / 2 - 10, def.label + timed, {
+        .text(def.x, labelTop - (crate ? 6 : 10), def.label + timed, {
           fontFamily: "sans-serif",
-          fontSize: fs(12),
+          fontSize: fs(crate ? 10 : 12),
           color: "#3d2c29",
           fontStyle: "bold",
           // Machine labels sit on the skirting board: a light tag keeps them readable.
@@ -605,7 +618,9 @@ export class ShopScene extends Phaser.Scene {
         .setDepth(def.y + def.height / 2 + 1);
       // Cups stand on the table top, not on the counter's front face.
       const slice = SLICED_STATIONS[def.type];
-      const topSurfaceBottom = slice
+      const topSurfaceBottom = kitchenStationTexture(def)
+        ? def.y - 6 // on the counter top / in the pan
+        : slice
         ? def.y + def.height / 2 - slice.bottom * SLICE_SCALE
         : FITTED_ART[def.type]
           ? def.y - def.height / 2 + def.height * FITTED_ART[def.type]!.topCentre + 8
@@ -634,8 +649,40 @@ export class ShopScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Restaurant: what a crate holds (its ingredient on top) and what a shelf hands out (a few plates / bowls / glasses).
+   * Drawn under any item placed there (same depth, created earlier).
+   */
+  private addKitchenIcons(def: StationDef) {
+    const depth = def.y + def.height / 2;
+    if (def.type === StationType.Crate && def.food) {
+      const icon = this.add.image(def.x, def.y - 4, foodTextureKey(def.food)).setDepth(depth);
+      icon.setScale(Math.min(42 / icon.width, 36 / icon.height));
+    }
+    if (def.type === StationType.Shelf && def.container) {
+      const top = def.y - def.height / 2 - KITCHEN_ART_RISE + 18;
+      const glass = def.container === "glass";
+      for (let i = 0; i < 3; i++) {
+        const x = glass ? def.x + (i - 1) * 20 : def.x;
+        const y = glass ? top : top - i * 5;
+        const view = new CupView(this, x, y, glass ? 18 : 16);
+        view.setItem(def.container);
+        view.setDepth(depth);
+      }
+    }
+  }
+
   /** Station artwork: 9-slice counter, plain image, or a coloured rectangle as fallback. */
   private createStationBody(def: StationDef) {
+    const kitchen = kitchenStationTexture(def);
+    if (kitchen) {
+      // Drawn at 1:1, standing on the bottom of the station box (and rising above it).
+      return this.add.image(def.x, def.y + def.height / 2 + (def.type === StationType.Crate ? 2 : 0), kitchen).setOrigin(0.5, 1);
+    }
+    if (def.type === StationType.Trash) {
+      const key = stationTextureKey("trash");
+      return this.add.image(def.x, def.y, key).setScale(def.height / this.textures.getFrame(key).height);
+    }
     if (FITTED_ART[def.type]) {
       const img = this.add.image(def.x, def.y, fittedArtKey(def.type));
       return img.setScale(Math.min(def.width / img.width, def.height / img.height));
@@ -884,7 +931,7 @@ export class ShopScene extends Phaser.Scene {
     const has = item !== EMPTY_HAND;
     view.heldCup.setItem(item);
     view.heldLabel.setVisible(has);
-    if (has) view.heldLabel.setText(describeItem(item));
+    if (has) view.heldLabel.setText(describeAnyItem(item));
   }
 
   private updateShiftText(state: BobaShopState) {
@@ -913,7 +960,16 @@ export class ShopScene extends Phaser.Scene {
     if (view.def.type === StationType.Counter) {
       // Counters: show what's on it so the teammate knows what to pick up.
       view.readyLabel.setVisible(item !== EMPTY_HAND);
-      if (item !== EMPTY_HAND) view.readyLabel.setText(describeItem(item)).setBackgroundColor("#6d4c41");
+      if (item !== EMPTY_HAND) view.readyLabel.setText(describeAnyItem(item)).setBackgroundColor("#6d4c41");
+      return;
+    }
+    if (view.def.type === StationType.Cooker) {
+      // Restaurant cookers: done (and burning on hot ones if left too long, see BURN_SECONDS), or burnt.
+      const done = item !== EMPTY_HAND && progress >= 1;
+      view.readyLabel.setVisible(done);
+      if (item === BURNT_ITEM) view.readyLabel.setText("🔥 Cháy rồi! Đem bỏ đi").setBackgroundColor("#3d2c29");
+      else if (overflow >= 0.5) view.readyLabel.setText("⚠ Sắp cháy! Lấy ngay").setBackgroundColor("#e63946");
+      else view.readyLabel.setText(`Xong: ${describeAnyItem(item)}`).setBackgroundColor("#2a9d8f");
       return;
     }
     // Timed machines: cup finished and waiting to be picked up.
@@ -929,7 +985,7 @@ export class ShopScene extends Phaser.Scene {
     const local = room ? this.players.get(room.sessionId) : undefined;
     // The first state patch may not have arrived yet during the first frames.
     const state = room?.state;
-    const tables = state?.orders && state.decorations ? tablesWaiting(state.decorations, state.orders) : [];
+    const tables = state?.orders && state.decorations ? tablesWaiting(allFurniture(state.decorations), state.orders) : [];
     const beds = state?.decorations ? bedSpots(state.decorations, state.tiles?.entries()) : [];
     // In bed the action key only gets up: nothing to highlight.
     const target = local && !local.bedId ? findInteractTarget(local.container, tables, beds) : undefined;
@@ -992,9 +1048,12 @@ export class ShopScene extends Phaser.Scene {
   private updateStatus() {
     if (!this.room) return;
     const count = this.players.size;
+    const venue = this.room.state.venue ? getVenue(this.room.state.venue) : undefined;
     this.statusText.setText(
       count >= 2
-        ? "Đủ 2 người, cùng làm trà sữa nào!"
+        ? venue?.id === "restaurant"
+          ? "Đủ 2 người, cùng nấu ăn nào!"
+          : "Đủ 2 người, cùng làm trà sữa nào!"
         : "Chờ người chơi thứ 2... Bấm 🔗 Mời để gửi link vào thẳng phòng này",
     );
   }

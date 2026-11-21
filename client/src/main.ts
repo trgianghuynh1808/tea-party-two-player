@@ -24,8 +24,10 @@ import {
   type CharacterDef,
   type Gender,
   type JoinOptions,
+  type Area,
   type RoomInfo,
   type RoomsResponse,
+  type Venue,
 } from "@boba/shared";
 import type { BobaShopState } from "@boba/shared/schema";
 import { FORCE_TOUCH_PARAM, isTouchDevice } from "./input/TouchControls";
@@ -88,6 +90,8 @@ let buildPanel: BuildPanel | undefined;
 let building = false;
 /** Last build tool picked (the panel is rebuilt for every room). */
 let buildTool = "floor_wood";
+/** Whose menu the side panel / 📋 modal show: the venue of the running shift, else where the player stands. */
+let menuVenue: Venue = "shop";
 
 // Keep the ?touch=1 debug flag across URL rewrites so a refresh still forces touch controls.
 const forceTouch = new URLSearchParams(location.search).get(FORCE_TOUCH_PARAM) === "1";
@@ -469,18 +473,19 @@ function startGame(room: Room<BobaShopState>) {
     game?.events.emit(BUILD_TOOL_EVENT, tool);
   });
 
-  // Only the host decorates (the room shows their furniture), and only between shifts, inside the shop.
+  // Only the host decorates (the room shows their furniture), and only between shifts, inside the tea shop.
   // Building is on the host's land outside the shop: anyone (paying from their own wallet), any time.
   let amHost = false;
-  let inYard = false;
+  let area: Area = "shop";
   const updateDecorateBtn = () => {
     const playing = room.state.phase === GamePhase.Playing;
     const host = room.state.hostName || "chủ phòng";
-    decorateBtn.disabled = playing || !amHost || inYard;
+    const inYard = area === "yard";
+    decorateBtn.disabled = playing || !amHost || area !== "shop";
     decorateBtn.title = !amHost
       ? `Quán này dùng nội thất của ${host}, chỉ chủ phòng mới trang trí được`
-      : inYard
-        ? "Vào trong quán để trang trí"
+      : area !== "shop"
+        ? "Vào trong tiệm trà để trang trí"
         : "Trang trí quán (ngoài giờ ca)";
     if (decorateBtn.disabled && decorating) setDecorating(false);
     // Guests build on the host's land too, paid from their own wallet (empty cells only).
@@ -492,11 +497,25 @@ function startGame(room: Room<BobaShopState>) {
         : `Xây giúp ${host} trên đất trống, trả bằng ví của bạn`;
     if (buildBtn.disabled && building) setBuilding(false);
   };
-  game.events.on(AREA_EVENT, (yard: boolean) => {
-    inYard = yard;
+  // The menu follows the running shift's venue, or else the place the player is in.
+  const updateMenu = () => {
+    const place = room.state.phase === GamePhase.Playing ? room.state.venue : area;
+    const venue: Venue = place === "restaurant" ? "restaurant" : place === "shop" ? "shop" : menuVenue;
+    if (venue === menuVenue && menuInline.childElementCount) return;
+    menuVenue = venue;
+    renderInlineMenu();
+  };
+  game.events.on(AREA_EVENT, (next: Area) => {
+    area = next;
     updateDecorateBtn();
+    updateMenu();
+    shiftOverlay?.setArea(next);
   });
-  $state.listen("phase", updateDecorateBtn);
+  $state.listen("phase", () => {
+    updateDecorateBtn();
+    updateMenu();
+  });
+  $state.listen("venue", updateMenu);
   $state.listen("hostName", updateDecorateBtn);
   $state.onAdd("players", (player, sessionId) => {
     if (sessionId !== room.sessionId) return;
@@ -577,7 +596,7 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !modal.hidden) closeModal();
 });
 
-menuBtn.addEventListener("click", () => openModal("📋 Menu", buildMenu()));
+menuBtn.addEventListener("click", () => openModal(`📋 Menu ${menuVenue === "restaurant" ? "nhà hàng" : "tiệm trà"}`, buildMenu(menuVenue)));
 
 // ---------------------------------------------------------------- Decorate mode (between shifts only)
 
@@ -646,8 +665,11 @@ if (isTouchDevice() && document.documentElement.requestFullscreen) {
 initForceLandscape();
 
 // Full menu shown inline in the side panel on large screens (hidden on phones; 📋 opens it in a modal).
-const menuTitle = document.createElement("h2");
-menuTitle.textContent = "📋 Menu";
-menuInline.append(menuTitle, buildMenu());
+function renderInlineMenu() {
+  const menuTitle = document.createElement("h2");
+  menuTitle.textContent = menuVenue === "restaurant" ? "📋 Menu nhà hàng" : "📋 Menu tiệm trà";
+  menuInline.replaceChildren(menuTitle, buildMenu(menuVenue));
+}
+renderInlineMenu();
 
 showLobby();
