@@ -75,6 +75,8 @@ export interface FoodDef {
   /** Artwork under client/public/ (cut by client/assets-src/tools/cut_food.py). */
   image: string;
   color: number;
+  /** Artwork replacing `image` once this step is done ("food:rice.boil" shows a bowl of rice). */
+  cooked?: Partial<Record<ProcessId, string>>;
 }
 
 const food = (label: string, color: number, image?: string): FoodDef => ({ label, color, image: image ?? "" });
@@ -103,7 +105,19 @@ export const FOODS: Record<FoodId, FoodDef> = {
   chocolate: food("Sô cô la", 0x6d3b26),
 };
 for (const [id, def] of Object.entries(FOODS)) if (!def.image) def.image = `assets/food/ing_${id}.png`;
+FOODS.rice.cooked = { boil: "assets/food/ing_rice_cooked.png" };
+FOODS.noodles.cooked = { boil: "assets/food/ing_noodles_cooked.png" };
 export const isFoodId = (id: string): id is FoodId => id in FOODS;
+
+/** Artwork of a food in a given state: the last step with its own image wins, else the raw ingredient's. */
+export function foodImage(food: FoodId, steps: ProcessId[]): string {
+  const cooked = FOODS[food].cooked;
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const image = cooked?.[steps[i]];
+    if (image) return image;
+  }
+  return FOODS[food].image;
+}
 
 // ---------------------------------------------------------------- Containers
 

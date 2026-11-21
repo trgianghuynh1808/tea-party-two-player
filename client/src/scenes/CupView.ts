@@ -10,11 +10,13 @@ import {
   cupContents,
   foodKey,
   isCup,
+  isFoodId,
   isKitchenItem,
   matchDish,
   matchDrink,
   parseFood,
   type ContainerId,
+  type ProcessId,
 } from "@boba/shared";
 
 /**
@@ -42,15 +44,28 @@ const CUP_ART_WIDTH = 87;
 
 // ---------------------------------------------------------------- Restaurant items (food, plates, dishes)
 
-/** Ingredient / finished dish artwork (client/public/assets/food/, cut by client/assets-src/tools/cut_food.py). */
-export const foodTextureKey = (id: string) => `food-${id}`;
+/** Ingredient / finished dish artwork (client/public/assets/food/, cut by client/assets-src/tools/cut_food.py).
+ *  Steps pick the cooked artwork (see foodImage): "food-rice" raw, "food-rice-boil" boiled. */
+export const foodTextureKey = (id: string, steps: ProcessId[] = []): string => {
+  const cooked = isFoodId(id) ? FOODS[id].cooked : undefined;
+  for (let i = steps.length - 1; i >= 0; i--) if (cooked?.[steps[i]]) return `food-${id}-${steps[i]}`;
+  return `food-${id}`;
+};
 export const dishTextureKey = (id: string) => `dish-${id}`;
 const containerTextureKey = (id: ContainerId) => `container-${id}`;
 const BURNT_KEY = "food-burnt";
 
 export function preloadCupTextures(scene: Phaser.Scene) {
   for (const [name, url] of Object.entries(CUP_TEXTURES)) scene.load.image(textureKey(name as CupTexture), url);
-  for (const [id, def] of Object.entries(FOODS)) scene.load.image(foodTextureKey(id), def.image);
+  for (const [id, def] of Object.entries(FOODS)) {
+    scene.load.image(foodTextureKey(id), def.image);
+    const cooked = def.cooked;
+    if (cooked)
+      for (const step of Object.keys(cooked) as ProcessId[]) {
+        const image = cooked[step];
+        if (image) scene.load.image(foodTextureKey(id, [step]), image);
+      }
+  }
   for (const dish of DISHES) scene.load.image(dishTextureKey(dish.id), dish.image);
 }
 
@@ -180,8 +195,8 @@ export class CupView extends Phaser.GameObjects.Container {
         return true;
       }
       const parsed = parseFood(key);
-      if (!parsed || !this.scene.textures.exists(foodTextureKey(parsed.food))) return false;
-      this.food.setTexture(foodTextureKey(parsed.food));
+      if (!parsed || !this.scene.textures.exists(foodTextureKey(parsed.food, parsed.steps))) return false;
+      this.food.setTexture(foodTextureKey(parsed.food, parsed.steps));
       this.fit(this.food, h * 1.2, h * 1.2);
       const last = parsed.steps[parsed.steps.length - 1];
       if (last) this.badge.setText(PROCESSES[last].icon).setPosition(h * 0.5, -h * 1.05).setVisible(true);
@@ -208,8 +223,8 @@ export class CupView extends Phaser.GameObjects.Container {
     parts.forEach((part, i) => {
       const parsed = parseFood(part);
       const img = this.parts[i];
-      if (!parsed || !this.scene.textures.exists(foodTextureKey(parsed.food))) return;
-      img.setTexture(foodTextureKey(parsed.food)).setVisible(true);
+      if (!parsed || !this.scene.textures.exists(foodTextureKey(parsed.food, parsed.steps))) return;
+      img.setTexture(foodTextureKey(parsed.food, parsed.steps)).setVisible(true);
       this.fit(img, h * 0.7, h * 0.7);
       img.setPosition((i - (parts.length - 1) / 2) * step, baseY - (i % 2) * h * 0.12);
     });
