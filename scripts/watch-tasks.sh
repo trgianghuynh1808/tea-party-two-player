@@ -2,18 +2,25 @@
 # Chạy trong ô OpenCode. Chờ Claude giao task qua .agents/queue/*.job,
 # rồi tự chạy scripts/run-task.sh cho task đó. Ctrl+C để thoát.
 #
-# Claude giao việc bằng:
-#   echo .agents/tasks/<file>.md > .agents/queue/$(date +%s).job
+# Claude giao việc bằng:   scripts/handoff.sh .agents/tasks/<file>.md
+# Trạng thái từng task ghi vào .agents/status/<file>.status để Claude chờ (scripts/wait-task.sh):
+#   queued → running → done | stuck
 
 set -uo pipefail
 
 QUEUE=".agents/queue"
-mkdir -p "$QUEUE"
+STATUS_DIR=".agents/status"
+mkdir -p "$QUEUE" "$STATUS_DIR"
 
 notify() {
   # Thông báo macOS + tiếng bíp trong terminal
   osascript -e "display notification \"$2\" with title \"$1\" sound name \"Glass\"" >/dev/null 2>&1 || true
   printf '\a'
+}
+
+set_status() {   # task state
+  local f="$STATUS_DIR/$(basename "$1" .md).status"
+  printf '%s %s\n' "$2" "$(date +%s)" > "$f"
 }
 
 waiting_msg() {
@@ -41,10 +48,15 @@ while true; do
   if [[ ! -f "$task" ]]; then
     echo "⚠️  Không thấy file task: $task"
     notify "Giao task lỗi" "Không thấy file $task"
-  elif scripts/run-task.sh "$task"; then
-    notify "OpenCode đã xong ✅" "Quay lại Claude để review: $(basename "$task")"
   else
-    notify "OpenCode cần trợ giúp ⛔" "Xem file task rồi chuyển cho Claude: $(basename "$task")"
+    set_status "$task" running
+    if scripts/run-task.sh "$task"; then
+      set_status "$task" done
+      notify "OpenCode đã xong ✅" "$(basename "$task") — Claude tiếp tục"
+    else
+      set_status "$task" stuck
+      notify "OpenCode bị kẹt ⛔" "$(basename "$task") — Claude xử lý"
+    fi
   fi
 
   rm -f "$job.running"
