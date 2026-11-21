@@ -266,8 +266,8 @@ export function describeKitchenItem(item: string): string {
 // Local coordinates inside RESTAURANT (0,0 = top-left of the room). The back wall is y 0..WALL_BOTTOM.
 // The kitchen is a one-way flow so two players can split the work: prep on the left, handover in
 // the middle, cooking and serving on the right.
-// - Prep zone (x <= 382): ingredient crates in three columns (x = 31, 129, 227), chop
-//   boards at x = 340, and trash in the bottom-left corner.
+// - Prep zone (x <= 382): ingredient crates in three columns (x = 31, 129, 227), with 40px between
+//   crates along both axes, chop boards at x = 340, and trash at the bottom of the prep zone.
 // - Handover zone (x = 455): one column of counters to put prepped parts on for the other player.
 // - Cook + serve zone (x >= COOK_X): cookers in two rows, container shelves, then the take-away counter.
 // - Right: the dining room, furnished by the host (decorate mode), with the door at the bottom.
@@ -280,6 +280,7 @@ const MID_Y = 290;
 const SHELF_Y = 500;
 const COOK_X = 570;
 const COOK_PITCH = 90;
+const CRATE_PITCH = 88;
 
 const shelf = (container: ContainerId, x: number, y: number): StationDef => ({
   id: `r_shelf_${container}`,
@@ -359,9 +360,9 @@ export const RESTAURANT_STATIONS: StationDef[] = [
   ...BACK_ROW.map(([process, n], i) => cooker(process, n, COOK_X + i * COOK_PITCH, BACK_Y)),
   ...MID_ROW.map(([process, n], i) => cooker(process, n, COOK_X + i * COOK_PITCH, MID_Y)),
   ...SHELF_ROW.map((container, i) => shelf(container, COOK_X + i * COOK_PITCH, SHELF_Y)),
-  ...LEFT_CRATES.map((f, i) => crate(f, 31, 170 + i * 60)),
-  ...ISLAND_CRATES.slice(0, 7).map((f, i) => crate(f, 129, 170 + i * 60)),
-  ...ISLAND_CRATES.slice(7).map((f, i) => crate(f, 227, 170 + i * 60)),
+  ...LEFT_CRATES.map((f, i) => crate(f, 31, 170 + i * CRATE_PITCH)),
+  ...ISLAND_CRATES.slice(0, 7).map((f, i) => crate(f, 129, 170 + i * CRATE_PITCH)),
+  ...ISLAND_CRATES.slice(7).map((f, i) => crate(f, 227, 170 + i * CRATE_PITCH)),
   ...[0, 1, 2, 3, 4, 5].map(
     (i): StationDef => ({
       id: `r_counter_${i + 1}`,
@@ -374,7 +375,7 @@ export const RESTAURANT_STATIONS: StationDef[] = [
     }),
   ),
   { id: "r_delivery", type: StationType.DeliveryCounter, label: "Mang đi", ...at(820, 640), width: 150, height: 80, color: 0x90be6d },
-  { id: "r_trash", type: StationType.Trash, label: "Thùng rác", ...at(40, 712), width: 52, height: 52, color: 0x9e9e9e },
+  { id: "r_trash", type: StationType.Trash, label: "Thùng rác", ...at(330, 712), width: 52, height: 52, color: 0x9e9e9e },
 ];
 
 const KITCHEN_STATION_IDS = new Set(RESTAURANT_STATIONS.map((s) => s.id));

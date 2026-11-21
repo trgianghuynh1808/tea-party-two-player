@@ -405,7 +405,40 @@ test("T8: every x-adjacent station pair in the prep zone leaves a 44px aisle (th
   }
 });
 
-test("T9: a player can walk through both 44px prep aisles to pick middle-row crates from column 1 and column 2", async ({
+test("T10: adjacent crates in the same column leave a 40px vertical gap; no stations overlap and all stay on the floor", () => {
+  const MIN_GAP = 40;
+  const crates = byIdPrefix("r_crate_");
+  expect(crates.length).toBeGreaterThan(0);
+
+  const columns = new Map<number, StationDef[]>();
+  for (const c of crates) {
+    const x = local(c).x;
+    const column = columns.get(x);
+    if (column) column.push(c);
+    else columns.set(x, [c]);
+  }
+  for (const [x, column] of columns) {
+    expect(column.length, `column x=${x} has at least two crates`).toBeGreaterThanOrEqual(2);
+    column.sort((a, b) => local(a).y - local(b).y);
+    for (let i = 1; i < column.length; i++) {
+      const gap = rectOf(column[i]).top - rectOf(column[i - 1]).bottom;
+      expect(gap, `column x=${x}: ${column[i - 1].id} <-> ${column[i].id} vertical gap`).toBeGreaterThanOrEqual(MIN_GAP);
+    }
+  }
+
+  for (const s of RESTAURANT_STATIONS) {
+    expect(rectOf(s).bottom, `${s.id} stays on the floor`).toBeLessThanOrEqual(RESTAURANT.height);
+  }
+  for (let i = 0; i < RESTAURANT_STATIONS.length; i++) {
+    for (let j = i + 1; j < RESTAURANT_STATIONS.length; j++) {
+      const a = RESTAURANT_STATIONS[i];
+      const b = RESTAURANT_STATIONS[j];
+      expect(rectsOverlap(rectOf(a), rectOf(b)), `${a.id} overlaps ${b.id}`).toBe(false);
+    }
+  }
+});
+
+test("T9: a player can walk into the vertical gaps between crates to pick shrimp from column 1 and tomato from column 2", async ({
   page,
 }) => {
   await joinAsHost(page, uniqueUser("p1"));
@@ -436,35 +469,43 @@ test("T9: a player can walk through both 44px prep aisles to pick middle-row cra
       return g.state.players.get(g.room.sessionId).heldItem;
     });
 
-  // Walk into aisle 1 (local x = 76, between column 1 at x=31 and column 2 at x=129) to y=350 (r_crate_shrimp).
+  // Column 1 (x = 31): along the bottom edge (the y = 630 row is now blocked by the rice crate at
+  // x = 129, y = 610), up aisle 1 (x = 76), then step into the 40px vertical gap between the
+  // shrimp (y = 434) and egg (y = 522) crates.
   await walkRestaurantPath(
     page,
     [
-      [76, 630],
-      [76, 350],
+      [470, 742],
+      [76, 742],
+      [76, 477],
+      [31, 477],
     ],
     "left",
   );
   await interact();
   await expect.poll(heldOf).toBe("food:shrimp");
 
-  // Discard at trash (40, 712), then walk into aisle 2 (local x = 174, between column 2 at x=129 and column 3 at x=227) to y=230 (r_crate_tomato).
+  // Discard at the trash (330, 712), now at the bottom of the prep zone.
   await walkRestaurantPath(
     page,
     [
-      [76, 665],
-      [40, 665],
+      [76, 477],
+      [76, 742],
+      [280, 742],
     ],
     "down",
   );
   await interact();
   await expect.poll(heldOf).toBe("");
 
+  // Column 2 (x = 129): up aisle 2 (x = 174), then step into the vertical gap between the
+  // tomato (y = 258) and lettuce (y = 346) crates.
   await walkRestaurantPath(
     page,
     [
-      [174, 630],
-      [174, 230],
+      [174, 742],
+      [174, 301],
+      [129, 301],
     ],
     "left",
   );
