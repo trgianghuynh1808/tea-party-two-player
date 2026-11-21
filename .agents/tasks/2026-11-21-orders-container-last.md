@@ -15,7 +15,7 @@ Trong panel Đơn hàng (nhà hàng), dòng chỉ vật chứa (tô/đĩa/ly) hi
 - [x] 2. [dễ] `client/src/style.css`, rule `.order .part-into`: thêm `margin-top: 2px; padding-top: 3px; border-top: 1px dashed #d9cbb8;` để tách khỏi các bước.
 - [x] 3. [vừa] `client/src/testHook.ts` (mới): export type `GameTestHook`, `isTestMode` (đọc `?test=1` một lần) và `installTestHook(room)` (chỉ chạy khi `isTestMode`, gán `window.__GAME__`; khai báo `declare global { interface Window { __GAME__?: GameTestHook } }`).
 - [x] 4. [dễ] `client/src/main.ts`: giữ param `test=1` trong `setUrl`; gọi `installTestHook(room)` trong `startGame`; xoá `window.__GAME__` ở chỗ rời phòng (cùng chỗ `ordersPanel?.destroy()`).
-- [ ] 5. [vừa] `tests/helpers.ts` (mới): `joinAsHost(page, username)` — mở `/?test=1`, nhập tên (`#username-input`, submit `#name-form`), bấm `#create-btn`, chờ `window.__GAME__`; `startRestaurantShift(page)` — `page.evaluate` gọi `__GAME__.send("start_shift", { venue: "restaurant" })`, chờ `#orders-panel .order .part-into`.
+- [x] 5. [vừa] `tests/helpers.ts` (mới): `joinAsHost(page, username)` — mở `/?test=1`, nhập tên (`#username-input`, submit `#name-form`), bấm `#create-btn`, chờ `window.__GAME__`; `startRestaurantShift(page)` — `page.evaluate` gọi `__GAME__.send("start_shift", { venue: "restaurant" })`, chờ `#orders-panel .order .part-into`.
 - [ ] 6. [vừa] `tests/orders-panel.spec.ts` (mới): viết T1–T3 theo mục "Test cases", username duy nhất `p1-${Date.now()}`; tick T1–T3 khi spec đã tồn tại.
 - [ ] 7. [dễ] Chạy `npm run typecheck` + `npx playwright test`, ghi kết quả từng test (T1–T3) vào "Test status".
 
@@ -25,10 +25,10 @@ Trong panel Đơn hàng (nhà hàng), dòng chỉ vật chứa (tô/đĩa/ly) hi
 - [ ] T3. Separator nét đứt — computed `border-top-style` của `.part-into` là `dashed` (width 1px) — tests/orders-panel.spec.ts
 
 ## Trạng thái hiện tại
-Code đã xong (bước 1 commit 70dfe04, bước 2 separator CSS, bước 3 commit c3e782f: `client/src/testHook.ts` có `GameTestHook`, `isTestMode` (?test=1, đọc 1 lần lúc load), `installTestHook(room)`, `declare global Window.__GAME__`, kèm `TEST_MODE_PARAM` cho bước 4). Bước 4 xong: `client/src/main.ts` giữ `?test=1` trong `setUrl`, gọi `installTestHook(room)` đầu `startGame`, `delete window.__GAME__` trong `stopGame` (cùng chỗ `ordersPanel?.destroy()`). Còn thiếu: spec e2e T1–T3 (bước 5–7).
+Code đã xong (bước 1 commit 70dfe04, bước 2 separator CSS, bước 3 commit c3e782f: `client/src/testHook.ts` có `GameTestHook`, `isTestMode` (?test=1, đọc 1 lần lúc load), `installTestHook(room)`, `declare global Window.__GAME__`, kèm `TEST_MODE_PARAM` cho bước 4). Bước 4 xong: `client/src/main.ts` giữ `?test=1` trong `setUrl`, gọi `installTestHook(room)` đầu `startGame`, `delete window.__GAME__` trong `stopGame` (cùng chỗ `ordersPanel?.destroy()`). Bước 5 xong: `tests/helpers.ts` có `joinAsHost(page, username)` (mở `/?test=1`, nhập tên, submit `#name-form`, bấm `#create-btn`, chờ `window.__GAME__` qua `waitForFunction`) và `startRestaurantShift(page)` (`page.evaluate` gọi `__GAME__.send("start_shift", { venue: "restaurant" })`, chờ `#orders-panel .order .part-into`, timeout 20s vì đơn đầu sau ~2s; cast `window.__GAME__` inline trong callback vì evaluate không hỗ trợ closure). Còn thiếu: spec e2e T1–T3 (bước 6–7).
 
 ## Test status
-- Lần chạy cuối: 2026-11-21 (sau bước 4) — `npm run typecheck` PASS; `npx playwright test` "No tests found" (exit 1, như mong đợi vì `tests/` chưa có spec — bước 5–6 chưa làm).
+- Lần chạy cuối: 2026-11-21 (sau bước 5) — `npm run typecheck` PASS; `npx playwright test` "No tests found" (exit 1, như mong đợi vì `tests/` mới có `helpers.ts`, chưa có spec — bước 6 chưa làm).
 - Kết quả từng test:
   - T1: chưa viết
   - T2: chưa viết
