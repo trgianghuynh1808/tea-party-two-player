@@ -45,7 +45,7 @@ npm run dev:client   # client only
 npm run typecheck    # tsc --noEmit: server, then client (no separate script for shared; it is checked via those imports)
 npm run build        # build client (tsc --noEmit + vite build)
 npm start            # start the server only (serves client/dist if built)
-npx playwright test  # e2e tests; config auto-starts `npm run dev` (reuses a running one)
+npx playwright test  # e2e tests; config starts dev:server (waits for /health) then dev:client, reusing running ones
 ```
 
 `npm run serve` = build + start single-origin production server on 2567. Deployment: `render.yaml` (Render blueprint).
@@ -61,11 +61,20 @@ npx playwright test  # e2e tests; config auto-starts `npm run dev` (reuses a run
 
 - After each coding step, run `npm run typecheck` and `npx playwright test`. While `tests/` has no specs, Playwright exits non-zero with "No tests found"; that is expected, so rely on typecheck only and note it in the task file.
 - When tests fail, read `test-results/results.json` first (the JSON reporter writes it).
-- Only use `playwright-cli` (interactive browser tool, separate from `@playwright/test`) when the failure is visual and `results.json` is not enough.
-- After any browser testing, clean up: close the browser, delete `.playwright-mcp/`, and stop any dev server you started.
+- In "Test status", report every test case from the task file (T1, T2...) as PASS / FAIL / not written yet, not just an overall result.
+- When a plan step writes a spec, tick the matching test case in "Test cases" once the spec exists.
+- Only use `playwright-cli` (interactive browser tool, separate from `@playwright/test`) when the failure is visual and `results.json` is not enough, or during the Verify phase.
+- After any browser testing, clean up: close the browser, delete `.playwright-mcp/` if present, and stop any dev server you started.
 - 2-player tests: use two separate browser contexts inside the same test; keep `workers: 1` (the config is already sequential).
+- Use unique usernames per test run (e.g. `p1-${Date.now()}`), because shops are persisted per username in `server/data/`.
+- Tests must not depend on or modify production data. Locally there are no Upstash env vars, so persistence goes to JSON files in `server/data/`.
 - Use `window.__GAME__` to set up state once it exists (TODO: not exposed yet — until then, don't script real gameplay to reach a screen).
-- `tests/` is currently empty; add specs there.
+
+## Verify Phase
+
+- After all plan steps are done, a Verify agent checks the feature in a real browser with `playwright-cli` (open `http://localhost:5173/?test=1`, two sessions for 2-player features).
+- It checks every item in "Mục tiêu" and "Test cases", records results in the task file's "## Verify" section with screenshot paths, and turns every checked scenario (PASS or FAIL) into a spec in `tests/`.
+- The Verify agent must not change game code. Its last line in "## Verify" is exactly `VERIFY: PASS` or `VERIFY: FAIL`.
 
 ## Workflow Rules
 
