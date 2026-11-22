@@ -282,8 +282,8 @@ export function describeKitchenItem(item: string): string {
 // - Crate row: all 21 ingredient crates in one horizontal line under the back wall (y = TOP_Y) —
 //   cooking ingredients first, then the shared ones, then the drink ones.
 // - Left galley: the savory cookers in two parallel columns along the left edge — an outer column
-//   against the wall and an inner column beside it — each 4 rows from y = 270 with 90px pitch
-//   (60px machines, 30px gaps). A 70px aisle (x 102..172) runs between the two columns, so a player
+//   against the wall and an inner column beside it — each 4 rows from y = 270 with 110px pitch
+//   (60px machines, 50px gaps). A 70px aisle (x 102..172) runs between the two columns, so a player
 //   standing in it reaches both.
 // - Right column: only the drink-side machines (chop board, blender, coffee machine) stacked at
 //   x = 1340, so every machine is reached from the open middle.
@@ -301,9 +301,9 @@ const LEFT_OUTER_X = 60;
 const LEFT_INNER_X = 214;
 /** Local x of the right machine column, hugging the right edge. */
 const RIGHT_MACHINE_X = 1340;
-/** Top machine y, then the vertical pitch down each column (60px machines, 30px gaps). */
+/** Top machine y, then the vertical pitch down each column (60px machines, 50px gaps). */
 const MACHINE_TOP_Y = 270;
-const MACHINE_PITCH_Y = 90;
+const MACHINE_PITCH_Y = 110;
 /** Center y of the bottom row (the 80px-tall take-away counter sits at y = 705). */
 const BOTTOM_Y = 715;
 
@@ -350,16 +350,16 @@ const COOK_CRATES: FoodId[] = [
 const SHARED_CRATES: FoodId[] = ["milk", "strawberry"];
 /** Crate row: drink ingredients. */
 const DRINK_CRATES: FoodId[] = ["coffee", "orange", "lemon", "chocolate"];
-/** Left galley, outer column (top to bottom): the chop board, the pans, a pot. */
+/** Left galley, outer column (top to bottom): the oven, the pans, a pot. */
 const LEFT_OUTER: [ProcessId, number][] = [
-  ["chop", 1],
+  ["bake", 1],
   ["fry", 1],
   ["fry", 2],
   ["boil", 1],
 ];
-/** Left galley, inner column (top to bottom): the oven, the fryer, the grill, the second pot. */
+/** Left galley, inner column (top to bottom): the chop board, the fryer, the grill, the second pot. */
 const LEFT_INNER: [ProcessId, number][] = [
-  ["bake", 1],
+  ["chop", 1],
   ["deepfry", 1],
   ["grill", 1],
   ["boil", 2],

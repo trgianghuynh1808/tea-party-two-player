@@ -79,6 +79,8 @@ test("edge-layout T1: crates form one row on top, the savory cookers fill the le
   // The savory machines all sit in the left galley now; the right column keeps only the drink ones.
   expect(local(station("r_bake_1")).x, "r_bake_1 moved into the left galley").toBeLessThan(400);
   expect(local(station("r_deepfry_1")).x, "r_deepfry_1 moved into the left galley").toBeLessThan(400);
+  expect(local(station("r_chop_1")).x, "r_chop_1 sits in the galley's inner column").toBe(214);
+  expect(local(station("r_bake_1")).x, "r_bake_1 sits in the galley's outer column").toBe(60);
   const rightColumn = cookers.filter((k) => local(k).x === 1340).map((k) => k.id);
   expect(rightColumn, "the right column is drink-side only").toEqual(["r_chop_2", "r_blend_1", "r_brew_1"]);
 
@@ -92,7 +94,7 @@ test("edge-layout T1: crates form one row on top, the savory cookers fill the le
     for (let i = 0; i < rects.length; i++) {
       for (let j = i + 1; j < rects.length; j++) {
         const [upper, lower] = rects[i].top < rects[j].top ? [rects[i], rects[j]] : [rects[j], rects[i]];
-        expect(lower.top - upper.bottom, `vertical gap between the cookers stacked at x=${x}`).toBeGreaterThanOrEqual(24);
+        expect(lower.top - upper.bottom, `vertical gap between the cookers stacked at x=${x}`).toBeGreaterThanOrEqual(48);
       }
     }
   }
@@ -315,14 +317,14 @@ test("T2: tea shop machines leave a 30px gap and counters a 40px gap, clear of t
 });
 
 test("T11: the station in the player's facing direction wins over the plain nearest one", () => {
-  // The 30px gap between r_chop_1 and r_fry_1 in the galley's outer column: standing 3px below the
-  // board, r_chop_1 is nearer (3 vs 27), so without facing it wins; only FACING_BIAS lets facing
+  // The 50px gap between r_bake_1 and r_fry_1 in the galley's outer column: standing 18px below the
+  // oven, r_bake_1 is nearer (18 vs 32), so without facing it wins; only FACING_BIAS lets facing
   // "down" pick r_fry_1.
-  const chop1 = station("r_chop_1");
-  const boardGap = { x: RESTAURANT.x + local(chop1).x, y: RESTAURANT.y + rectOf(chop1).bottom + 3 };
-  expect(findNearestStationDef(boardGap)?.id).toBe("r_chop_1");
-  expect(findNearestStationDef(boardGap, "up")?.id).toBe("r_chop_1");
-  expect(findNearestStationDef(boardGap, "down")?.id).toBe("r_fry_1");
+  const bake1 = station("r_bake_1");
+  const ovenGap = { x: RESTAURANT.x + local(bake1).x, y: RESTAURANT.y + rectOf(bake1).bottom + 18 };
+  expect(findNearestStationDef(ovenGap)?.id).toBe("r_bake_1");
+  expect(findNearestStationDef(ovenGap, "up")?.id).toBe("r_bake_1");
+  expect(findNearestStationDef(ovenGap, "down")?.id).toBe("r_fry_1");
 
   // The 8px gap between the shrimp and egg crates on the top row: standing 1px closer to the shrimp,
   // facing "left" picks it while facing "right" picks the egg.
@@ -492,7 +494,7 @@ test("edge-layout T3: two players collaborate through the open middle - potato: 
     const boilStand: [number, number] = [rectOf(boil1).right + 18, local(boil1).y];
     const plateStand: [number, number] = [local(plateShelf).x, rectOf(plateShelf).top - 25];
 
-    // Player 1: potato from the top crate row -> chop on r_chop_1 (left column) -> r_counter_1.
+    // Player 1: potato from the top crate row -> chop on r_chop_1 (left galley, inner column) -> r_counter_1.
     await walkRestaurantPath(page1, [[potatoStand[0], spawn.y], potatoStand], "up");
     await interact(page1);
     await expect.poll(() => heldOf(page1)).toBe("food:potato");
