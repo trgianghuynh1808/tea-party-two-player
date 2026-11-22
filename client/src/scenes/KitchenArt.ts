@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { StationType, isProcess, type ProcessId, type StationDef } from "@boba/shared";
+import { teaStationTexture } from "./TeaArt";
 
 // Restaurant kitchen stations, drawn with code (front view, like the tea shop's machines): a counter / stove
 // with the appliance on top. The art stands on the bottom edge of the station box and may rise KITCHEN_ART_RISE px
@@ -22,6 +23,7 @@ export function kitchenStationTexture(def: StationDef): string | undefined {
   if (def.type === StationType.Cooker && def.process) return key(def.process);
   if (def.type === StationType.Crate) return key("crate");
   if (def.type === StationType.Shelf) return key("shelf");
+  if (def.type === StationType.Machine || def.type === StationType.CupShelf) return teaStationTexture(def);
   return undefined;
 }
 

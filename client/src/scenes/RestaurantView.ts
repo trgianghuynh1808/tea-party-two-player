@@ -7,6 +7,20 @@ const TILE_KEY = "restaurant-tile";
 /** The dining area (local px): the wooden floor in the open middle; tiles everywhere else. */
 const DINING_RECT = { left: 280, top: 230, right: 1250, bottom: 660 };
 
+/** The checkered tile texture (cream + terracotta checker, 80×80), created once; returns its key. */
+export function ensureTileTexture(scene: Phaser.Scene): string {
+  if (!scene.textures.exists(TILE_KEY)) {
+    const g = scene.make.graphics({}, false);
+    // Cream and terracotta checker tiles.
+    g.fillStyle(0xf1e6d6).fillRect(0, 0, 80, 80);
+    g.fillStyle(0xd9a38a).fillRect(0, 0, 40, 40).fillRect(40, 40, 40, 40);
+    g.lineStyle(1, 0xb08968, 0.35).strokeRect(0.5, 0.5, 39, 39).strokeRect(40.5, 0.5, 39, 39).strokeRect(0.5, 40.5, 39, 39).strokeRect(40.5, 40.5, 39, 39);
+    g.generateTexture(TILE_KEY, 80, 80);
+    g.destroy();
+  }
+  return TILE_KEY;
+}
+
 /**
  * The restaurant's interior (static): tile floor all around the edges and the wooden dining room in the
  * open middle, back wall with a tiled splashback along its full width, the sign over the middle and the
@@ -18,7 +32,7 @@ export class RestaurantView {
     private readonly fs: (px: number) => string,
     floorTexture: string,
   ) {
-    this.makeTextures();
+    ensureTileTexture(scene);
     const R = RESTAURANT;
     scene.add.tileSprite(R.x, R.y, R.width, R.height, TILE_KEY).setOrigin(0).setDepth(FLOOR_DEPTH);
     if (scene.textures.exists(floorTexture)) {
@@ -35,17 +49,6 @@ export class RestaurantView {
     }
     this.drawWall();
     this.drawExit();
-  }
-
-  private makeTextures() {
-    if (this.scene.textures.exists(TILE_KEY)) return;
-    const g = this.scene.make.graphics({}, false);
-    // Cream and terracotta checker tiles.
-    g.fillStyle(0xf1e6d6).fillRect(0, 0, 80, 80);
-    g.fillStyle(0xd9a38a).fillRect(0, 0, 40, 40).fillRect(40, 40, 40, 40);
-    g.lineStyle(1, 0xb08968, 0.35).strokeRect(0.5, 0.5, 39, 39).strokeRect(40.5, 0.5, 39, 39).strokeRect(0.5, 40.5, 39, 39).strokeRect(40.5, 40.5, 39, 39);
-    g.generateTexture(TILE_KEY, 80, 80);
-    g.destroy();
   }
 
   private drawWall() {

@@ -53,8 +53,9 @@ import { CupView, foodTextureKey, preloadCupTextures } from "./CupView";
 import { DecorController, bedPillowPoint, preloadDecorTextures } from "./DecorController";
 import { CustomerController } from "./CustomerController";
 import { YardView, preloadBuildTextures } from "./YardView";
-import { RestaurantView } from "./RestaurantView";
+import { RestaurantView, ensureTileTexture } from "./RestaurantView";
 import { KITCHEN_ART_RISE, kitchenStationTexture, makeKitchenStationTextures } from "./KitchenArt";
+import { makeTeaStationTextures, teaStationTexture } from "./TeaArt";
 import { BuildController } from "./BuildController";
 import { CHARACTER_BODY_PX, DIRECTION_ROW, FEET_Y, HEAD_Y, WALK_COLUMNS, WALK_FPS, characterKey, characterOf } from "./characterArt";
 
@@ -297,6 +298,7 @@ export class ShopScene extends Phaser.Scene {
     this.drawWall();
     this.drawExit();
     makeKitchenStationTextures(this);
+    makeTeaStationTextures(this);
     new RestaurantView(this, fs, FLOOR_TEXTURE);
     this.createStations();
     this.createHud();
@@ -569,6 +571,10 @@ export class ShopScene extends Phaser.Scene {
   /** Wood floor art, pre-cropped to the world size (client/assets-src/floor/build_floor.py). */
   private drawFloor() {
     this.add.image(0, 0, FLOOR_TEXTURE).setOrigin(0).setDisplaySize(WORLD_WIDTH, WORLD_HEIGHT).setDepth(-1000);
+    // Checkered strip along the back counters (like the restaurant's tiled edge), added after the wood
+    // floor so it sits on top; a thin brown border line closes it off at the bottom edge.
+    this.add.tileSprite(0, WALL_BOTTOM, WORLD_WIDTH, 95, ensureTileTexture(this)).setOrigin(0).setDepth(-1000);
+    this.add.rectangle(0, WALL_BOTTOM + 91, WORLD_WIDTH, 4, 0x8d5a3b, 0.6).setOrigin(0).setDepth(-1000);
   }
 
   /** Back wall strip at the top of the shop (y 0..WALL_BOTTOM): paintings hang on it, machines stand against it. */
@@ -606,9 +612,11 @@ export class ShopScene extends Phaser.Scene {
       const rect = this.createStationBody(def);
       const iconDef = STATION_ICONS[def.id];
       if (iconDef) {
-        // Sits on the station, under any cup placed there (same depth, created earlier).
-        const icon = this.add.image(def.x, def.y, stationIconKey(def.id));
-        icon.setScale(iconDef.height / icon.height).setDepth(def.y + def.height / 2);
+        // Under any cup placed there (same depth, created earlier). On the new wooden counters the icon
+        // moves to the plain front face, capped at 22px so it covers no equipment on top.
+        const tea = teaStationTexture(def);
+        const icon = this.add.image(def.x, tea ? def.y + def.height / 2 - 14 : def.y, stationIconKey(def.id));
+        icon.setScale((tea ? Math.min(iconDef.height, 22) : iconDef.height) / icon.height).setDepth(def.y + def.height / 2);
       }
       this.addKitchenIcons(def);
       // Phones: icon only, the seconds would make neighbouring labels overlap at the larger font size.
