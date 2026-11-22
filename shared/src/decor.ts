@@ -148,7 +148,6 @@ const wallArt = (kind: string, label: string, price: number, image: string, widt
 export const DECORATION_CATALOG: DecorationDef[] = [
   ...inCategory("plants", [
     decor("plant", "Chậu dương xỉ", 50, "fern_medium", 30, 28, 44, 0x2a9d8f),
-    decor("fern_small", "Dương xỉ nhỏ", 30, "fern_small", 24, 22, 32, 0x2a9d8f),
     decor("fern_large", "Dương xỉ lớn", 80, "fern_large", 46, 36, 58, 0x2a9d8f),
     decor("succulent", "Sen đá", 45, "succulent_1", 28, 26, 40, 0x457b9d),
     decor("succulent_large", "Sen đá lớn", 55, "succulent_5", 30, 28, 46, 0x457b9d),
@@ -182,9 +181,6 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     { ...decor("stool", "Đôn gỗ", 35, "stool", 28, 24, 40, 0xa1887f, "flip"), role: "seat" },
     // Built by client/assets-src/tools/build_table_view.py (front view only: the table is round, so it doesn't turn).
     { ...decor("table", "Bàn khách", 90, "wicker_table", 44, 26, 48, 0x8d6e63), role: "table" },
-    // Cut from client/assets-src/sheets/bedroom-original.png by client/assets-src/tools/cut_bedroom.py.
-    { ...decor("chair_wood_back", "Ghế gỗ (quay lưng)", 35, "bedroom/chair_back", 30, 22, 50, 0xb07a66), role: "seat" },
-    { ...decor("chair_wood_side", "Ghế gỗ (nghiêng)", 35, "bedroom/chair_side", 32, 22, 55, 0xb07a66, "flip"), role: "seat" },
   ]),
   ...inCategory("bedroom", [
     // Cut from client/assets-src/sheets/bedroom-original.png by client/assets-src/tools/cut_bedroom.py.
@@ -193,7 +189,6 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     decor("desk_book", "Bàn học có sách", 100, "bedroom/desk_book", 60, 26, 65, 0xb07a66),
     decor("dresser", "Tủ ngăn kéo", 120, "bedroom/dresser", 54, 26, 83, 0x8a4b3d),
     decor("wardrobe", "Tủ quần áo", 140, "bedroom/wardrobe", 54, 26, 86, 0x8a4b3d),
-    decor("bucket", "Xô thiếc", 20, "bedroom/bucket", 24, 18, 31, 0x8796a8),
     // bedroom-2-original.png
     decor("grandfather_clock", "Đồng hồ quả lắc", 130, "bedroom/grandfather_clock", 40, 20, 90, 0x7a4a2a),
     decor("chest", "Rương gỗ", 60, "bedroom/chest", 46, 24, 44, 0xa0673a),
@@ -208,11 +203,9 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     // bedroom-4-original.png
     bed(decor("bed_blue_lamp", "Giường chăn xanh có đèn", 160, "bedroom/bed_blue_lamp", 60, 50, 80, 0x3d7bd0, "flip"), 0.56, 0.2),
     decor("nightstand_green_lamp", "Tủ đầu giường đèn lá", 80, "bedroom/nightstand_green_lamp", 42, 22, 54, 0x7a3f3a, "flip"),
-    decor("desk_set", "Bàn làm việc bày đồ", 130, "bedroom/desk_set", 100, 26, 75, 0x7a3f3a, "flip"),
   ]),
   ...inCategory("lighting", [
     decor("lamp", "Lồng đèn đỏ", 75, "red_lantern_lit", 30, 26, 56, 0xf4a261),
-    decor("red_lantern", "Lồng đèn (tắt)", 55, "red_lantern", 28, 24, 50, 0xe76f51),
     decor("lantern_brass", "Đèn bão", 60, "lantern_brass", 26, 22, 48, 0xb08968),
     decor("lantern_lit", "Đèn bão (sáng)", 85, "lantern_gold_lit", 26, 22, 48, 0xffd166),
     decor("lantern_bronze_lit", "Đèn bão đồng (sáng)", 85, "lantern_bronze_lit", 26, 22, 48, 0xb5838d),
@@ -233,10 +226,8 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     rug("rug_bear_brown", "Thảm gấu nâu", 150, "rug_bear_brown", 0xb08463, 146, 66),
     rug("rug_bear_white", "Thảm gấu trắng", 150, "rug_bear_white", 0xf1e6d6, 158, 60),
     rug("rug_tiger", "Thảm hổ con", 160, "rug_tiger", 0xe8b04a, 146, 66),
-    rug("rug_blue", "Thảm xanh hoa văn", 110, "rug_blue", 0x2a56b8, 90, 90),
     rug("rug_teal", "Thảm ngọc ô trám", 90, "rug_teal", 0x5ec4c4, 118, 62),
     rug("rug_green", "Thảm xanh rêu tua rua", 120, "rug_green", 0x24705a, 138, 61),
-    rug("rug_oval_blue", "Thảm bầu dục xanh", 70, "rug_oval_blue", 0x51698f, 50, 90),
   ]),
   ...inCategory("art", [
     // Hangs on the back wall.

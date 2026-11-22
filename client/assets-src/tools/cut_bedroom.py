@@ -40,13 +40,9 @@ SCENES = {
             "bedroom/bed.png": {"box": (203, 132, 322, 374), "h": 182},
             "bedroom/nightstand_lamp.png": {"box": (320, 64, 455, 292), "h": 167},
             "wall/window_wood.png": {"box": (478, 16, 598, 136), "h": 83},
-            "bedroom/bucket.png": {"box": (546, 187, 622, 272), "h": 62, "drop_reddish": True},
             "bedroom/desk_book.png": {"box": (630, 104, 794, 288), "h": 131},
-            "bedroom/chair_back.png": {"box": (662, 272, 760, 408), "h": 100, "holes": 40},
             "bedroom/dresser.png": {"box": (795, 64, 942, 286), "h": 166},
             "bedroom/wardrobe.png": {"box": (932, 52, 1080, 286), "h": 173},
-            "rug_blue.png": {"box": (322, 292, 548, 518), "h": 168, "mirror_x": True},
-            "bedroom/chair_side.png": {"box": (197, 466, 296, 612), "h": 111, "holes": 40},
         },
     },
     "bedroom-2": {
@@ -87,8 +83,6 @@ SCENES = {
         "items": {
             "bedroom/bed_blue_lamp.png": {"box": (46, 156, 120, 252), "h": 160},
             "bedroom/nightstand_green_lamp.png": {"box": (123, 163, 177, 230), "h": 108},
-            "bedroom/desk_set.png": {"box": (203, 143, 335, 236), "h": 150, "erase": [(249, 221, 286, 236)]},  # the chair under it (left out: too hidden)
-            "rug_oval_blue.png": {"box": (288, 320, 335, 402), "h": 180},
         },
     },
 }
