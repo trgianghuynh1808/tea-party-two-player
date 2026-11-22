@@ -29,3 +29,33 @@ test("T2: the 8 removed items are gone from the catalog and disk, kept neighbour
   expect(getDecorationDef("lantern_brass")).toBeDefined();
   expect(existsSync("client/public/assets/decor/red_lantern_lit.png")).toBe(true);
 });
+
+const NEW_FURNITURE: { kind: string; seat?: true }[] = [
+  { kind: "armchair_baroque", seat: true },
+  { kind: "chair_cream", seat: true },
+  { kind: "armchair_cream", seat: true },
+  { kind: "lamp_arc_brass" },
+  { kind: "lamp_shade_white" },
+  { kind: "lamp_post_brass" },
+  { kind: "lamp_floor_cream" },
+  { kind: "globe" },
+  { kind: "coat_stand" },
+  { kind: "vanity_piano" },
+  { kind: "vanity_mirror" },
+  { kind: "fireplace_white" },
+  { kind: "plant_leafy" },
+  { kind: "plant_big_leaf" },
+  { kind: "plant_slim" },
+  { kind: "plant_pattern_pot" },
+];
+
+test("T3: the 16 new furniture pieces are in the catalog with art on disk, the 3 chairs are seats, and no kind is duplicated", () => {
+  const kinds = DECORATION_CATALOG.map((d) => d.kind);
+  for (const { kind, seat } of NEW_FURNITURE) {
+    const def = getDecorationDef(kind);
+    expect(def, kind).toBeDefined();
+    expect(existsSync(`client/public/${def!.image}`), kind).toBe(true);
+    if (seat) expect(def!.role, kind).toBe("seat");
+    expect(kinds.filter((k) => k === kind), kind).toHaveLength(1);
+  }
+});
