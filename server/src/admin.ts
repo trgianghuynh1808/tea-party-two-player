@@ -18,6 +18,9 @@ import { forgetShop, openShop, type Piece, type RefundMode } from "./shop/Shared
  * - PATCH  /admin/users/:name/money        -> body { set } (new total, >= 0) or { delta } (add/remove)
  * - DELETE /admin/users/:name/decorations -> body { ids } or { venue } ("shop" | "restaurant"),
  *   optional { refund: "full" | "none" } (default full): removed pieces refund their FULL price
+ * - GET    /admin/users/:name/tiles     -> that user's yard tiles grouped by kind (label, shape, price, count)
+ * - DELETE /admin/users/:name/tiles     -> body { kinds } (tile kind array) or { all: true }, optional
+ *   { refund: "full" | "none" } (default full): removed tiles refund their FULL price per cell
  * - POST   /admin/decorations/reset         -> body { venue: "restaurant", refund: "full", dryRun? }:
  *   removes every user's restaurant furniture (dryRun previews the totals without changing anything)
  */
@@ -63,6 +66,7 @@ export function registerAdminRoutes(app: Application): void {
             counts: {
               shop: pieces.filter((p) => p.venue === "shop").length,
               restaurant: pieces.filter((p) => p.venue === "restaurant").length,
+              tiles: shop.tiles.size,
             },
           };
         }),
@@ -193,6 +197,49 @@ export function registerAdminRoutes(app: Application): void {
       res.json({ ok: true, removed, refunded, money: shop.money });
     } catch (err) {
       console.error("[admin] remove decorations failed", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  app.get("/admin/users/:name/tiles", async (req, res) => {
+    const name = normalizeUsername(req.params.name);
+    if (!name) return void res.status(400).json({ error: "bad name" });
+    try {
+      const found = await shopOfUser(name);
+      if ("error" in found) return void res.status(404).json({ error: "user not found" });
+      const tiles = found.shop.tilesByKind();
+      res.json({ name, money: found.shop.money, tiles, total: found.shop.tiles.size });
+    } catch (err) {
+      console.error("[admin] read tiles failed", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  app.delete("/admin/users/:name/tiles", JSON_BODY, async (req, res) => {
+    const name = normalizeUsername(req.params.name);
+    if (!name) return void res.status(400).json({ error: "bad name" });
+    const body = (req.body ?? {}) as { kinds?: unknown; all?: unknown; refund?: unknown };
+    const hasKinds = body.kinds !== undefined;
+    const hasAll = body.all !== undefined;
+    if (hasKinds === hasAll) {
+      return void res.status(400).json({ error: "body must have exactly one of kinds or all: true" });
+    }
+    if (hasAll && body.all !== true) return void res.status(400).json({ error: "all must be true" });
+    if (hasKinds && (!Array.isArray(body.kinds) || !body.kinds.length || body.kinds.some((k) => typeof k !== "string"))) {
+      return void res.status(400).json({ error: "kinds must be a non-empty array of tile kinds" });
+    }
+    const refund = parseRefundMode(body.refund);
+    if (!refund) return void res.status(400).json({ error: "refund must be \"full\" or \"none\"" });
+    try {
+      const found = await shopOfUser(name);
+      if ("error" in found) return void res.status(404).json({ error: "user not found" });
+      const shop = found.shop;
+      const selector = hasAll ? "all" : (body.kinds as string[]);
+      const { removed, refunded } = shop.removeTiles(selector, refund);
+      console.log(`[admin] removed ${removed} tile(s) of ${name}, refunded $${refunded}`);
+      res.json({ ok: true, removed, refunded, money: shop.money });
+    } catch (err) {
+      console.error("[admin] remove tiles failed", err);
       res.status(500).json({ error: String(err) });
     }
   });

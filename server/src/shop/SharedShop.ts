@@ -41,6 +41,15 @@ export interface PieceInfo {
 /** How much money to give back for removed pieces: the full price, or nothing. */
 export type RefundMode = "full" | "none";
 
+/** A yard-tile kind as shown in admin views: its catalog info plus how many cells hold it. */
+export interface TileKindInfo {
+  kind: string;
+  label: string;
+  price: number;
+  shape: string;
+  count: number;
+}
+
 /** What changed in the shop; every open room mirrors these into its synced state. */
 export type ShopEvent =
   | { type: "money"; money: number }
@@ -216,6 +225,44 @@ export class SharedShop {
     this.emit({ type: "money", money: this.money });
     this.scheduleSave();
     return { removed, refunded };
+  }
+
+  /**
+   * Yard tiles grouped by kind (admin views). A kind no longer in the catalog keeps its raw kind as
+   * the label, at price 0, with shape "unknown". Sorted by descending count.
+   */
+  tilesByKind(): TileKindInfo[] {
+    const counts = new Map<string, number>();
+    for (const kind of this.tiles.values()) counts.set(kind, (counts.get(kind) ?? 0) + 1);
+    return [...counts.entries()]
+      .map(([kind, count]) => {
+        const def = getBuildTile(kind);
+        return { kind, label: def?.label ?? kind, price: def?.price ?? 0, shape: def?.shape ?? "unknown", count };
+      })
+      .sort((a, b) => b.count - a.count);
+  }
+
+  /**
+   * Remove yard tiles picked by kind list, or all of them (admin tool; refunds the FULL price per
+   * cell, unknown kinds are worth $0). Emits one "tiles" event with every removed cell, then a
+   * "money" event. Returns totals; nothing is emitted when no tile matched.
+   */
+  removeTiles(selector: string[] | "all", refund: RefundMode): { removed: number; refunded: number } {
+    const kinds = selector === "all" ? undefined : new Set(selector);
+    const changes: [string, string][] = [];
+    let refunded = 0;
+    for (const [key, kind] of this.tiles) {
+      if (kinds && !kinds.has(kind)) continue;
+      this.tiles.delete(key);
+      changes.push([key, ""]);
+      if (refund === "full") refunded += getBuildTile(kind)?.price ?? 0;
+    }
+    if (!changes.length) return { removed: 0, refunded: 0 };
+    if (refunded) this.money += refunded;
+    this.emit({ type: "tiles", changes });
+    this.emit({ type: "money", money: this.money });
+    this.scheduleSave();
+    return { removed: changes.length, refunded };
   }
 
   /**

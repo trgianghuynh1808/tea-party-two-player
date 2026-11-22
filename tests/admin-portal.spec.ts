@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
-import { SERVER_PORT, getDecorationDef } from "@boba/shared";
+import { BUILD_TILES, SERVER_PORT, YARD_COLS, YARD_ROWS, canBuildCell, getBuildTile, getDecorationDef, tileKey } from "@boba/shared";
 import { joinAsHost } from "./helpers";
 
 /**
@@ -8,6 +8,8 @@ import { joinAsHost } from "./helpers";
  * - T2 drives the /portal page the server itself serves (page fixture + the game hook to buy furniture).
  * - T4/T5 cover deleting a user (task .agents/tasks/2026-11-22-admin-delete-user.md): the API rules
  *   (token, confirm, 404/409, the storage endpoint removed) and the portal row's Xoá button.
+ * - T6/T7 cover the yard-tile admin (task .agents/tasks/2026-11-22-admin-tiles.md): the tiles API
+ *   rules (kinds/all, refund, 400) and the portal's tile column + tile card with delete-all.
  * playwright.config.ts starts the server with ADMIN_TOKEN set, so these tests need a server
  * started by Playwright: a dev server without the token would answer 404 instead of 401.
  */
@@ -47,6 +49,31 @@ const RESTAURANT_PLANT = { kind: "plant", x: 1800, y: 400 };
 /** A "plant" in the open middle of the tea shop (x <= 960, clear of the machines and counters). */
 const SHOP_PLANT = { kind: "plant", x: 500, y: 450 };
 const PLANT_PRICE = getDecorationDef("plant")!.price;
+
+/** Yard-tile fixtures for T6/T7: the wood floor and a bed prop (any decor_* tile if the bed is renamed). */
+const FLOOR_TILE = getBuildTile("floor_wood")!;
+const PROP_TILE = getBuildTile("decor_bed_red") ?? BUILD_TILES.find((t) => t.kind.startsWith("decor_"))!;
+
+/** The first `count` yard cells (row-major from the origin) that allow building (canBuildCell). */
+function buildableCells(count: number): { cx: number; cy: number }[] {
+  const cells: { cx: number; cy: number }[] = [];
+  for (let cy = 0; cy < YARD_ROWS && cells.length < count; cy++) {
+    for (let cx = 0; cx < YARD_COLS && cells.length < count; cx++) {
+      if (canBuildCell(cx, cy)) cells.push({ cx, cy });
+    }
+  }
+  return cells;
+}
+
+/** A shop-save tiles field: two wood-floor cells and one bed prop, on three separate buildable cells. */
+function sampleTiles(): Record<string, string> {
+  const [floorA, floorB, prop] = buildableCells(3);
+  return {
+    [tileKey(floorA.cx, floorA.cy, "floor")]: FLOOR_TILE.kind,
+    [tileKey(floorB.cx, floorB.cy, "floor")]: FLOOR_TILE.kind,
+    [tileKey(prop.cx, prop.cy, "structure")]: PROP_TILE.kind,
+  };
+}
 
 test("T1: admin API — no token is 401, pieces come back per venue, deleting a venue refunds the full price, reset rejects the shop venue", async ({ page, request }) => {
   // No token: the admin middleware answers 401 before any route runs.
@@ -194,4 +221,95 @@ test("T5: portal delete — the row's Xoá button (confirm dialog) removes the u
   await expect(row).toHaveCount(0);
   await expect(page.locator("#detailView")).toBeHidden();
   await expect(page.locator("#diagBox")).toHaveCount(0);
+});
+
+test("T6: admin tiles API — the user list counts tiles, the tiles view groups them by kind, and deleting by kind or all refunds the full price per cell", async ({ request }) => {
+  // A user who never played, with money and three yard tiles (two wood floors, one bed prop).
+  const user = uniqueUser();
+  const put = await request.put(`${SERVER}/admin/users/${encodeURIComponent(user)}/shop`, {
+    headers: AUTH,
+    data: { money: 100, decorations: [], tiles: sampleTiles() },
+  });
+  expect(put.status()).toBe(200);
+
+  // The user listing counts their tiles.
+  const list = (await (await request.get(`${SERVER}/admin/users`, { headers: AUTH })).json()) as {
+    name: string;
+    counts: { tiles: number };
+  }[];
+  expect(list.find((u) => u.name === user)?.counts.tiles).toBe(3);
+
+  // The tiles view groups them into two kinds (2 floors + 1 bed) with the right total.
+  const tilesRes = await request.get(`${SERVER}/admin/users/${encodeURIComponent(user)}/tiles`, { headers: AUTH });
+  expect(tilesRes.status()).toBe(200);
+  const tilesData = (await tilesRes.json()) as { money: number; tiles: { kind: string; count: number; price: number }[]; total: number };
+  expect(tilesData.total).toBe(3);
+  expect(tilesData.tiles).toHaveLength(2);
+  expect(tilesData.tiles.find((t) => t.kind === FLOOR_TILE.kind)).toMatchObject({ count: 2, price: FLOOR_TILE.price });
+  expect(tilesData.tiles.find((t) => t.kind === PROP_TILE.kind)).toMatchObject({ count: 1, price: PROP_TILE.price });
+
+  // Deleting one kind removes both cells and refunds the FULL price of each into the wallet.
+  const del = await request.delete(`${SERVER}/admin/users/${encodeURIComponent(user)}/tiles`, {
+    headers: AUTH,
+    data: { kinds: [FLOOR_TILE.kind] },
+  });
+  expect(del.status()).toBe(200);
+  expect(await del.json()).toMatchObject({
+    ok: true,
+    removed: 2,
+    refunded: 2 * FLOOR_TILE.price,
+    money: 100 + 2 * FLOOR_TILE.price,
+  });
+
+  // A DELETE without kinds or all is rejected.
+  const bad = await request.delete(`${SERVER}/admin/users/${encodeURIComponent(user)}/tiles`, {
+    headers: AUTH,
+    data: {},
+  });
+  expect(bad.status()).toBe(400);
+
+  // Deleting the rest (all: true) removes the remaining cell and refunds its full price too.
+  const delAll = await request.delete(`${SERVER}/admin/users/${encodeURIComponent(user)}/tiles`, {
+    headers: AUTH,
+    data: { all: true },
+  });
+  expect(delAll.status()).toBe(200);
+  expect(await delAll.json()).toMatchObject({
+    ok: true,
+    removed: 1,
+    refunded: PROP_TILE.price,
+    money: 100 + 2 * FLOOR_TILE.price + PROP_TILE.price,
+  });
+});
+
+test("T7: portal tiles — the users list shows the tile count, the detail card groups tiles by kind, deleting all of them empties the table and refunds", async ({ page, request }) => {
+  // A user who never played, with money and three yard tiles (two wood floors, one bed prop).
+  const user = uniqueUser();
+  const put = await request.put(`${SERVER}/admin/users/${encodeURIComponent(user)}/shop`, {
+    headers: AUTH,
+    data: { money: 100, decorations: [], tiles: sampleTiles() },
+  });
+  expect(put.status()).toBe(200);
+
+  await page.goto(`${SERVER}/portal`);
+  await page.fill("#tokenInput", ADMIN_TOKEN);
+  await page.click("#loginBtn");
+
+  // The users list: column 5 (Ô xây) shows their tile count.
+  const row = page.locator("#usersBody tr", { hasText: user });
+  await expect(row).toHaveCount(1);
+  await expect(row.locator("td").nth(4)).toHaveText("3");
+
+  // Detail view: the yard-tiles card groups the two wood-floor cells into one "Sàn gỗ" row.
+  await row.click();
+  await expect(page.locator("#detailMoney")).toHaveText("$100");
+  const floorRow = page.locator("#tilesBody tr", { hasText: "Sàn gỗ" });
+  await expect(floorRow).toHaveCount(1);
+  await expect(floorRow.locator("td").nth(3)).toHaveText("2");
+
+  // Deleting all tiles (confirm dialog) empties the table and refunds the full price of every cell.
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.click("#removeTilesBtn");
+  await expect(page.locator("#tilesBody")).toContainText("Chưa có ô xây nào");
+  await expect(page.locator("#detailMoney")).toHaveText(`$${100 + 2 * FLOOR_TILE.price + PROP_TILE.price}`);
 });

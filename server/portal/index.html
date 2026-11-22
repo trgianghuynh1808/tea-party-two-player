@@ -65,7 +65,7 @@
       <table>
         <thead>
           <tr>
-            <th>Tên</th><th>Tiền</th><th>Số món Tiệm trà</th><th>Số món Nhà hàng</th><th>Lần cuối</th><th>Thao tác</th>
+            <th>Tên</th><th>Tiền</th><th>Số món Tiệm trà</th><th>Số món Nhà hàng</th><th>Ô xây</th><th>Lần cuối</th><th>Thao tác</th>
           </tr>
         </thead>
         <tbody id="usersBody"></tbody>
@@ -123,6 +123,17 @@
     <div class="row">
       <button id="removeSelectedBtn" class="danger">Xoá món đã chọn (hoàn tiền đủ)</button>
       <button id="removeRestaurantBtn" class="danger">Xoá toàn bộ nhà hàng của user (hoàn tiền đủ)</button>
+    </div>
+
+    <div class="card pieces-card">
+      <h2>Ô xây (sân)</h2>
+      <table>
+        <thead><tr><th>Loại</th><th>Dạng</th><th>Giá</th><th>Số ô</th><th>Thao tác</th></tr></thead>
+        <tbody id="tilesBody"></tbody>
+      </table>
+      <div class="row">
+        <button id="removeTilesBtn" class="danger">Xoá toàn bộ ô xây của user (hoàn tiền đủ)</button>
+      </div>
     </div>
   </section>
 </main>
@@ -189,7 +200,7 @@ function renderUsers() {
     if (term && !u.name.toLowerCase().includes(term)) continue;
     const tr = document.createElement("tr");
     tr.className = "clickable";
-    for (const text of [u.name, fmtMoney(u.money), String(u.counts.shop), String(u.counts.restaurant), fmtDate(u.lastSeenAt)]) {
+    for (const text of [u.name, fmtMoney(u.money), String(u.counts.shop), String(u.counts.restaurant), String(u.counts.tiles ?? 0), fmtDate(u.lastSeenAt)]) {
       const td = document.createElement("td");
       td.textContent = text;
       tr.append(td);
@@ -210,7 +221,7 @@ function renderUsers() {
   if (!body.firstElementChild) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 6;
+    td.colSpan = 7;
     td.textContent = "Không có user nào";
     tr.append(td);
     body.append(tr);
@@ -274,8 +285,52 @@ function renderPieces(tbodyId, pieces) {
   }
 }
 
+const SHAPE_LABELS = {
+  floor: "Sàn",
+  wall: "Tường",
+  fence: "Hàng rào",
+  door: "Cửa",
+  prop: "Đồ vật",
+  unknown: "Không còn trong catalog",
+};
+
+let currentTiles = [];
+
+function renderTiles(tiles) {
+  currentTiles = tiles;
+  const body = $("tilesBody");
+  body.replaceChildren();
+  for (const tile of tiles) {
+    const tr = document.createElement("tr");
+    for (const text of [tile.label, SHAPE_LABELS[tile.shape] ?? tile.shape, fmtMoney(tile.price), String(tile.count)]) {
+      const td = document.createElement("td");
+      td.textContent = text;
+      tr.append(td);
+    }
+    const actionTd = document.createElement("td");
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "danger";
+    removeBtn.textContent = "Xoá";
+    removeBtn.addEventListener("click", () => void removeTileKind(tile));
+    actionTd.append(removeBtn);
+    tr.append(actionTd);
+    body.append(tr);
+  }
+  if (!body.firstElementChild) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 5;
+    td.textContent = "Chưa có ô xây nào";
+    tr.append(td);
+    body.append(tr);
+  }
+}
+
 async function loadDetail(name) {
-  const data = await api("/admin/users/" + encodeURIComponent(name) + "/decorations");
+  const [data, tileData] = await Promise.all([
+    api("/admin/users/" + encodeURIComponent(name) + "/decorations"),
+    api("/admin/users/" + encodeURIComponent(name) + "/tiles"),
+  ]);
   detailName = name;
   $("detailTitle").textContent = "User: " + name;
   $("detailMoney").textContent = fmtMoney(data.money);
@@ -285,6 +340,7 @@ async function loadDetail(name) {
   $("restaurantCount").textContent = "(" + restaurant.length + " món)";
   renderPieces("shopPiecesBody", shop);
   renderPieces("restaurantPiecesBody", restaurant);
+  renderTiles(tileData.tiles);
 }
 
 async function openDetail(name) {
@@ -303,6 +359,22 @@ async function removePieces(body) {
     body: JSON.stringify(body),
   });
   return data;
+}
+
+async function removeTileKind(tile) {
+  const refund = tile.price * tile.count;
+  const confirmed = window.confirm(
+    "Xoá " + tile.count + " ô \"" + tile.label + "\" của " + detailName + "? Hoàn lại " + fmtMoney(refund) + " vào ví. Không hoàn tác được.",
+  );
+  if (!confirmed) return;
+  try {
+    const data = await api("/admin/users/" + encodeURIComponent(detailName) + "/tiles", {
+      method: "DELETE",
+      body: JSON.stringify({ kinds: [tile.kind] }),
+    });
+    setMsg("Đã xoá " + data.removed + " ô \"" + tile.label + "\", hoàn " + fmtMoney(data.refunded) + " cho " + detailName + ".", "success");
+    await loadDetail(detailName);
+  } catch (err) { handleError(err); }
 }
 
 // ------------------------------------------------------------ wiring
@@ -396,6 +468,23 @@ $("removeRestaurantBtn").addEventListener("click", async () => {
   try {
     const data = await removePieces({ venue: "restaurant" });
     setMsg("Đã xoá " + data.removed + " món nhà hàng của " + detailName + ", hoàn " + fmtMoney(data.refunded) + ".", "success");
+    await loadDetail(detailName);
+  } catch (err) { handleError(err); }
+});
+
+$("removeTilesBtn").addEventListener("click", async () => {
+  const count = currentTiles.reduce((sum, tile) => sum + tile.count, 0);
+  const refund = currentTiles.reduce((sum, tile) => sum + tile.price * tile.count, 0);
+  const confirmed = window.confirm(
+    "Xoá toàn bộ " + count + " ô xây của " + detailName + "? Hoàn lại " + fmtMoney(refund) + " vào ví. Không hoàn tác được.",
+  );
+  if (!confirmed) return;
+  try {
+    const data = await api("/admin/users/" + encodeURIComponent(detailName) + "/tiles", {
+      method: "DELETE",
+      body: JSON.stringify({ all: true }),
+    });
+    setMsg("Đã xoá " + data.removed + " ô xây của " + detailName + ", hoàn " + fmtMoney(data.refunded) + ".", "success");
     await loadDetail(detailName);
   } catch (err) { handleError(err); }
 });
