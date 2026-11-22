@@ -2,7 +2,7 @@
 //
 // How cooking works (the tea shop's "cup + ordered steps" idea, extended):
 // - Crates hand out raw ingredients ("food:beef").
-// - Cookers (board, pan, pot, grill, oven, fryer, blender, coffee machine) take ONE ingredient, work on it for a
+// - Cookers (board, pan, pot, grill, fryer, blender, coffee machine) take ONE ingredient, work on it for a
 //   few seconds and add their method to it ("food:beef.chop" -> "food:beef.chop.grill"). Hot cookers burn food
 //   left on them too long ("food:burnt").
 // - Shelves hand out containers (plate / bowl / glass). Finished parts are gathered in a container in any order
@@ -156,31 +156,18 @@ const dish = (
 export const DISHES: DishDef[] = [
   // Plates
   dish("fries", "Khoai tây chiên", 20, "plate", ["potato.chop.deepfry"]),
-  dish("tempura", "Tôm tempura", 30, "plate", ["shrimp.deepfry"]),
-  dish("roast_chicken", "Gà nướng lò", 35, "plate", ["chicken.bake"]),
-  dish("fried_chicken", "Gà rán giòn", 32, "plate", ["chicken.chop.deepfry"], 0.1),
   dish("omurice", "Cơm trứng omurice", 35, "plate", ["rice.boil", "egg.fry"]),
   dish("sushi", "Sushi cá hồi", 38, "plate", ["rice.boil", "salmon.chop"]),
-  dish("pancake", "Pancake dâu", 32, "plate", ["flour.fry", "strawberry.chop"], 0.1),
   dish("steak", "Bò bít tết khoai nghiền", 55, "plate", ["beef.grill", "potato.chop.boil"], 0.25),
   dish("spaghetti", "Mì Ý sốt cà chua", 45, "plate", ["noodles.boil", "tomato.chop.fry"], 0.25),
-  dish("fish_chips", "Cá hồi chiên khoai tây", 55, "plate", ["salmon.chop.deepfry", "potato.chop.deepfry"], 0.35),
-  dish("sandwich", "Bánh mì kẹp trứng", 45, "plate", ["bread.bake", "egg.fry", "lettuce.chop"], 0.35),
-  dish("pizza", "Pizza phô mai cà chua", 55, "plate", ["flour.bake", "tomato.chop", "cheese.chop"], 0.45),
-  dish("burger", "Hamburger bò phô mai", 65, "plate", ["bread", "beef.chop.grill", "lettuce.chop", "cheese.chop"], 0.55),
   // Bowls
   dish("salad", "Salad rau củ", 22, "bowl", ["lettuce.chop", "tomato.chop"]),
   dish("mushroom_soup", "Súp nấm kem", 30, "bowl", ["mushroom.chop.boil", "milk"]),
-  dish("pumpkin_soup", "Súp bí đỏ", 30, "bowl", ["pumpkin.chop.boil", "milk"], 0.1),
   dish("beef_stew", "Bò hầm khoai tây", 50, "bowl", ["beef.chop.boil", "potato.chop.boil"], 0.3),
-  dish("ramen", "Mì ramen bò", 60, "bowl", ["noodles.boil", "egg.boil", "beef.chop.fry"], 0.5),
   // Glasses
   dish("orange_juice", "Nước cam ép", 15, "glass", ["orange.blend"]),
-  dish("lemonade", "Nước chanh tươi", 12, "glass", ["lemon.chop"]),
   dish("black_coffee", "Cà phê đen đá", 15, "glass", ["coffee.brew"]),
   dish("latte", "Cà phê latte", 20, "glass", ["coffee.brew", "milk"], 0.1),
-  dish("strawberry_smoothie", "Sinh tố dâu sữa", 22, "glass", ["strawberry.blend", "milk"], 0.2),
-  dish("hot_chocolate", "Sô cô la nóng", 25, "glass", ["milk.boil", "chocolate.chop"], 0.3),
 ];
 
 export const getDish = (id: string) => DISHES.find((d) => d.id === id);
@@ -280,33 +267,35 @@ export function describeKitchenItem(item: string): string {
 //
 // Local coordinates inside RESTAURANT (0,0 = top-left of the room). The back wall is y 0..WALL_BOTTOM.
 // The kitchen hugs the edges so the middle of the room stays open as the dining area:
-// - Crate row: all 21 ingredient crates in one horizontal line under the back wall (y = TOP_Y) —
-//   cooking ingredients first, then the shared ones, then the drink ones.
+// - Crate row: all 12 ingredient crates in one horizontal line under the back wall (y = TOP_Y, pitch 78 —
+//   54px crates with 24px gaps, so neighbours are hard to mix up).
 // - Left galley: the savory cookers in two parallel columns along the left edge — an outer column
-//   against the wall and an inner column beside it — each 4 rows from y = 270 with 110px pitch
-//   (60px machines, 50px gaps). A 70px aisle (x 102..172) runs between the two columns, so a player
-//   standing in it reaches both.
-// - Right column: only the drink-side machines (chop board, blender, coffee machine) stacked at
-//   x = 1340, so every machine is reached from the open middle.
-// - Bottom row: trash, plate/bowl shelves, the six handover counters, the take-away counter and the
-//   glass shelf in one horizontal line (center y = 715), leaving x 640..760 free for the door at the
+//   against the wall and an inner column beside it — from y = 260 with 100px pitch (60px machines,
+//   40px gaps). A 70px aisle (x 102..172) runs between the two columns, so a player standing in it
+//   reaches both.
+// - Right column: the second chop board, the blender and the coffee machine stacked at x = 940, so
+//   every machine is reached from the open middle.
+// - Bottom row: trash, plate/bowl shelves, the four handover counters, the take-away counter and the
+//   glass shelf in one horizontal line (center y = 575), leaving x 450..550 free for the door at the
 //   bottom centre.
 
 const at = (x: number, y: number) => ({ x: RESTAURANT.x + x, y: RESTAURANT.y + y });
 /** Center y of the crate row, just below the back wall. */
 const TOP_Y = WALL_BOTTOM + 50;
-/** Horizontal pitch of the crate row (54px crates, so 8px gaps). */
-const CRATE_PITCH_X = 62;
+/** Horizontal pitch of the crate row (54px crates, so 24px gaps). */
+const CRATE_PITCH_X = 78;
+/** Local x where the crate row starts. */
+const CRATE_X0 = 52;
 /** Local x of the left galley's two columns: the outer column hugs the wall, the inner one sits beside it (70px aisle between). */
 const LEFT_OUTER_X = 60;
 const LEFT_INNER_X = 214;
 /** Local x of the right machine column, hugging the right edge. */
-const RIGHT_MACHINE_X = 1340;
-/** Top machine y, then the vertical pitch down each column (60px machines, 50px gaps). */
-const MACHINE_TOP_Y = 270;
-const MACHINE_PITCH_Y = 110;
-/** Center y of the bottom row (the 80px-tall take-away counter sits at y = 705). */
-const BOTTOM_Y = 715;
+const RIGHT_MACHINE_X = 940;
+/** Top machine y, then the vertical pitch down each column (60px machines, 40px gaps). */
+const MACHINE_TOP_Y = 260;
+const MACHINE_PITCH_Y = 100;
+/** Center y of the bottom row (the 80px-tall take-away counter sits at y = BOTTOM_Y - 10). */
+const BOTTOM_Y = 575;
 
 const shelf = (container: ContainerId, x: number, y: number): StationDef => ({
   id: `r_shelf_${container}`,
@@ -341,31 +330,23 @@ const crate = (foodId: FoodId, x: number, y: number): StationDef => ({
   food: foodId,
 });
 
-/** Crate row: cooking ingredients, left to right. */
-const COOK_CRATES: FoodId[] = [
-  "beef", "chicken", "salmon", "shrimp", "egg",
-  "potato", "tomato", "lettuce", "mushroom", "pumpkin",
-  "rice", "noodles", "flour", "bread", "cheese",
+/** Crate row, left to right: the 12 ingredients the menu uses. */
+const CRATES: FoodId[] = [
+  "beef", "salmon", "egg", "potato", "tomato", "lettuce",
+  "mushroom", "rice", "noodles", "milk", "orange", "coffee",
 ];
-/** Crate row: ingredients both sides draw from. */
-const SHARED_CRATES: FoodId[] = ["milk", "strawberry"];
-/** Crate row: drink ingredients. */
-const DRINK_CRATES: FoodId[] = ["coffee", "orange", "lemon", "chocolate"];
-/** Left galley, outer column (top to bottom): the oven, the pans, a pot. */
+/** Left galley, outer column (top to bottom): a pan and a pot. */
 const LEFT_OUTER: [ProcessId, number][] = [
-  ["bake", 1],
   ["fry", 1],
-  ["fry", 2],
   ["boil", 1],
 ];
-/** Left galley, inner column (top to bottom): the chop board, the fryer, the grill, the second pot. */
+/** Left galley, inner column (top to bottom): the chop board, the fryer and the grill. */
 const LEFT_INNER: [ProcessId, number][] = [
   ["chop", 1],
   ["deepfry", 1],
   ["grill", 1],
-  ["boil", 2],
 ];
-/** Right column (top to bottom): the drink-side machines. */
+/** Right column (top to bottom): the second chop board, the blender, the coffee machine. */
 const RIGHT_MACHINES: [ProcessId, number][] = [
   ["chop", 2],
   ["blend", 1],
@@ -373,11 +354,9 @@ const RIGHT_MACHINES: [ProcessId, number][] = [
 ];
 
 export const RESTAURANT_STATIONS: StationDef[] = [
-  // Crate row along the back wall: cooking, shared, then drink ingredients.
-  ...COOK_CRATES.map((f, i) => crate(f, 40 + i * CRATE_PITCH_X, TOP_Y)),
-  ...SHARED_CRATES.map((f, i) => crate(f, 986 + i * CRATE_PITCH_X, TOP_Y)),
-  ...DRINK_CRATES.map((f, i) => crate(f, 1126 + i * CRATE_PITCH_X, TOP_Y)),
-  // Machine columns: the left galley's outer and inner columns, then the right drink-side column.
+  // Crate row along the back wall.
+  ...CRATES.map((f, i) => crate(f, CRATE_X0 + i * CRATE_PITCH_X, TOP_Y)),
+  // Machine columns: the left galley's outer and inner columns, then the right column.
   ...LEFT_OUTER.map(([process, n], i) =>
     cooker(process, n, LEFT_OUTER_X, MACHINE_TOP_Y + i * MACHINE_PITCH_Y),
   ),
@@ -387,12 +366,12 @@ export const RESTAURANT_STATIONS: StationDef[] = [
   ...RIGHT_MACHINES.map(([process, n], i) =>
     cooker(process, n, RIGHT_MACHINE_X, MACHINE_TOP_Y + i * MACHINE_PITCH_Y),
   ),
-  // Bottom row: trash and shelves on the left, handover counters around the door gap (x 640..760),
+  // Bottom row: trash and shelves on the left, handover counters around the door gap (x 450..550),
   // take-away counter and glass shelf on the right.
-  { id: "r_trash", type: StationType.Trash, label: "Thùng rác", ...at(120, BOTTOM_Y), width: 52, height: 52, color: 0x9e9e9e },
-  shelf("plate", 200, BOTTOM_Y),
-  shelf("bowl", 300, BOTTOM_Y),
-  ...[400, 470, 540, 860, 930, 1000].map(
+  { id: "r_trash", type: StationType.Trash, label: "Thùng rác", ...at(80, BOTTOM_Y), width: 52, height: 52, color: 0x9e9e9e },
+  shelf("plate", 170, BOTTOM_Y),
+  shelf("bowl", 262, BOTTOM_Y),
+  ...[340, 405, 595, 660].map(
     (x, i): StationDef => ({
       id: `r_counter_${i + 1}`,
       type: StationType.Counter,
@@ -403,8 +382,8 @@ export const RESTAURANT_STATIONS: StationDef[] = [
       color: 0xc9a27e,
     }),
   ),
-  { id: "r_delivery", type: StationType.DeliveryCounter, label: "Mang đi", ...at(1120, 705), width: 150, height: 80, color: 0x90be6d },
-  shelf("glass", 1250, BOTTOM_Y),
+  { id: "r_delivery", type: StationType.DeliveryCounter, label: "Mang đi", ...at(780, BOTTOM_Y - 10), width: 150, height: 80, color: 0x90be6d },
+  shelf("glass", 905, BOTTOM_Y),
 ];
 
 const KITCHEN_STATION_IDS = new Set(RESTAURANT_STATIONS.map((s) => s.id));
@@ -415,4 +394,4 @@ const KITCHEN_STATION_IDS = new Set(RESTAURANT_STATIONS.map((s) => s.id));
 export const isKitchenStation = (def: StationDef) => KITCHEN_STATION_IDS.has(def.id);
 
 /** Where players stand when a restaurant shift starts (in the open middle of the room). */
-export const RESTAURANT_SPAWN_POINTS = [at(630, 600), at(770, 600)];
+export const RESTAURANT_SPAWN_POINTS = [at(440, 480), at(560, 480)];

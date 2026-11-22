@@ -5,7 +5,7 @@ const FLOOR_DEPTH = -1000;
 const WALL_DEPTH = -900;
 const TILE_KEY = "restaurant-tile";
 /** The dining area (local px): the wooden floor in the open middle; tiles everywhere else. */
-const DINING_RECT = { left: 280, top: 230, right: 1250, bottom: 660 };
+const DINING_RECT = { left: 280, top: 230, right: 860, bottom: 520 };
 
 /** The checkered tile texture (cream + terracotta checker, 80×80), created once; returns its key. */
 export function ensureTileTexture(scene: Phaser.Scene): string {

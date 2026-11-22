@@ -1,5 +1,6 @@
 import {
   DECOR_GRID,
+  DECOR_ROOMS,
   ERASE_TOOL,
   buildRefund,
   areaOf,
@@ -8,6 +9,7 @@ import {
   isBlocking,
   planCellChange,
   canPlaceDecoration,
+  footprintOf,
   getDecorationDef,
   normalizeRotation,
   refundFor,
@@ -385,11 +387,21 @@ export class SharedShop {
       // (e.g. under the back wall / machines added later) are nudged down a few grid steps instead of dropped.
       const def = getDecorationDef(d.kind);
       const rotation = def ? normalizeRotation(def, d.rotation) : 0;
+      let x = d.x;
       let y = d.y;
-      for (let step = 0; step < RESTORE_NUDGE_STEPS && !canPlaceDecoration(d.kind, d.x, y, this.pieces, undefined, rotation); step++) {
+      // A room may have shrunk since the save: pull old restaurant pieces back inside its floor box
+      // (clamped with their footprint) before nudging, so they move into the smaller room instead of being dropped.
+      const room = DECOR_ROOMS.find((r) => r.area === "restaurant");
+      if (def && room && areaOf({ x, y }) === "restaurant") {
+        const { floor } = room;
+        const size = footprintOf(def, rotation);
+        x = Math.min(Math.max(x, floor.minX + size.width / 2), floor.maxX - size.width / 2);
+        y = Math.min(Math.max(y, floor.minY + size.height / 2), floor.maxY - size.height / 2);
+      }
+      for (let step = 0; step < RESTORE_NUDGE_STEPS && !canPlaceDecoration(d.kind, x, y, this.pieces, undefined, rotation); step++) {
         y += DECOR_GRID;
       }
-      if (canPlaceDecoration(d.kind, d.x, y, this.pieces, undefined, rotation)) this.place(d.kind, d.x, y, rotation);
+      if (canPlaceDecoration(d.kind, x, y, this.pieces, undefined, rotation)) this.place(d.kind, x, y, rotation);
       else dropped++;
     }
     if (dropped) console.warn(`[SharedShop] ${this.shopId}: ${dropped} decoration(s) no longer fit and were dropped`);

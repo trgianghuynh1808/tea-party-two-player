@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
+  DISHES,
   INTERACT_RANGE,
   PLAYER_RADIUS,
   RESTAURANT,
@@ -21,11 +22,11 @@ import {
 import { joinAsHost, startRestaurantShift } from "./helpers";
 
 /**
- * Layout specs for the restaurant's edge kitchen: the 21 ingredient crates in one row along the back
- * wall, the savory cookers in a two-column galley down the left edge with a 70px aisle between its
- * columns, the drink-side cookers in one column down the right edge, the shelves / handover
- * counters / take-away counter / trash in one row along the bottom, and the open middle left clear
- * for dining.
+ * Layout specs for the restaurant's edge kitchen: the 12 ingredient crates in one spaced row along
+ * the back wall, the savory cookers in a two-column galley down the left edge with a 70px aisle
+ * between its columns, the second chop board / blender / coffee machine in one column down the
+ * right edge, the shelves / handover counters / take-away counter / trash in one row along the
+ * bottom, and the open middle left clear for dining.
  * The shape and reachability checks are pure Node (station coordinates are static shared data); the
  * collaboration checks drive two browser sessions through window.__GAME__.
  * RESTAURANT_STATIONS / RESTAURANT_SPAWN_POINTS are world-space (RESTAURANT.x/y already added),
@@ -35,9 +36,9 @@ import { joinAsHost, startRestaurantShift } from "./helpers";
 /** Spawn / entry points must clear every station rect by this margin. */
 const SPAWN_MARGIN = 20;
 /** The wooden dining middle (local px, mirrors DINING_RECT in client RestaurantView.ts): no station inside. */
-const DINING_RECT: Rect = { left: 280, top: 230, right: 1250, bottom: 660 };
+const DINING_RECT: Rect = { left: 280, top: 230, right: 860, bottom: 520 };
 /** The door gap in the bottom row (local px): no station inside. The crate row above may cross it. */
-const DOOR_GAP_RECT: Rect = { left: 640, top: 685, right: 760, bottom: RESTAURANT.height };
+const DOOR_GAP_RECT: Rect = { left: 450, top: 540, right: 550, bottom: RESTAURANT.height };
 
 type Point = { x: number; y: number };
 type Rect = { left: number; top: number; right: number; bottom: number };
@@ -63,25 +64,44 @@ const station = (id: string): StationDef => {
   return def;
 };
 
-test("edge-layout T1: crates form one row on top, the savory cookers fill the left galley and the drink ones the right column, the rest one bottom row; door gap and dining middle clear", () => {
+test("edge-layout T1: twelve crates form one spaced row on top, the cookers fill the two left columns and the right one, the rest one bottom row; door gap and dining middle clear", () => {
   const crates = RESTAURANT_STATIONS.filter((s) => s.type === StationType.Crate);
-  expect(crates.length, "21 ingredient crates").toBe(21);
+  expect(crates.length, "12 ingredient crates").toBe(12);
   for (const c of crates) {
     expect(local(c).y, `${c.id} sits on the crate row`).toBe(170);
   }
-
-  const cookers = RESTAURANT_STATIONS.filter((s) => s.type === StationType.Cooker);
-  expect(cookers.length, "11 cookers across the galley and the right column").toBe(11);
-  for (const k of cookers) {
-    expect([60, 214, 1340], `${k.id} in the galley's outer or inner column, or the right column`).toContain(local(k).x);
+  const crateRow = [...crates].sort((a, b) => a.x - b.x);
+  for (let i = 1; i < crateRow.length; i++) {
+    const gap = rectOf(crateRow[i]).left - rectOf(crateRow[i - 1]).right;
+    expect(gap, `${crateRow[i - 1].id} <-> ${crateRow[i].id} gap`).toBeGreaterThanOrEqual(20);
   }
 
-  // The savory machines all sit in the left galley now; the right column keeps only the drink ones.
-  expect(local(station("r_bake_1")).x, "r_bake_1 moved into the left galley").toBeLessThan(400);
-  expect(local(station("r_deepfry_1")).x, "r_deepfry_1 moved into the left galley").toBeLessThan(400);
-  expect(local(station("r_chop_1")).x, "r_chop_1 sits in the galley's inner column").toBe(214);
-  expect(local(station("r_bake_1")).x, "r_bake_1 sits in the galley's outer column").toBe(60);
-  const rightColumn = cookers.filter((k) => local(k).x === 1340).map((k) => k.id);
+  const cookers = RESTAURANT_STATIONS.filter((s) => s.type === StationType.Cooker);
+  expect(cookers.length, "8 cookers across the galley and the right column").toBe(8);
+  for (const k of cookers) {
+    expect([60, 214, 940], `${k.id} in the galley's outer or inner column, or the right column`).toContain(local(k).x);
+  }
+
+  // Every cooker type appears once, except the two chop boards; the oven is gone for good.
+  const perProcess: Record<string, number> = {};
+  for (const k of cookers) perProcess[k.process ?? ""] = (perProcess[k.process ?? ""] ?? 0) + 1;
+  expect(perProcess, "each cooker type once, except the two chop boards").toEqual({
+    chop: 2,
+    fry: 1,
+    boil: 1,
+    grill: 1,
+    deepfry: 1,
+    blend: 1,
+    brew: 1,
+  });
+  expect(RESTAURANT_STATIONS.find((s) => s.id === "r_bake_1"), "the oven is gone").toBeUndefined();
+
+  expect(local(station("r_fry_1"))).toMatchObject({ x: 60, y: 260 });
+  expect(local(station("r_boil_1"))).toMatchObject({ x: 60, y: 360 });
+  expect(local(station("r_chop_1"))).toMatchObject({ x: 214, y: 260 });
+  expect(local(station("r_deepfry_1"))).toMatchObject({ x: 214, y: 360 });
+  expect(local(station("r_grill_1"))).toMatchObject({ x: 214, y: 460 });
+  const rightColumn = cookers.filter((k) => local(k).x === 940).map((k) => k.id);
   expect(rightColumn, "the right column is drink-side only").toEqual(["r_chop_2", "r_blend_1", "r_brew_1"]);
 
   // Machines stacked in one column leave a usable vertical gap...
@@ -94,7 +114,7 @@ test("edge-layout T1: crates form one row on top, the savory cookers fill the le
     for (let i = 0; i < rects.length; i++) {
       for (let j = i + 1; j < rects.length; j++) {
         const [upper, lower] = rects[i].top < rects[j].top ? [rects[i], rects[j]] : [rects[j], rects[i]];
-        expect(lower.top - upper.bottom, `vertical gap between the cookers stacked at x=${x}`).toBeGreaterThanOrEqual(48);
+        expect(lower.top - upper.bottom, `vertical gap between the cookers stacked at x=${x}`).toBeGreaterThanOrEqual(40);
       }
     }
   }
@@ -111,9 +131,10 @@ test("edge-layout T1: crates form one row on top, the savory cookers fill the le
       s.type === StationType.DeliveryCounter ||
       s.type === StationType.Trash,
   );
-  expect(bottomRow.length, "3 shelves + 6 counters + delivery + trash").toBe(11);
+  expect(bottomRow.length, "3 shelves + 4 counters + delivery + trash").toBe(9);
+  expect(bottomRow.filter((s) => s.type === StationType.Counter).length, "four handover counters").toBe(4);
   for (const s of bottomRow) {
-    expect(local(s).y, `${s.id} on the bottom row`).toBeGreaterThanOrEqual(685);
+    expect(local(s).y, `${s.id} on the bottom row`).toBeGreaterThanOrEqual(565);
   }
 
   // The door gap and the wooden dining middle stay free of stations.
@@ -317,21 +338,21 @@ test("T2: tea shop machines leave a 30px gap and counters a 40px gap, clear of t
 });
 
 test("T11: the station in the player's facing direction wins over the plain nearest one", () => {
-  // The 50px gap between r_bake_1 and r_fry_1 in the galley's outer column: standing 18px below the
-  // oven, r_bake_1 is nearer (18 vs 32), so without facing it wins; only FACING_BIAS lets facing
-  // "down" pick r_fry_1.
-  const bake1 = station("r_bake_1");
-  const ovenGap = { x: RESTAURANT.x + local(bake1).x, y: RESTAURANT.y + rectOf(bake1).bottom + 18 };
-  expect(findNearestStationDef(ovenGap)?.id).toBe("r_bake_1");
-  expect(findNearestStationDef(ovenGap, "up")?.id).toBe("r_bake_1");
-  expect(findNearestStationDef(ovenGap, "down")?.id).toBe("r_fry_1");
+  // The 40px gap between r_fry_1 and r_boil_1 in the galley's outer column: standing 18px below the
+  // pan, r_fry_1 is nearer (18 vs 22), so without facing it wins; only FACING_BIAS lets facing
+  // "down" pick r_boil_1.
+  const fry1 = station("r_fry_1");
+  const panPotGap = { x: RESTAURANT.x + local(fry1).x, y: RESTAURANT.y + rectOf(fry1).bottom + 18 };
+  expect(findNearestStationDef(panPotGap)?.id).toBe("r_fry_1");
+  expect(findNearestStationDef(panPotGap, "up")?.id).toBe("r_fry_1");
+  expect(findNearestStationDef(panPotGap, "down")?.id).toBe("r_boil_1");
 
-  // The 8px gap between the shrimp and egg crates on the top row: standing 1px closer to the shrimp,
-  // facing "left" picks it while facing "right" picks the egg.
-  const shrimp = station("r_crate_shrimp");
-  const crateGap = { x: RESTAURANT.x + rectOf(shrimp).right + 1, y: RESTAURANT.y + local(shrimp).y };
-  expect(findNearestStationDef(crateGap, "left")?.id).toBe("r_crate_shrimp");
-  expect(findNearestStationDef(crateGap, "right")?.id).toBe("r_crate_egg");
+  // The 24px gap between the beef and salmon crates on the top row: standing 2px right of the beef,
+  // facing "left" picks it while facing "right" picks the salmon.
+  const beef = station("r_crate_beef");
+  const crateGap = { x: RESTAURANT.x + rectOf(beef).right + 2, y: RESTAURANT.y + local(beef).y };
+  expect(findNearestStationDef(crateGap, "left")?.id).toBe("r_crate_beef");
+  expect(findNearestStationDef(crateGap, "right")?.id).toBe("r_crate_salmon");
 });
 
 let userSeq = 0;
@@ -559,15 +580,18 @@ test("T12: the server picks the crate the player faces, one independent room per
         return g.state.players.get(g.room.sessionId).heldItem;
       });
 
-    // Both players stand below the crate row, exactly between the egg and potato crates (~36px from
-    // each): only the facing direction tells the two picks apart. The walk stays in the open middle.
+    // Both players stand below the crate row, exactly between the egg and potato crates (~22px from
+    // each): only the facing direction tells the two picks apart. The route swings wide of the
+    // galley's inner column (x=214) before coming back along the crates, hugging the top edge of
+    // r_chop_1 (the inner column's cookers start at y=230, the stand sits at y=212).
     const egg = station("r_crate_egg");
     const potato = station("r_crate_potato");
     const spawn = local(RESTAURANT_SPAWN_POINTS[0]);
     const standX = (local(egg).x + local(potato).x) / 2;
-    const standY = rectOf(egg).bottom + 36;
+    const standY = rectOf(egg).bottom + 18;
     const crateGapPath: [number, number][] = [
-      [standX, spawn.y],
+      [390, spawn.y],
+      [390, standY],
       [standX, standY],
     ];
     await walkRestaurantPath(page1, crateGapPath, "left");
@@ -596,4 +620,48 @@ test('T1: empty counters show no "Bàn" label while functional stations keep the
   const labels = await stationLabels();
   expect(labels.some((label) => label.includes("Bàn")), "no counter keeps its Bàn label").toBe(false);
   expect(labels.some((label) => label.includes("Giao hàng")), "functional stations keep their label").toBe(true);
+});
+
+test("T3: the menu is 11 dishes, every ingredient and cooking step has a crate and a machine, no spare crates", () => {
+  expect(DISHES.map((d) => d.id), "the 11 kept dishes").toEqual([
+    "fries",
+    "omurice",
+    "sushi",
+    "steak",
+    "spaghetti",
+    "salad",
+    "mushroom_soup",
+    "beef_stew",
+    "orange_juice",
+    "black_coffee",
+    "latte",
+  ]);
+
+  const crates = RESTAURANT_STATIONS.filter((s) => s.type === StationType.Crate);
+  const cookers = RESTAURANT_STATIONS.filter((s) => s.type === StationType.Cooker);
+  const usedFoods = new Set<string>();
+  const usedProcesses = new Set<string>();
+  for (const d of DISHES) {
+    for (const part of d.parts) {
+      const [food, ...steps] = part.split(".");
+      usedFoods.add(food);
+      steps.forEach((step) => usedProcesses.add(step));
+      expect(crates.some((c) => c.food === food), `${d.id}: no crate for ${food}`).toBe(true);
+      for (const step of steps) {
+        expect(cookers.some((k) => k.process === step), `${d.id}: no machine for ${step}`).toBe(true);
+      }
+    }
+    expect(
+      RESTAURANT_STATIONS.find((s) => s.type === StationType.Shelf && s.container === d.container),
+      `${d.id}: no shelf for ${d.container}`,
+    ).toBeDefined();
+  }
+
+  // Nothing in the kitchen goes unused.
+  for (const c of crates) {
+    expect(usedFoods.has(c.food ?? ""), `${c.id} serves no dish`).toBe(true);
+  }
+  for (const k of cookers) {
+    expect(usedProcesses.has(k.process ?? ""), `${k.id} serves no dish`).toBe(true);
+  }
 });

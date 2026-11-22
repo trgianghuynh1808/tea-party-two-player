@@ -68,16 +68,16 @@ export const ARRIVAL_SPAWN_POINTS = [
 ];
 
 /** The restaurant's interior (world px). Its back wall is the strip of WALL_BOTTOM px at the top, like the shop's. */
-export const RESTAURANT = { x: 1400, y: 0, width: 1400, height: 760 } as const;
+export const RESTAURANT = { x: 1400, y: 0, width: 1000, height: 620 } as const;
 /** Inside: the way out is a doormat on the bottom edge, at the centre of the room (behind the door gap). */
 export const RESTAURANT_EXIT_ZONE: Rect = {
-  left: RESTAURANT.x + 660,
+  left: RESTAURANT.x + 460,
   top: RESTAURANT.y + RESTAURANT.height - 24,
-  right: RESTAURANT.x + 740,
+  right: RESTAURANT.x + 540,
   bottom: RESTAURANT.y + RESTAURANT.height,
 };
 /** Where a player walking into the restaurant appears. */
-export const RESTAURANT_ENTRY_SPAWN = { x: RESTAURANT.x + 700, y: RESTAURANT.y + RESTAURANT.height - 70 };
+export const RESTAURANT_ENTRY_SPAWN = { x: RESTAURANT.x + 500, y: RESTAURANT.y + RESTAURANT.height - 70 };
 
 /** Where a position is: inside the tea shop, inside the restaurant, or outdoors. */
 export type Area = "shop" | "restaurant" | "yard";
