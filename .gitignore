@@ -18,3 +18,4 @@ server/data
 .agents/queue/
 .agents/run.log
 .agents/status/
+.venv-art

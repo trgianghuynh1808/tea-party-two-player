@@ -47,11 +47,23 @@ export function preloadDecorTextures(scene: Phaser.Scene) {
 
 /**
  * World point of a bed's pillow (where a sleeper's head goes), from DecorationDef.pillow and the drawn artwork
- * (bottom-aligned on the footprint like buildDecorVisual, mirrored when flipped).
+ * (bottom-aligned on the footprint like buildDecorVisual, mirrored when flipped). Beds with per-facing artwork
+ * (pillows) read the pillow of the current view instead, never flipped.
  */
 export function bedPillowPoint(scene: Phaser.Scene, bed: { kind: string; x: number; y: number; rotation?: number }): { x: number; y: number } {
   const def = getDecorationDef(bed.kind);
   if (!def?.pillow) return { x: bed.x, y: bed.y };
+  const rotation = normalizeRotation(def, bed.rotation);
+  if (def.rotation === "views" && def.pillows) {
+    const view = VIEW_ORDER[rotation];
+    const pillow = def.pillows[view];
+    const key = decorTextureKey(def.kind, view);
+    const source = scene.textures.exists(key) ? scene.textures.get(key).getSourceImage() : undefined;
+    const scale = viewsScale(scene, def);
+    const artWidth = source && scale ? source.width * scale : footprintOf(def, rotation).width;
+    const artHeight = source && scale ? source.height * scale : (def.imageHeight ?? def.height);
+    return { x: bed.x + (pillow.x - 0.5) * artWidth, y: bed.y + def.height / 2 - artHeight * (1 - pillow.y) };
+  }
   const artHeight = def.imageHeight ?? def.height;
   const key = decorTextureKey(def.kind);
   const source = scene.textures.exists(key) ? scene.textures.get(key).getSourceImage() : undefined;
@@ -59,6 +71,14 @@ export function bedPillowPoint(scene: Phaser.Scene, bed: { kind: string; x: numb
   const flipped = def.rotation === "flip" && bed.rotation === 1;
   const fx = flipped ? 1 - def.pillow.x : def.pillow.x;
   return { x: bed.x + (fx - 0.5) * artWidth, y: bed.y + def.height / 2 - artHeight * (1 - def.pillow.y) };
+}
+
+/** Views furniture shares one scale, set by the front artwork's height, so every facing keeps the same pixel/world ratio. */
+function viewsScale(scene: Phaser.Scene, def: DecorationDef): number | undefined {
+  if (def.rotation !== "views") return undefined;
+  const key = decorTextureKey(def.kind);
+  if (!scene.textures.exists(key)) return undefined;
+  return (def.imageHeight ?? def.height) / scene.textures.get(key).getSourceImage().height;
 }
 
 /**
@@ -83,7 +103,8 @@ function buildDecorVisual(
       const effect = def.effect === "breeze" ? buildBreeze(scene, def.width, def.height / 2, alpha) : [];
       return { objects: [img, ...effect], width: size.width, halfHeight: size.height / 2, hasArt: true };
     }
-    img.setOrigin(0.5, 1).setY(def.height / 2).setScale((def.imageHeight ?? def.height) / img.height);
+    // Views share the front artwork's scale (not each view's own height) so all facings render at the same ratio.
+    img.setOrigin(0.5, 1).setY(def.height / 2).setScale(viewsScale(scene, def) ?? (def.imageHeight ?? def.height) / img.height);
     if (def.rotation === "flip") img.setFlipX(rotation === 1);
     const top = Math.max(def.height / 2, img.displayHeight - def.height / 2);
     return { objects: [img], width: Math.max(def.width, img.displayWidth), halfHeight: top, hasArt: true };

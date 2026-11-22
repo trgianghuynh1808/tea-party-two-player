@@ -45,6 +45,8 @@ export interface DecorationDef {
   role?: "seat" | "table" | "bed";
   /** Beds: where the sleeper's head goes, as a fraction of the artwork (0..1 from its top-left, as drawn unflipped). */
   pillow?: { x: number; y: number };
+  /** Beds with per-facing artwork: the pillow point of each view instead of the single `pillow` (never flipped). */
+  pillows?: Record<DecorationView, { x: number; y: number }>;
 }
 
 /**
@@ -52,7 +54,7 @@ export interface DecorationDef {
  * - none:   looks the same from every side (plants, lanterns) — always 0.
  * - flip:   0 = as drawn, 1 = mirrored left/right.
  * - rotate: top-down art (rugs) turned by quarter turns; the footprint swaps width/height on 1 and 3.
- * - views:  separate artwork per facing: 0 front, 1 left, 2 back, 3 right (see VIEW_ORDER).
+ * - views:  separate artwork per facing: 0 front, 1 left, 2 back, 3 right (see VIEW_ORDER); the footprint swaps width/height on 1 and 3.
  */
 export type DecorationRotation = "none" | "flip" | "rotate" | "views";
 export type DecorationView = "front" | "left" | "back" | "right";
@@ -68,9 +70,9 @@ export function normalizeRotation(def: DecorationDef, rotation: unknown): number
   return Number.isInteger(r) && r >= 0 && r < rotationCount(def) ? r : 0;
 }
 
-/** Floor footprint for a rotation: rugs turned a quarter swap width and height. */
+/** Floor footprint for a rotation: rugs and 4-view furniture turned a quarter (1, 3) swap width and height. */
 export function footprintOf(def: DecorationDef, rotation = 0): { width: number; height: number } {
-  return def.rotation === "rotate" && rotation % 2 === 1
+  return (def.rotation === "rotate" || def.rotation === "views") && rotation % 2 === 1
     ? { width: def.height, height: def.width }
     : { width: def.width, height: def.height };
 }
@@ -115,6 +117,33 @@ const rug = (kind: string, label: string, price: number, image: string, color: n
 
 /** A bed players can lie in (Space next to it): head at (x, y), fractions of the artwork. */
 const bed = (def: DecorationDef, x: number, y: number): DecorationDef => ({ ...def, role: "bed", pillow: { x, y } });
+
+/** Artwork per facing of furniture cut into client/public/assets/decor/views/ by build_furniture_views.py. */
+const viewsOf = (kind: string): Record<DecorationView, string> => ({
+  front: `assets/decor/views/${kind}_front.png`,
+  left: `assets/decor/views/${kind}_left.png`,
+  back: `assets/decor/views/${kind}_back.png`,
+  right: `assets/decor/views/${kind}_right.png`,
+});
+
+/** 4-view furniture: the front artwork doubles as the catalog thumbnail (`image`). */
+const viewsDecor = (
+  kind: string,
+  label: string,
+  price: number,
+  width: number,
+  height: number,
+  imageHeight: number,
+  color = 0x8d6e63,
+): DecorationDef => ({ ...decor(kind, label, price, `views/${kind}_front`, width, height, imageHeight, color, "views"), views: viewsOf(kind) });
+
+/** A 4-view bed: the pillow follows the current facing; `pillow` keeps the front view for readers of `def.pillow`. */
+const viewsBed = (def: DecorationDef, pillows: Record<DecorationView, { x: number; y: number }>): DecorationDef => ({
+  ...def,
+  role: "bed",
+  pillow: pillows.front,
+  pillows,
+});
 
 /** Catalog groups, in display order (decorate panel sections). */
 export const DECORATION_CATEGORIES = [
@@ -187,6 +216,9 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     // Cut from client/assets-src/sheets/furniture/ by client/assets-src/tools/cut_furniture.py (front-facing pieces only).
     { ...decor("armchair_baroque", "Ghế bành hoàng gia", 90, "furniture/armchair_baroque", 34, 26, 70), role: "seat" },
     { ...decor("armchair_cream", "Ghế bành kem", 85, "furniture/armchair_cream", 30, 26, 76, 0xc29a78), role: "seat" },
+    // 4-view furniture from client/assets-src/sheets/views/ (build_furniture_views.py).
+    viewsDecor("sofa_lilac", "Sofa tím oải hương", 160, 88, 36, 44, 0xb9a3d6),
+    { ...viewsDecor("dining_table", "Bàn ăn trái cây", 110, 70, 40, 60), role: "table" },
   ]),
   ...inCategory("bedroom", [
     // Cut from client/assets-src/sheets/bedroom-original.png by client/assets-src/tools/cut_bedroom.py.
@@ -212,6 +244,18 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     // Cut from client/assets-src/sheets/furniture/ by client/assets-src/tools/cut_furniture.py (front-facing pieces only).
     decor("globe", "Quả địa cầu", 80, "furniture/globe", 26, 22, 60),
     decor("fireplace_white", "Lò sưởi trắng", 180, "furniture/fireplace_white", 50, 24, 80),
+    // 4-view furniture from client/assets-src/sheets/views/ (build_furniture_views.py).
+    viewsDecor("nightstand_clock", "Tủ đầu giường đồng hồ", 95, 40, 24, 60),
+    viewsDecor("bookshelf", "Kệ sách", 130, 70, 22, 96),
+    viewsBed(viewsDecor("bed_plaid", "Giường đôi caro", 170, 66, 56, 66, 0xd98e7c), {
+      front: { x: 0.5, y: 0.25 },
+      left: { x: 0.87, y: 0.3 },
+      back: { x: 0.5, y: 0.3 },
+      right: { x: 0.13, y: 0.3 },
+    }),
+    viewsDecor("tv_stand", "Kệ tivi", 140, 64, 22, 74),
+    viewsDecor("wardrobe_open", "Tủ quần áo hai cánh", 150, 60, 24, 104),
+    viewsDecor("desk_pc", "Bàn làm việc máy tính", 130, 74, 34, 68),
   ]),
   ...inCategory("lighting", [
     decor("lamp", "Lồng đèn đỏ", 75, "red_lantern_lit", 30, 26, 56, 0xf4a261),
