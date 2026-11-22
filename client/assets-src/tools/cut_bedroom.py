@@ -55,7 +55,6 @@ SCENES = {
         "shadows": True,
         "bg": [(60, 390, 340, 440), (240, 190, 300, 230), (60, 60, 100, 110), (330, 60, 360, 80), (180, 60, 230, 70)],
         "items": {
-            "bedroom/bed_pink.png": {"box": (46, 106, 167, 197), "h": 120, "drop_green": True, "erase": [(64, 100, 170, 119)]},  # window sill above
             "rug_teal.png": {"box": (48, 188, 166, 250), "h": 124, "fill_top": 20},  # bed legs on its top edge
             "wall/window_curtain_green.png": {"box": (100, 52, 174, 120), "h": 112},
             "bedroom/grandfather_clock.png": {"box": (176, 72, 230, 184), "h": 180, "shadows": False},

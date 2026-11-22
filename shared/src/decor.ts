@@ -195,7 +195,6 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     decor("wardrobe", "Tủ quần áo", 140, "bedroom/wardrobe", 54, 26, 86, 0x8a4b3d),
     decor("bucket", "Xô thiếc", 20, "bedroom/bucket", 24, 18, 31, 0x8796a8),
     // bedroom-2-original.png
-    bed(decor("bed_pink", "Giường chăn hồng", 140, "bedroom/bed_pink", 80, 40, 60, 0xe06666, "flip"), 0.24, 0.38),
     decor("grandfather_clock", "Đồng hồ quả lắc", 130, "bedroom/grandfather_clock", 40, 20, 90, 0x7a4a2a),
     decor("chest", "Rương gỗ", 60, "bedroom/chest", 46, 24, 44, 0xa0673a),
     decor("stove", "Lò sưởi gang", 110, "bedroom/stove", 44, 24, 60, 0x555a66),
