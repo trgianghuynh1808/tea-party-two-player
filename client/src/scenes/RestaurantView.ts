@@ -9,9 +9,8 @@ const DINING_RECT = { left: 280, top: 230, right: 1250, bottom: 660 };
 
 /**
  * The restaurant's interior (static): tile floor all around the edges and the wooden dining room in the
- * open middle, back wall with a tiled splashback along its full width, the sign over the middle, floor
- * labels on the tile border and the doormat out to the yard. Stations are drawn by ShopScene like the
- * tea shop's.
+ * open middle, back wall with a tiled splashback along its full width, the sign over the middle and the
+ * doormat out to the yard. Stations are drawn by ShopScene like the tea shop's.
  */
 export class RestaurantView {
   constructor(
@@ -36,7 +35,6 @@ export class RestaurantView {
     }
     this.drawWall();
     this.drawExit();
-    this.drawZoneLabels();
   }
 
   private makeTextures() {
@@ -92,24 +90,5 @@ export class RestaurantView {
       .text(cx, cy, "⬇ Ra sân", { fontFamily: "sans-serif", fontSize: this.fs(11), fontStyle: "bold", color: "#fdf6ec" })
       .setOrigin(0.5)
       .setDepth(WALL_DEPTH + 11);
-  }
-
-  /**
-   * Floor labels on the tile border, away from every station rectangle: one under the crate row
-   * (y 197..240 is free), one above the bottom row of handover counters (y 660..685 is free).
-   * Drawn just above the floor, below everything that stands on it.
-   */
-  private drawZoneLabels() {
-    const R = RESTAURANT;
-    const labels: [number, number, string][] = [
-      [700, 215, "🥬 Nguyên liệu"],
-      [470, 668, "🤝 Bàn giao"],
-    ];
-    for (const [x, y, label] of labels) {
-      this.scene.add
-        .text(R.x + x, R.y + y, label, { fontFamily: "sans-serif", fontSize: this.fs(15), fontStyle: "bold", color: "#5b3a29" })
-        .setOrigin(0.5)
-        .setDepth(FLOOR_DEPTH + 10);
-    }
   }
 }

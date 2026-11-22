@@ -21,6 +21,7 @@
   "ing_chocolate": ["fruits", 1406, 14, 1546, 173],
   "ing_rice_cooked": ["dishes", 303, 25, 385, 105],
   "ing_noodles_cooked": ["dishes-fancy", 245, 870, 325, 935],
+  "ing_egg_fried": ["dishes", 505, 143, 590, 228],
 
   "dish_steak": ["dishes", 810, 555, 943, 641],
   "dish_omurice": ["dishes", 811, 742, 938, 808],

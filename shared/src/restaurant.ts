@@ -107,6 +107,7 @@ export const FOODS: Record<FoodId, FoodDef> = {
 for (const [id, def] of Object.entries(FOODS)) if (!def.image) def.image = `assets/food/ing_${id}.png`;
 FOODS.rice.cooked = { boil: "assets/food/ing_rice_cooked.png" };
 FOODS.noodles.cooked = { boil: "assets/food/ing_noodles_cooked.png" };
+FOODS.egg.cooked = { fry: "assets/food/ing_egg_fried.png" };
 export const isFoodId = (id: string): id is FoodId => id in FOODS;
 
 /** Artwork of a food in a given state: the last step with its own image wins, else the raw ingredient's. */

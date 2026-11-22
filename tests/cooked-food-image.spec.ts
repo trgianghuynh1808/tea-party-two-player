@@ -8,6 +8,9 @@ test("T1: boiled rice and noodles swap in their cooked artwork; other foods keep
   expect(foodImage("rice", [])).toBe(FOODS.rice.image);
   expect(foodImage("noodles", ["chop"])).toBe(FOODS.noodles.image);
   expect(foodImage("beef", ["fry"])).toBe(FOODS.beef.image);
+  expect(foodImage("egg", ["fry"])).not.toBe(FOODS.egg.image);
+  expect(foodImage("egg", [])).toBe(FOODS.egg.image);
+  expect(foodImage("egg", ["boil"])).toBe(FOODS.egg.image);
 });
 
 test("T2: every cooked artwork path in FOODS points to an existing file under client/public/", () => {
