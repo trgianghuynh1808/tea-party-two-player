@@ -244,6 +244,8 @@ export class ShopScene extends Phaser.Scene {
   private buildWalking = false;
   private buildToggle?: Phaser.GameObjects.Text;
   private controlsText!: Phaser.GameObjects.Text;
+  /** Touch only: once the joystick has steered, the move hint never comes back (build hints still show). */
+  private controlsDismissed = false;
 
   private keys!: KeyboardState;
   private touch?: TouchControls;
@@ -468,7 +470,9 @@ export class ShopScene extends Phaser.Scene {
     } else if (this.building) {
       text = "Kéo chuột trên sân để xây · WASD/mũi tên: đi";
     }
-    this.controlsText?.setText(text);
+    // Touch: once the player has moved, the non-build hint stays hidden for good.
+    const hidden = !!this.touch && !this.building && this.controlsDismissed;
+    this.controlsText?.setText(text).setVisible(!hidden);
   }
 
   // ---------------------------------------------------------------- Game loop
@@ -501,6 +505,11 @@ export class ShopScene extends Phaser.Scene {
     if (this.touch && dx === 0 && dy === 0) {
       dx = this.touch.dx;
       dy = this.touch.dy;
+      // First real joystick steering outside build mode dismisses the move hint for good.
+      if (!this.building && !this.controlsDismissed && (this.touch.dx !== 0 || this.touch.dy !== 0)) {
+        this.controlsDismissed = true;
+        this.controlsText?.setVisible(false);
+      }
     }
 
     const local = this.players.get(this.room.sessionId);
@@ -614,7 +623,9 @@ export class ShopScene extends Phaser.Scene {
           this.add
             .text(def.x, labelTop - (crate ? 6 : 10), def.label + timed, {
               fontFamily: "sans-serif",
-              fontSize: fs(crate ? 10 : 12),
+              // Crates sit in tight rows: keep them small. Machines get a bigger
+              // touch-friendly size (not via fs, which would also enlarge crates' neighbours).
+              fontSize: crate ? fs(10) : isTouchDevice() ? Math.round(12 * 1.6) : 12,
               color: "#3d2c29",
               fontStyle: "bold",
               // Machine labels sit on the skirting board: a light tag keeps them readable.
@@ -719,10 +730,23 @@ export class ShopScene extends Phaser.Scene {
       .text(16, 12, "💰 $0", { fontFamily: "sans-serif", fontSize: "22px", color: "#3d2c29", fontStyle: "bold" })
       .setDepth(10000).setScrollFactor(0);
     this.statusText = this.add
-      .text(16, WORLD_HEIGHT - 52, "Đang kết nối...", { fontFamily: "sans-serif", fontSize: fs(14), color: "#3d2c29" })
+      .text(16, WORLD_HEIGHT - 52, "Đang kết nối...", {
+        fontFamily: "sans-serif",
+        fontSize: fs(14),
+        color: "#3d2c29",
+        // Light tag so the corner hints stay readable over tables/stations.
+        backgroundColor: "#fdf6ecd9",
+        padding: { x: 4, y: 2 },
+      })
       .setDepth(10000).setScrollFactor(0);
     this.controlsText = this.add
-      .text(16, WORLD_HEIGHT - 28, "", { fontFamily: "sans-serif", fontSize: fs(13), color: "#6b5b57" })
+      .text(16, WORLD_HEIGHT - 28, "", {
+        fontFamily: "sans-serif",
+        fontSize: fs(13),
+        color: "#6b5b57",
+        backgroundColor: "#fdf6ecd9",
+        padding: { x: 4, y: 2 },
+      })
       .setDepth(10000).setScrollFactor(0);
     this.updateControlsText();
     if (isTouchDevice()) {
