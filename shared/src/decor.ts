@@ -166,8 +166,6 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     wallArt("hanging_fern", "Dương xỉ treo", 70, "hanging_fern", 71, 92, 0x2a9d8f),
     wallArt("hanging_pothos", "Trầu bà treo", 65, "hanging_pothos", 44, 96, 0x2a9d8f),
     // Cut from client/assets-src/sheets/furniture/ by client/assets-src/tools/cut_furniture.py (front-facing pieces only).
-    decor("plant_leafy", "Cây lá nhỏ chậu đỏ", 50, "furniture/plant_leafy", 24, 20, 56, 0x2a9d8f),
-    decor("plant_big_leaf", "Cây lá to chậu đỏ", 60, "furniture/plant_big_leaf", 26, 22, 64, 0x2a9d8f),
     decor("plant_slim", "Cây thân đứng", 75, "furniture/plant_slim", 24, 20, 80, 0x2a9d8f),
     decor("plant_pattern_pot", "Cây lá lớn chậu hoa văn", 90, "furniture/plant_pattern_pot", 28, 22, 90, 0x2a9d8f),
   ]),
@@ -188,7 +186,6 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     { ...decor("table", "Bàn khách", 90, "wicker_table", 44, 26, 48, 0x8d6e63), role: "table" },
     // Cut from client/assets-src/sheets/furniture/ by client/assets-src/tools/cut_furniture.py (front-facing pieces only).
     { ...decor("armchair_baroque", "Ghế bành hoàng gia", 90, "furniture/armchair_baroque", 34, 26, 70), role: "seat" },
-    { ...decor("chair_cream", "Ghế bọc kem", 60, "furniture/chair_cream", 24, 22, 66, 0xc29a78), role: "seat" },
     { ...decor("armchair_cream", "Ghế bành kem", 85, "furniture/armchair_cream", 30, 26, 76, 0xc29a78), role: "seat" },
   ]),
   ...inCategory("bedroom", [
@@ -214,9 +211,6 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     decor("nightstand_green_lamp", "Tủ đầu giường đèn lá", 80, "bedroom/nightstand_green_lamp", 42, 22, 54, 0x7a3f3a, "flip"),
     // Cut from client/assets-src/sheets/furniture/ by client/assets-src/tools/cut_furniture.py (front-facing pieces only).
     decor("globe", "Quả địa cầu", 80, "furniture/globe", 26, 22, 60),
-    decor("coat_stand", "Mắc áo đứng", 60, "furniture/coat_stand", 20, 16, 90),
-    decor("vanity_piano", "Bàn trang điểm đàn", 150, "furniture/vanity_piano", 50, 24, 80),
-    decor("vanity_mirror", "Bàn trang điểm gương", 120, "furniture/vanity_mirror", 40, 20, 90),
     decor("fireplace_white", "Lò sưởi trắng", 180, "furniture/fireplace_white", 50, 24, 80),
   ]),
   ...inCategory("lighting", [

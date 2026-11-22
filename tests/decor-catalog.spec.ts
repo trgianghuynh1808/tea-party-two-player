@@ -18,9 +18,15 @@ const REMOVED_ITEMS: { kind: string; image: string }[] = [
   { kind: "red_lantern", image: "red_lantern.png" },
   { kind: "rug_blue", image: "rug_blue.png" },
   { kind: "rug_oval_blue", image: "rug_oval_blue.png" },
+  { kind: "chair_cream", image: "furniture/chair_cream.png" },
+  { kind: "coat_stand", image: "furniture/coat_stand.png" },
+  { kind: "plant_big_leaf", image: "furniture/plant_big_leaf.png" },
+  { kind: "plant_leafy", image: "furniture/plant_leafy.png" },
+  { kind: "vanity_piano", image: "furniture/vanity_piano.png" },
+  { kind: "vanity_mirror", image: "furniture/vanity_mirror.png" },
 ];
 
-test("T2: the 8 removed items are gone from the catalog and disk, kept neighbours remain", () => {
+test("T2: the 14 removed items are gone from the catalog and disk, kept neighbours remain", () => {
   for (const { kind, image } of REMOVED_ITEMS) {
     expect(getDecorationDef(kind)).toBeUndefined();
     expect(existsSync(`client/public/assets/decor/${image}`)).toBe(false);
@@ -32,24 +38,18 @@ test("T2: the 8 removed items are gone from the catalog and disk, kept neighbour
 
 const NEW_FURNITURE: { kind: string; seat?: true }[] = [
   { kind: "armchair_baroque", seat: true },
-  { kind: "chair_cream", seat: true },
   { kind: "armchair_cream", seat: true },
   { kind: "lamp_arc_brass" },
   { kind: "lamp_shade_white" },
   { kind: "lamp_post_brass" },
   { kind: "lamp_floor_cream" },
   { kind: "globe" },
-  { kind: "coat_stand" },
-  { kind: "vanity_piano" },
-  { kind: "vanity_mirror" },
   { kind: "fireplace_white" },
-  { kind: "plant_leafy" },
-  { kind: "plant_big_leaf" },
   { kind: "plant_slim" },
   { kind: "plant_pattern_pot" },
 ];
 
-test("T3: the 16 new furniture pieces are in the catalog with art on disk, the 3 chairs are seats, and no kind is duplicated", () => {
+test("T3: the 10 remaining furniture pieces are in the catalog with art on disk, the 2 chairs are seats, and no kind is duplicated", () => {
   const kinds = DECORATION_CATALOG.map((d) => d.kind);
   for (const { kind, seat } of NEW_FURNITURE) {
     const def = getDecorationDef(kind);
