@@ -57,6 +57,12 @@
   </section>
 
   <section id="listView" hidden>
+    <div id="diagBox" class="card" style="margin-bottom: 20px">
+      <h2>Chẩn đoán lưu trữ</h2>
+      <p id="diagSummary" class="muted"></p>
+      <ul id="diagSkipped" style="margin: 8px 0 0; padding-left: 20px"></ul>
+    </div>
+
     <div class="card" style="margin-bottom: 20px">
       <h2>Người chơi</h2>
       <div class="row">
@@ -208,6 +214,30 @@ async function loadUsers() {
   renderUsers();
 }
 
+// ------------------------------------------------------------ storage diagnostics
+
+function renderDiag(data) {
+  $("diagSummary").textContent =
+    "Lưu trữ: " + data.backend + " · " + data.userKeys + " hồ sơ user · " + data.users +
+    " đọc được · " + data.shopKeys + " shop · " + data.skipped.length + " bỏ qua";
+  const list = $("diagSkipped");
+  list.replaceChildren();
+  for (const item of data.skipped.slice(0, 50)) {
+    const li = document.createElement("li");
+    li.textContent = item.id + " — " + item.reason;
+    list.append(li);
+  }
+}
+
+async function loadDiag() {
+  try {
+    renderDiag(await api("/admin/storage"));
+  } catch {
+    $("diagSummary").textContent = "Không tải được chẩn đoán";
+    $("diagSkipped").replaceChildren();
+  }
+}
+
 // ------------------------------------------------------------ detail
 
 function pieceRow(piece) {
@@ -278,7 +308,7 @@ function enterWithToken(given) {
   token = given;
   sessionStorage.setItem(TOKEN_KEY, token);
   setMsg("", "success");
-  loadUsers()
+  Promise.all([loadUsers(), loadDiag()])
     .then(() => {
       resetZone();
       showView("listView");
@@ -333,6 +363,7 @@ $("setMoneyBtn").addEventListener("click", async () => {
     });
     setMsg("Đã đặt lại tiền của " + detailName + ": " + fmtMoney(data.money), "success");
     await loadDetail(detailName);
+    await loadDiag();
   } catch (err) { handleError(err); }
 });
 
@@ -346,6 +377,7 @@ $("deltaMoneyBtn").addEventListener("click", async () => {
     });
     setMsg("Đã cộng/trừ " + value + " cho " + detailName + ": còn " + fmtMoney(data.money), "success");
     await loadDetail(detailName);
+    await loadDiag();
   } catch (err) { handleError(err); }
 });
 
@@ -356,6 +388,7 @@ $("removeSelectedBtn").addEventListener("click", async () => {
     const data = await removePieces({ ids });
     setMsg("Đã xoá " + data.removed + " món, hoàn " + fmtMoney(data.refunded) + " cho " + detailName + ".", "success");
     await loadDetail(detailName);
+    await loadDiag();
   } catch (err) { handleError(err); }
 });
 
@@ -364,6 +397,7 @@ $("removeRestaurantBtn").addEventListener("click", async () => {
     const data = await removePieces({ venue: "restaurant" });
     setMsg("Đã xoá " + data.removed + " món nhà hàng của " + detailName + ", hoàn " + fmtMoney(data.refunded) + ".", "success");
     await loadDetail(detailName);
+    await loadDiag();
   } catch (err) { handleError(err); }
 });
 
@@ -402,6 +436,7 @@ $("resetBtn").addEventListener("click", async () => {
     resetZone();
     await loadUsers();
     renderUsers();
+    await loadDiag();
   } catch (err) { handleError(err); }
 });
 

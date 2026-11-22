@@ -6,6 +6,8 @@ import { joinAsHost } from "./helpers";
  * Admin portal e2e (task .agents/tasks/2026-11-22-admin-portal.md):
  * - T1 drives the admin API directly (the request fixture, "Authorization: Bearer" header).
  * - T2 drives the /portal page the server itself serves (page fixture + the game hook to buy furniture).
+ * - T3 checks the storage diagnostics: /admin/storage auth + key/read/skip counts and the portal
+ *   diag box (task .agents/tasks/2026-11-22-admin-diagnostics.md).
  * playwright.config.ts starts the server with ADMIN_TOKEN set, so these tests need a server
  * started by Playwright: a dev server without the token would answer 404 instead of 401.
  */
@@ -122,4 +124,35 @@ test("T2: portal page — a wrong token shows the error, the user row lists thei
   await page.click("#removeRestaurantBtn");
   await expect(page.locator("#restaurantCount")).toHaveText("(0 món)");
   await expect(page.locator("#detailMoney")).toHaveText("$1000");
+});
+
+test("T3: storage diagnostics — /admin/storage without a token is 401; after a fresh host join it reports the file backend, and the portal shows the diag box", async ({ page, request }) => {
+  // No token: the admin middleware answers 401 before the route runs.
+  expect((await request.get(`${SERVER}/admin/storage`)).status()).toBe(401);
+
+  // A brand-new player creates one user record (and its shop) in the file backend.
+  const user = uniqueUser();
+  await joinAsHost(page, user);
+
+  const res = await request.get(`${SERVER}/admin/storage`, { headers: AUTH });
+  expect(res.status()).toBe(200);
+  const diag = (await res.json()) as {
+    backend: string;
+    userKeys: number;
+    shopKeys: number;
+    users: number;
+    skipped: unknown[];
+  };
+  expect(diag.backend.startsWith("files")).toBe(true);
+  expect(diag.userKeys).toBeGreaterThanOrEqual(1);
+  expect(diag.users).toBeGreaterThanOrEqual(1);
+  expect(diag.users).toBeLessThanOrEqual(diag.userKeys);
+  expect(Array.isArray(diag.skipped)).toBe(true);
+
+  // The portal list view renders the diagnostics box right after login.
+  await page.goto(`${SERVER}/portal`);
+  await page.fill("#tokenInput", ADMIN_TOKEN);
+  await page.click("#loginBtn");
+  await expect(page.locator("#diagBox")).toContainText("Lưu trữ:");
+  await expect(page.locator("#diagBox")).toContainText("hồ sơ user");
 });

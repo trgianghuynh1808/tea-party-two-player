@@ -99,6 +99,12 @@ function upstashBackend(url: string, token: string): Backend {
         cursor = String(next);
         for (const key of Array.isArray(keys) ? keys : []) ids.push(String(key).slice(prefix.length));
       } while (cursor !== "0");
+      // SCAN can come back empty on some setups even when matching keys exist; the database is
+      // small, so one KEYS call is an acceptable fallback before concluding the collection is empty.
+      if (!ids.length) {
+        const keys = await command(["KEYS", `${prefix}*`]);
+        if (Array.isArray(keys)) return keys.map((key) => String(key).slice(prefix.length));
+      }
       return ids;
     },
   };
@@ -141,32 +147,74 @@ export async function saveUser(user: UserRecord): Promise<void> {
   await backend.write("users", userIdOf(user.key), JSON.stringify(user, null, 2));
 }
 
+/** Cap a skipped-record reason so it stays readable on one log line. */
+const MAX_REASON_LENGTH = 200;
+
 /**
- * Every user record in storage. Corrupt records are skipped (with a warning) so one bad file
+ * The users listing plus storage diagnostics for the admin portal: the backend in use, how many
+ * user/shop keys it sees, the user records that could be read, and every skipped record with a
+ * short reason. Corrupt records are skipped (same rule as listUsers) so one bad record can't take
+ * the whole listing down; only storage errors reject. Read-only.
+ */
+export async function inspectUsers(): Promise<{
+  backend: string;
+  userKeys: number;
+  shopKeys: number;
+  users: UserRecord[];
+  skipped: { id: string; reason: string }[];
+}> {
+  const userIds = await backend.list("users");
+  const shopIds = await backend.list("shops");
+  const users: UserRecord[] = [];
+  const skipped: { id: string; reason: string }[] = [];
+  for (const id of userIds) {
+    let raw: string | undefined;
+    try {
+      raw = await backend.read("users", id);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      skipped.push({ id, reason: `đọc lỗi: ${message}`.slice(0, MAX_REASON_LENGTH) });
+      continue;
+    }
+    if (raw === undefined) {
+      skipped.push({ id, reason: "bản ghi không tồn tại" });
+      continue;
+    }
+    let data: Partial<UserRecord>;
+    try {
+      data = JSON.parse(raw) as Partial<UserRecord>;
+    } catch {
+      skipped.push({ id, reason: "json hỏng" });
+      continue;
+    }
+    if (typeof data.name !== "string" || typeof data.key !== "string") {
+      skipped.push({ id, reason: "thiếu name/key" });
+      continue;
+    }
+    if (userIdOf(data.key) !== id) {
+      skipped.push({ id, reason: "id không khớp hash của key" });
+      continue;
+    }
+    if (!isValidShopId(data.shopId)) {
+      skipped.push({ id, reason: "shopId không hợp lệ" });
+      continue;
+    }
+    users.push(data as UserRecord);
+  }
+  const head = skipped.slice(0, 5).map((entry) => `${entry.id}: ${entry.reason}`);
+  console.log(
+    `[ShopStore] users: ${userIds.length} keys, ${users.length} read, ${skipped.length} skipped` +
+      (head.length ? ` (${head.join("; ")})` : ""),
+  );
+  return { backend: backend.name, userKeys: userIds.length, shopKeys: shopIds.length, users, skipped };
+}
+
+/**
+ * Every user record in storage. Corrupt records are skipped (see inspectUsers) so one bad file
  * can't take the whole admin listing down; only storage errors reject.
  */
 export async function listUsers(): Promise<UserRecord[]> {
-  const ids = await backend.list("users");
-  const users: UserRecord[] = [];
-  for (const id of ids) {
-    try {
-      const raw = await backend.read("users", id);
-      if (raw === undefined) continue;
-      const data = JSON.parse(raw) as Partial<UserRecord>;
-      if (
-        typeof data.name !== "string" ||
-        typeof data.key !== "string" ||
-        userIdOf(data.key) !== id ||
-        !isValidShopId(data.shopId)
-      ) {
-        throw new Error("corrupt user record");
-      }
-      users.push(data as UserRecord);
-    } catch (err) {
-      console.warn(`[ShopStore] skipping unreadable user record ${id}`, err);
-    }
-  }
-  return users;
+  return (await inspectUsers()).users;
 }
 
 /**

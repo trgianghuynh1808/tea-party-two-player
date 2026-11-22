@@ -1,13 +1,15 @@
 import { timingSafeEqual } from "node:crypto";
 import express, { type Application } from "express";
 import { areaOf, normalizeUsername, usernameKey } from "@boba/shared";
-import { listUsers, loadUser, parseShopSave } from "./persistence/ShopStore.js";
+import { inspectUsers, listUsers, loadUser, parseShopSave } from "./persistence/ShopStore.js";
 import { openShop, type Piece, type RefundMode } from "./shop/SharedShop.js";
 
 /**
  * Admin API (backups / restores / the /portal admin page), enabled only when ADMIN_TOKEN is set.
  * Send the token as "Authorization: Bearer <ADMIN_TOKEN>"; the token is never logged or put in URLs.
  * - GET  /admin/users                     -> all users with money and furniture counts per venue
+ * - GET  /admin/storage                   -> storage diagnostics: backend name, user/shop key counts,
+ *   read vs skipped users (ids + short reasons); no record contents
  * - GET  /admin/users/:name               -> the user record + their shop (money + furniture), live from the server
  * - PUT  /admin/users/:name/shop          -> body = a shop save ({ money, decorations }): replaces that user's shop
  *   (creates the user if they never played). Works while the server runs: open rooms update right away.
@@ -67,6 +69,16 @@ export function registerAdminRoutes(app: Application): void {
       res.json(rows);
     } catch (err) {
       console.error("[admin] list users failed", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  app.get("/admin/storage", async (_req, res) => {
+    try {
+      const info = await inspectUsers();
+      res.json({ backend: info.backend, userKeys: info.userKeys, shopKeys: info.shopKeys, users: info.users.length, skipped: info.skipped });
+    } catch (err) {
+      console.error("[admin] storage diagnostics failed", err);
       res.status(500).json({ error: String(err) });
     }
   });
