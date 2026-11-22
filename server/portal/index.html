@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1280">
+<title>Portal Admin — Tiệm Trà Be Ngọc Giang</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; background: #f5f1ea; color: #3a2f28; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; background: #5a3d2b; color: #fdf6ec; }
+  header h1 { margin: 0; font-size: 20px; font-weight: 600; }
+  main { max-width: 1240px; margin: 0 auto; padding: 20px 24px; }
+  section { margin-bottom: 28px; }
+  h2 { font-size: 17px; margin: 0 0 12px; }
+  #msg { margin: 0 0 16px; padding: 10px 14px; border-radius: 8px; display: none; }
+  #msg.success { display: block; background: #dff2dd; color: #256b2a; }
+  #msg.error { display: block; background: #f8dcdc; color: #8f2424; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px #0002; }
+  th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #e7ddd0; }
+  th { background: #efe6d8; font-weight: 600; }
+  tr:last-child td { border-bottom: none; }
+  tbody tr.clickable { cursor: pointer; }
+  tbody tr.clickable:hover { background: #faf3e3; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+  input[type="text"], input[type="password"], input[type="number"], input[type="search"] { padding: 8px 10px; border: 1px solid #c9bba8; border-radius: 6px; font: inherit; }
+  button { padding: 8px 14px; border: 1px solid #8a6d55; border-radius: 6px; background: #6f4e37; color: #fdf6ec; font: inherit; cursor: pointer; }
+  button:hover:not(:disabled) { background: #8a6d55; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button.ghost { background: #fdf6ec; color: #5a3d2b; }
+  button.danger { background: #8f2424; border-color: #6e1b1b; }
+  .card { background: #fff; border-radius: 8px; padding: 16px 20px; box-shadow: 0 1px 3px #0002; }
+  .muted { color: #8d7f70; }
+  .money { font-weight: 700; color: #256b2a; }
+  #loginView .card { max-width: 420px; margin: 60px auto; }
+  #previewOut { margin: 10px 0; font-weight: 600; }
+  .pieces-card { margin: 14px 0; }
+  .piece-count { font-weight: 400; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Portal Admin</h1>
+  <button id="logoutBtn" class="ghost" hidden>Đăng xuất</button>
+</header>
+<main>
+  <div id="msg" role="status"></div>
+
+  <section id="loginView" hidden>
+    <div class="card">
+      <h2>Đăng nhập admin</h2>
+      <div class="row">
+        <label for="tokenInput">Token</label>
+        <input id="tokenInput" type="password" autocomplete="off" style="flex: 1">
+        <button id="loginBtn">Đăng nhập</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="listView" hidden>
+    <div class="card" style="margin-bottom: 20px">
+      <h2>Người chơi</h2>
+      <div class="row">
+        <input id="searchInput" type="search" placeholder="Tìm theo tên…" style="flex: 1">
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Tên</th><th>Tiền</th><th>Số món Tiệm trà</th><th>Số món Nhà hàng</th><th>Lần cuối</th>
+          </tr>
+        </thead>
+        <tbody id="usersBody"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Dọn nhà hàng cho mọi user</h2>
+      <p class="muted">Xoá toàn bộ đồ trang trí trong NHÀ HÀNG của mọi user, hoàn lại đủ giá từng món vào ví.
+        Đồ trong tiệm trà và sân giữ nguyên.</p>
+      <div class="row">
+        <button id="previewBtn" class="ghost">Xem trước</button>
+        <button id="resetBtn" class="danger" disabled>Xoá thật</button>
+        <label id="confirmLabel" for="confirmInput" hidden>Gõ <strong>XOA</strong> để xác nhận</label>
+        <input id="confirmInput" type="text" autocomplete="off" hidden style="width: 90px">
+      </div>
+      <div id="previewOut"></div>
+    </div>
+  </section>
+
+  <section id="detailView" hidden>
+    <div class="row">
+      <button id="backBtn" class="ghost">← Danh sách</button>
+      <h2 id="detailTitle" style="margin: 0"></h2>
+    </div>
+
+    <div class="card" style="margin-bottom: 20px">
+      <h2>Sửa tiền</h2>
+      <div>Tiền hiện tại: <span id="detailMoney" class="money"></span></div>
+      <div class="row">
+        <input id="setMoneyInput" type="number" min="0" step="1" placeholder="Số tiền mới">
+        <button id="setMoneyBtn" class="ghost">Đặt lại</button>
+        <span style="width: 24px"></span>
+        <input id="deltaMoneyInput" type="number" step="1" placeholder="Cộng/trừ (vd -50)">
+        <button id="deltaMoneyBtn" class="ghost">Cộng/trừ</button>
+      </div>
+    </div>
+
+    <div class="card pieces-card">
+      <h2>Đồ trang trí — Tiệm trà <span id="shopCount" class="piece-count muted"></span></h2>
+      <table>
+        <thead><tr><th>Chọn</th><th>Tên món</th><th>Giá</th><th>Toạ độ</th></tr></thead>
+        <tbody id="shopPiecesBody"></tbody>
+      </table>
+    </div>
+
+    <div class="card pieces-card">
+      <h2>Đồ trang trí — Nhà hàng <span id="restaurantCount" class="piece-count muted"></span></h2>
+      <table>
+        <thead><tr><th>Chọn</th><th>Tên món</th><th>Giá</th><th>Toạ độ</th></tr></thead>
+        <tbody id="restaurantPiecesBody"></tbody>
+      </table>
+    </div>
+
+    <div class="row">
+      <button id="removeSelectedBtn" class="danger">Xoá món đã chọn (hoàn tiền đủ)</button>
+      <button id="removeRestaurantBtn" class="danger">Xoá toàn bộ nhà hàng của user (hoàn tiền đủ)</button>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const TOKEN_KEY = "bobaAdminToken";
+let token = sessionStorage.getItem(TOKEN_KEY) ?? "";
+let users = [];
+let detailName = "";
+
+class UnauthorizedError extends Error {}
+
+function setMsg(text, kind) {
+  const el = $("msg");
+  el.textContent = text;
+  el.className = kind;
+  el.style.display = text ? "block" : "none";
+}
+
+function showView(name) {
+  for (const id of ["loginView", "listView", "detailView"]) $(id).hidden = id !== name;
+  $("logoutBtn").hidden = name === "loginView";
+}
+
+async function api(path, options = {}) {
+  const res = await fetch(path, {
+    ...options,
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + token, ...(options.headers ?? {}) },
+  });
+  if (res.status === 401) throw new UnauthorizedError("Sai token");
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error ?? "HTTP " + res.status);
+  return body;
+}
+
+function resetZone() {
+  $("previewOut").textContent = "";
+  $("confirmInput").value = "";
+  $("confirmInput").hidden = true;
+  $("confirmLabel").hidden = true;
+  $("resetBtn").disabled = true;
+}
+
+// ------------------------------------------------------------ users list
+
+function fmtMoney(n) { return "$" + n; }
+
+function fmtDate(iso) {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString("vi-VN");
+}
+
+function renderUsers() {
+  const term = $("searchInput").value.trim().toLowerCase();
+  const body = $("usersBody");
+  body.replaceChildren();
+  for (const u of users) {
+    if (term && !u.name.toLowerCase().includes(term)) continue;
+    const tr = document.createElement("tr");
+    tr.className = "clickable";
+    for (const text of [u.name, fmtMoney(u.money), String(u.counts.shop), String(u.counts.restaurant), fmtDate(u.lastSeenAt)]) {
+      const td = document.createElement("td");
+      td.textContent = text;
+      tr.append(td);
+    }
+    tr.addEventListener("click", () => void openDetail(u.name));
+    body.append(tr);
+  }
+  if (!body.firstElementChild) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 5;
+    td.textContent = "Không có user nào";
+    tr.append(td);
+    body.append(tr);
+  }
+}
+
+async function loadUsers() {
+  users = await api("/admin/users");
+  renderUsers();
+}
+
+// ------------------------------------------------------------ detail
+
+function pieceRow(piece) {
+  const tr = document.createElement("tr");
+  const checkTd = document.createElement("td");
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.dataset.id = piece.id;
+  checkTd.append(box);
+  const cells = [piece.label, fmtMoney(piece.price), "(" + piece.x + ", " + piece.y + ")"];
+  tr.append(checkTd);
+  for (const text of cells) {
+    const td = document.createElement("td");
+    td.textContent = text;
+    tr.append(td);
+  }
+  return tr;
+}
+
+function renderPieces(tbodyId, pieces) {
+  const body = $(tbodyId);
+  body.replaceChildren();
+  for (const piece of pieces) body.append(pieceRow(piece));
+  if (!pieces.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 4;
+    td.textContent = "Chưa có món nào";
+    tr.append(td);
+    body.append(tr);
+  }
+}
+
+async function loadDetail(name) {
+  const data = await api("/admin/users/" + encodeURIComponent(name) + "/decorations");
+  detailName = name;
+  $("detailTitle").textContent = "User: " + name;
+  $("detailMoney").textContent = fmtMoney(data.money);
+  const shop = data.pieces.filter((p) => p.venue === "shop");
+  const restaurant = data.pieces.filter((p) => p.venue === "restaurant");
+  $("shopCount").textContent = "(" + shop.length + " món)";
+  $("restaurantCount").textContent = "(" + restaurant.length + " món)";
+  renderPieces("shopPiecesBody", shop);
+  renderPieces("restaurantPiecesBody", restaurant);
+}
+
+async function openDetail(name) {
+  setMsg("", "success");
+  await loadDetail(name);
+  showView("detailView");
+}
+
+function checkedPieceIds() {
+  return [...document.querySelectorAll("#detailView input[type=checkbox]:checked")].map((el) => el.dataset.id);
+}
+
+async function removePieces(body) {
+  const data = await api("/admin/users/" + encodeURIComponent(detailName) + "/decorations", {
+    method: "DELETE",
+    body: JSON.stringify(body),
+  });
+  return data;
+}
+
+// ------------------------------------------------------------ wiring
+
+function enterWithToken(given) {
+  token = given;
+  sessionStorage.setItem(TOKEN_KEY, token);
+  setMsg("", "success");
+  loadUsers()
+    .then(() => {
+      resetZone();
+      showView("listView");
+    })
+    .catch(handleError);
+}
+
+function handleError(err) {
+  if (err instanceof UnauthorizedError) {
+    token = "";
+    sessionStorage.removeItem(TOKEN_KEY);
+    setMsg("Sai token. Hãy nhập lại.", "error");
+    showView("loginView");
+  } else {
+    setMsg("Lỗi: " + err.message, "error");
+  }
+}
+
+$("loginBtn").addEventListener("click", () => {
+  const given = $("tokenInput").value.trim();
+  if (!given) return setMsg("Chưa nhập token.", "error");
+  enterWithToken(given);
+});
+
+$("logoutBtn").addEventListener("click", () => {
+  token = "";
+  sessionStorage.removeItem(TOKEN_KEY);
+  users = [];
+  detailName = "";
+  $("tokenInput").value = "";
+  setMsg("", "success");
+  showView("loginView");
+});
+
+$("searchInput").addEventListener("input", renderUsers);
+
+$("backBtn").addEventListener("click", () => {
+  detailName = "";
+  setMsg("", "success");
+  loadUsers()
+    .then(() => showView("listView"))
+    .catch(handleError);
+});
+
+$("setMoneyBtn").addEventListener("click", async () => {
+  const value = Number($("setMoneyInput").value);
+  if (!Number.isInteger(value) || value < 0) return setMsg("Số tiền đặt lại phải là số nguyên ≥ 0.", "error");
+  try {
+    const data = await api("/admin/users/" + encodeURIComponent(detailName) + "/money", {
+      method: "PATCH",
+      body: JSON.stringify({ set: value }),
+    });
+    setMsg("Đã đặt lại tiền của " + detailName + ": " + fmtMoney(data.money), "success");
+    await loadDetail(detailName);
+  } catch (err) { handleError(err); }
+});
+
+$("deltaMoneyBtn").addEventListener("click", async () => {
+  const value = Number($("deltaMoneyInput").value);
+  if (!Number.isInteger(value)) return setMsg("Cộng/trừ phải là số nguyên (vd -50).", "error");
+  try {
+    const data = await api("/admin/users/" + encodeURIComponent(detailName) + "/money", {
+      method: "PATCH",
+      body: JSON.stringify({ delta: value }),
+    });
+    setMsg("Đã cộng/trừ " + value + " cho " + detailName + ": còn " + fmtMoney(data.money), "success");
+    await loadDetail(detailName);
+  } catch (err) { handleError(err); }
+});
+
+$("removeSelectedBtn").addEventListener("click", async () => {
+  const ids = checkedPieceIds();
+  if (!ids.length) return setMsg("Chưa chọn món nào.", "error");
+  try {
+    const data = await removePieces({ ids });
+    setMsg("Đã xoá " + data.removed + " món, hoàn " + fmtMoney(data.refunded) + " cho " + detailName + ".", "success");
+    await loadDetail(detailName);
+  } catch (err) { handleError(err); }
+});
+
+$("removeRestaurantBtn").addEventListener("click", async () => {
+  try {
+    const data = await removePieces({ venue: "restaurant" });
+    setMsg("Đã xoá " + data.removed + " món nhà hàng của " + detailName + ", hoàn " + fmtMoney(data.refunded) + ".", "success");
+    await loadDetail(detailName);
+  } catch (err) { handleError(err); }
+});
+
+$("previewBtn").addEventListener("click", async () => {
+  try {
+    const data = await api("/admin/decorations/reset", {
+      method: "POST",
+      body: JSON.stringify({ venue: "restaurant", refund: "full", dryRun: true }),
+    });
+    $("previewOut").textContent =
+      data.pieces === 0
+        ? "Không có món nhà hàng nào để xoá."
+        : "Sẽ xoá " + data.pieces + " món nhà hàng của " + data.users + " user, hoàn " + fmtMoney(data.refund) + ".";
+    $("confirmInput").value = "";
+    $("confirmInput").hidden = false;
+    $("confirmLabel").hidden = false;
+    $("resetBtn").disabled = true;
+    setMsg("", "success");
+  } catch (err) { handleError(err); }
+});
+
+$("confirmInput").addEventListener("input", () => {
+  $("resetBtn").disabled = $("confirmInput").value !== "XOA";
+});
+
+$("resetBtn").addEventListener("click", async () => {
+  try {
+    const data = await api("/admin/decorations/reset", {
+      method: "POST",
+      body: JSON.stringify({ venue: "restaurant", refund: "full" }),
+    });
+    setMsg(
+      "Đã dọn nhà hàng: " + data.users + " user, " + data.removed + " món, hoàn " + fmtMoney(data.refunded) + ".",
+      "success",
+    );
+    resetZone();
+    await loadUsers();
+    renderUsers();
+  } catch (err) { handleError(err); }
+});
+
+// Boot: use a saved token if there is one, else ask for it.
+if (token) enterWithToken(token);
+else showView("loginView");
+</script>
+</body>
+</html>

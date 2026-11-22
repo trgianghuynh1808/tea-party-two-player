@@ -51,6 +51,9 @@ export default defineConfig({
       url: 'http://localhost:2567/health',
       reuseExistingServer: true,
       timeout: 120_000,
+      /* The admin API + /portal only exist when ADMIN_TOKEN is set; the admin-portal spec relies on it.
+         Spread process.env (Playwright replaces the whole environment, which would drop PATH). */
+      env: { ...process.env, ADMIN_TOKEN: 'test-admin-token' },
     },
     {
       command: 'npm run dev:client',

@@ -2,6 +2,7 @@ import {
   DECOR_GRID,
   ERASE_TOOL,
   buildRefund,
+  areaOf,
   cellsForTool,
   getBuildTile,
   isBlocking,
@@ -11,6 +12,7 @@ import {
   normalizeRotation,
   refundFor,
   snapToGrid,
+  type Area,
   type PlacedDecoration,
   type ShopSave,
 } from "@boba/shared";
@@ -22,6 +24,22 @@ const SAVE_DEBOUNCE_MS = 1000;
 const RESTORE_NUDGE_STEPS = 12;
 
 export type Piece = Required<PlacedDecoration>;
+
+/** A piece as shown in admin views: its catalog info plus which venue it stands in. */
+export interface PieceInfo {
+  id: string;
+  kind: string;
+  label: string;
+  price: number;
+  x: number;
+  y: number;
+  rotation: number;
+  /** From areaOf: pieces can only be placed inside a room, so this is "shop" or "restaurant" in practice. */
+  venue: Area;
+}
+
+/** How much money to give back for removed pieces: the full price, or nothing. */
+export type RefundMode = "full" | "none";
 
 /** What changed in the shop; every open room mirrors these into its synced state. */
 export type ShopEvent =
@@ -126,6 +144,61 @@ export class SharedShop {
     this.emit({ type: "removed", id: piece.id });
     this.emit({ type: "money", money: this.money });
     this.scheduleSave();
+  }
+
+  /**
+   * All furniture with catalog info and its venue (tea shop / restaurant), for admin views.
+   * A piece with an unknown kind (catalog changed) keeps its raw kind as the label at price 0.
+   */
+  piecesByVenue(): PieceInfo[] {
+    return this.pieces.map((piece) => {
+      const def = getDecorationDef(piece.kind);
+      return {
+        id: piece.id,
+        kind: piece.kind,
+        label: def?.label ?? piece.kind,
+        price: def?.price ?? 0,
+        x: piece.x,
+        y: piece.y,
+        rotation: piece.rotation,
+        venue: areaOf({ x: piece.x, y: piece.y }),
+      };
+    });
+  }
+
+  /** Add (or take, when negative) money; never below zero. Returns the change actually applied. */
+  adjustMoney(delta: number): number {
+    return this.earn(delta);
+  }
+
+  /**
+   * Remove pieces picked by id list or predicate (admin tool; unlike sell, this can refund the FULL
+   * price). Emits "removed" per piece, then one "money" event when money changed. Returns totals.
+   */
+  removePieces(selector: string[] | ((piece: Piece) => boolean), refund: RefundMode): { removed: number; refunded: number } {
+    let matches: (piece: Piece) => boolean;
+    if (Array.isArray(selector)) {
+      const ids = new Set(selector);
+      matches = (piece) => ids.has(piece.id);
+    } else {
+      matches = selector;
+    }
+    let removed = 0;
+    let refunded = 0;
+    for (let i = this.pieces.length - 1; i >= 0; i--) {
+      const piece = this.pieces[i];
+      if (!matches(piece)) continue;
+      this.pieces.splice(i, 1);
+      const def = getDecorationDef(piece.kind);
+      if (refund === "full" && def) refunded += def.price;
+      this.emit({ type: "removed", id: piece.id });
+      removed++;
+    }
+    if (!removed) return { removed, refunded };
+    if (refunded) this.money += refunded;
+    this.emit({ type: "money", money: this.money });
+    this.scheduleSave();
+    return { removed, refunded };
   }
 
   /**

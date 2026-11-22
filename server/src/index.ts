@@ -1,4 +1,3 @@
-import { timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,14 +8,12 @@ import {
   ROOMS_PATH,
   ROOM_NAME,
   SERVER_PORT,
-  normalizeUsername,
-  usernameKey,
   type RoomMetadata,
   type RoomsResponse,
 } from "@boba/shared";
 import { BobaShopRoom } from "./rooms/BobaShopRoom.js";
-import { loadUser, parseShopSave, storageName } from "./persistence/ShopStore.js";
-import { openShop } from "./shop/SharedShop.js";
+import { registerAdminRoutes } from "./admin.js";
+import { storageName } from "./persistence/ShopStore.js";
 
 const port = Number(process.env.PORT) || SERVER_PORT;
 
@@ -25,20 +22,8 @@ const port = Number(process.env.PORT) || SERVER_PORT;
 const clientDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../client/dist");
 const serveClient = existsSync(path.join(clientDist, "index.html"));
 
-/**
- * Admin API (backups / restores), enabled only when ADMIN_TOKEN is set. Send it as "Authorization: Bearer <token>".
- * - GET /admin/users/:name        -> the user record + their shop (money + furniture), live from the server
- * - PUT /admin/users/:name/shop   -> body = a shop save ({ money, decorations }): replaces that user's shop
- *   (creates the user if they never played). Works while the server runs: open rooms update right away.
- */
+// Admin API + portal, enabled only when ADMIN_TOKEN is set (see src/admin.ts).
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN ?? "";
-
-function isAdmin(header: string | undefined): boolean {
-  if (!ADMIN_TOKEN) return false;
-  const given = Buffer.from(header?.replace(/^Bearer\s+/i, "") ?? "");
-  const expected = Buffer.from(ADMIN_TOKEN);
-  return given.length === expected.length && timingSafeEqual(given, expected);
-}
 
 const server = defineServer({
   rooms: {
@@ -72,37 +57,10 @@ const server = defineServer({
       };
       res.set("Access-Control-Allow-Origin", "*").set("Cache-Control", "no-store").json(body);
     });
-    app.use("/admin", (req, res, next) => {
-      if (isAdmin(req.get("authorization"))) return next();
-      res.status(ADMIN_TOKEN ? 401 : 404).json({ error: ADMIN_TOKEN ? "unauthorized" : "admin API disabled" });
-    });
-    app.get("/admin/users/:name", async (req, res) => {
-      const name = normalizeUsername(req.params.name);
-      if (!name) return void res.status(400).json({ error: "bad name" });
-      try {
-        const key = usernameKey(name);
-        const user = await loadUser(key);
-        if (!user) return void res.status(404).json({ error: "user not found" });
-        const shop = await openShop(user.name, key, false);
-        res.json({ user, shop: shop.snapshot() });
-      } catch (err) {
-        console.error("[admin] read failed", err);
-        res.status(500).json({ error: String(err) });
-      }
-    });
-    app.put("/admin/users/:name/shop", express.json({ limit: "1mb" }), async (req, res) => {
-      const name = normalizeUsername(req.params.name);
-      if (!name) return void res.status(400).json({ error: "bad name" });
-      try {
-        const save = parseShopSave(req.body);
-        const shop = await openShop(name, usernameKey(name), false);
-        const dropped = await shop.replace(save);
-        console.log(`[admin] restored shop of ${name}: $${shop.money}, ${shop.pieces.length} decorations (${dropped} dropped)`);
-        res.json({ ok: true, shopId: shop.shopId, money: shop.money, decorations: shop.pieces.length, dropped });
-      } catch (err) {
-        console.error("[admin] restore failed", err);
-        res.status(500).json({ error: String(err) });
-      }
+    registerAdminRoutes(app);
+    // The admin portal page (HTML, no build step): free to load, the token is entered inside.
+    app.get("/portal", (_req, res) => {
+      res.sendFile(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../portal/index.html"));
     });
     if (serveClient) app.use(express.static(clientDist));
   },

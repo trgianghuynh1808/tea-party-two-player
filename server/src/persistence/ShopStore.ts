@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { canBuildCell, getBuildTile, getDecorationDef, isValidShopId, layerOf, parseTileKey, tileKey, type ShopSave } from "@boba/shared";
@@ -22,6 +22,8 @@ interface Backend {
   name: string;
   read(collection: Collection, id: string): Promise<string | undefined>;
   write(collection: Collection, id: string, json: string): Promise<void>;
+  /** All record ids currently stored in a collection. */
+  list(collection: Collection): Promise<string[]>;
 }
 
 // ---------------------------------------------------------------- File backend (local dev / own machine)
@@ -48,6 +50,15 @@ const fileBackend: Backend = {
     const tmp = `${file}.${process.pid}.tmp`;
     await writeFile(tmp, json, "utf8");
     await rename(tmp, file);
+  },
+  async list(collection) {
+    try {
+      const files = await readdir(path.join(DATA_DIR, collection));
+      return files.filter((file) => file.endsWith(".json")).map((file) => file.slice(0, -".json".length));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw err;
+    }
   },
 };
 
@@ -77,6 +88,18 @@ function upstashBackend(url: string, token: string): Backend {
     },
     async write(collection, id, json) {
       await command(["SET", REDIS_PREFIX[collection] + id, json]);
+    },
+    async list(collection) {
+      const prefix = REDIS_PREFIX[collection];
+      const ids: string[] = [];
+      let cursor = "0";
+      do {
+        const result = await command(["SCAN", cursor, "MATCH", `${prefix}*`, "COUNT", "200"]);
+        const [next, keys] = Array.isArray(result) ? (result as [unknown, unknown]) : ["0", []];
+        cursor = String(next);
+        for (const key of Array.isArray(keys) ? keys : []) ids.push(String(key).slice(prefix.length));
+      } while (cursor !== "0");
+      return ids;
     },
   };
 }
@@ -116,6 +139,34 @@ export async function loadUser(usernameKey: string): Promise<UserRecord | undefi
 
 export async function saveUser(user: UserRecord): Promise<void> {
   await backend.write("users", userIdOf(user.key), JSON.stringify(user, null, 2));
+}
+
+/**
+ * Every user record in storage. Corrupt records are skipped (with a warning) so one bad file
+ * can't take the whole admin listing down; only storage errors reject.
+ */
+export async function listUsers(): Promise<UserRecord[]> {
+  const ids = await backend.list("users");
+  const users: UserRecord[] = [];
+  for (const id of ids) {
+    try {
+      const raw = await backend.read("users", id);
+      if (raw === undefined) continue;
+      const data = JSON.parse(raw) as Partial<UserRecord>;
+      if (
+        typeof data.name !== "string" ||
+        typeof data.key !== "string" ||
+        userIdOf(data.key) !== id ||
+        !isValidShopId(data.shopId)
+      ) {
+        throw new Error("corrupt user record");
+      }
+      users.push(data as UserRecord);
+    } catch (err) {
+      console.warn(`[ShopStore] skipping unreadable user record ${id}`, err);
+    }
+  }
+  return users;
 }
 
 /**
