@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
+import { Encoder } from "@colyseus/schema";
 import { defineRoom, defineServer, matchMaker } from "colyseus";
 import {
   MAX_PLAYERS,
@@ -14,6 +15,9 @@ import {
 import { BobaShopRoom } from "./rooms/BobaShopRoom.js";
 import { registerAdminRoutes } from "./admin.js";
 import { storageName } from "./persistence/ShopStore.js";
+
+// Room state outgrew the 8 KB default encode buffer (caused "buffer overflow" lag).
+Encoder.BUFFER_SIZE = 64 * 1024;
 
 const port = Number(process.env.PORT) || SERVER_PORT;
 
