@@ -6,8 +6,8 @@ import { joinAsHost } from "./helpers";
  * Admin portal e2e (task .agents/tasks/2026-11-22-admin-portal.md):
  * - T1 drives the admin API directly (the request fixture, "Authorization: Bearer" header).
  * - T2 drives the /portal page the server itself serves (page fixture + the game hook to buy furniture).
- * - T3 checks the storage diagnostics: /admin/storage auth + key/read/skip counts and the portal
- *   diag box (task .agents/tasks/2026-11-22-admin-diagnostics.md).
+ * - T4/T5 cover deleting a user (task .agents/tasks/2026-11-22-admin-delete-user.md): the API rules
+ *   (token, confirm, 404/409, the storage endpoint removed) and the portal row's Xoá button.
  * playwright.config.ts starts the server with ADMIN_TOKEN set, so these tests need a server
  * started by Playwright: a dev server without the token would answer 404 instead of 401.
  */
@@ -126,33 +126,72 @@ test("T2: portal page — a wrong token shows the error, the user row lists thei
   await expect(page.locator("#detailMoney")).toHaveText("$1000");
 });
 
-test("T3: storage diagnostics — /admin/storage without a token is 401; after a fresh host join it reports the file backend, and the portal shows the diag box", async ({ page, request }) => {
-  // No token: the admin middleware answers 401 before the route runs.
-  expect((await request.get(`${SERVER}/admin/storage`)).status()).toBe(401);
-
-  // A brand-new player creates one user record (and its shop) in the file backend.
+test("T4: delete user API — no token is 401, missing confirm is 400, with confirm the user is gone, /admin/storage is 404, a user in a room is 409", async ({ page, request }) => {
+  // Create a user who never played, with money, through the shop-restore API.
   const user = uniqueUser();
-  await joinAsHost(page, user);
+  const put = await request.put(`${SERVER}/admin/users/${encodeURIComponent(user)}/shop`, {
+    headers: AUTH,
+    data: { money: 500, decorations: [] },
+  });
+  expect(put.status()).toBe(200);
 
-  const res = await request.get(`${SERVER}/admin/storage`, { headers: AUTH });
-  expect(res.status()).toBe(200);
-  const diag = (await res.json()) as {
-    backend: string;
-    userKeys: number;
-    shopKeys: number;
-    users: number;
-    skipped: unknown[];
-  };
-  expect(diag.backend.startsWith("files")).toBe(true);
-  expect(diag.userKeys).toBeGreaterThanOrEqual(1);
-  expect(diag.users).toBeGreaterThanOrEqual(1);
-  expect(diag.users).toBeLessThanOrEqual(diag.userKeys);
-  expect(Array.isArray(diag.skipped)).toBe(true);
+  // No token: the admin middleware answers 401 before the route runs.
+  expect((await request.delete(`${SERVER}/admin/users/${encodeURIComponent(user)}`)).status()).toBe(401);
 
-  // The portal list view renders the diagnostics box right after login.
+  // A DELETE without confirm: true must not delete anything.
+  const noConfirm = await request.delete(`${SERVER}/admin/users/${encodeURIComponent(user)}`, {
+    headers: AUTH,
+    data: {},
+  });
+  expect(noConfirm.status()).toBe(400);
+
+  // The removed storage-diagnostics endpoint is gone (404 with a valid token).
+  expect((await request.get(`${SERVER}/admin/storage`, { headers: AUTH })).status()).toBe(404);
+
+  // With confirm: true the user is deleted: the response is 200...
+  const del = await request.delete(`${SERVER}/admin/users/${encodeURIComponent(user)}`, {
+    headers: AUTH,
+    data: { confirm: true },
+  });
+  expect(del.status()).toBe(200);
+  // ...their record is gone...
+  expect((await request.get(`${SERVER}/admin/users/${encodeURIComponent(user)}`, { headers: AUTH })).status()).toBe(404);
+  // ...and the user listing no longer has them.
+  const list = (await (await request.get(`${SERVER}/admin/users`, { headers: AUTH })).json()) as { name: string }[];
+  expect(list.some((u) => u.name === user)).toBe(false);
+
+  // A user who is in a room (their game page is still open) cannot be deleted: 409, still there.
+  const playing = uniqueUser();
+  await joinAsHost(page, playing);
+  const busy = await request.delete(`${SERVER}/admin/users/${encodeURIComponent(playing)}`, {
+    headers: AUTH,
+    data: { confirm: true },
+  });
+  expect(busy.status()).toBe(409);
+  expect((await request.get(`${SERVER}/admin/users/${encodeURIComponent(playing)}`, { headers: AUTH })).status()).toBe(200);
+});
+
+test("T5: portal delete — the row's Xoá button (confirm dialog) removes the user, stays on the list, and the diag box is gone", async ({ page, request }) => {
+  // A user with money, created through the API.
+  const user = uniqueUser();
+  const put = await request.put(`${SERVER}/admin/users/${encodeURIComponent(user)}/shop`, {
+    headers: AUTH,
+    data: { money: 300, decorations: [] },
+  });
+  expect(put.status()).toBe(200);
+
   await page.goto(`${SERVER}/portal`);
   await page.fill("#tokenInput", ADMIN_TOKEN);
   await page.click("#loginBtn");
-  await expect(page.locator("#diagBox")).toContainText("Lưu trữ:");
-  await expect(page.locator("#diagBox")).toContainText("hồ sơ user");
+  const row = page.locator("#usersBody tr", { hasText: user });
+  await expect(row).toHaveCount(1);
+
+  // The delete button asks for confirmation: accept it.
+  page.once("dialog", (dialog) => void dialog.accept());
+  await row.locator("button.danger").click();
+
+  // The row disappears, the list view stays open (no detail view), and the diag box is gone.
+  await expect(row).toHaveCount(0);
+  await expect(page.locator("#detailView")).toBeHidden();
+  await expect(page.locator("#diagBox")).toHaveCount(0);
 });

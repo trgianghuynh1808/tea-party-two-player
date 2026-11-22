@@ -65,6 +65,8 @@ export class SharedShop {
   private seq = 0;
   private loading?: Promise<void>;
   private saveTimer?: ReturnType<typeof setTimeout>;
+  /** Set by discard(): a deleted user's shop must never be written back to storage. */
+  private discarded = false;
   private readonly listeners = new Set<(event: ShopEvent) => void>();
 
   constructor(readonly shopId: string) {}
@@ -85,6 +87,21 @@ export class SharedShop {
   subscribe(listener: (event: ShopEvent) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /** True while at least one room listens to this shop (the player is in a game). */
+  isInUse(): boolean {
+    return this.listeners.size > 0;
+  }
+
+  /**
+   * Retire this shop before its records are deleted: cancel any pending save and refuse all later
+   * writes, so a late flush() can never write the just-deleted save back to storage.
+   */
+  discard(): void {
+    this.discarded = true;
+    clearTimeout(this.saveTimer);
+    this.saveTimer = undefined;
   }
 
   /** Add (or take, if negative) money; never goes below zero. Returns the change actually applied. */
@@ -275,8 +292,9 @@ export class SharedShop {
     return dropped;
   }
 
-  /** Write pending changes now (e.g. when a room closes). */
+  /** Write pending changes now (e.g. when a room closes). Never writes a discarded shop. */
   async flush() {
+    if (this.discarded) return;
     if (!this.saveTimer) return;
     clearTimeout(this.saveTimer);
     this.saveTimer = undefined;
@@ -288,6 +306,7 @@ export class SharedShop {
   }
 
   private scheduleSave() {
+    if (this.discarded) return;
     clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => void this.flush(), SAVE_DEBOUNCE_MS);
   }
@@ -362,4 +381,13 @@ export function shopOf(key: string): SharedShop {
   const shop = shops.get(key);
   if (!shop) throw new Error(`Shop of ${key} was not opened`);
   return shop;
+}
+
+/**
+ * Drop the cached shop of a player (by username key) before deleting their records: the instance is
+ * discarded (no more writes) and removed from the cache, so the next openShop starts fresh ($0).
+ */
+export function forgetShop(key: string): void {
+  shops.get(key)?.discard();
+  shops.delete(key);
 }

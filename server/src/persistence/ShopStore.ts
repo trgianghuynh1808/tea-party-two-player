@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { canBuildCell, getBuildTile, getDecorationDef, isValidShopId, layerOf, parseTileKey, tileKey, type ShopSave } from "@boba/shared";
@@ -24,6 +24,8 @@ interface Backend {
   write(collection: Collection, id: string, json: string): Promise<void>;
   /** All record ids currently stored in a collection. */
   list(collection: Collection): Promise<string[]>;
+  /** Remove one record; a record that isn't there is not an error. */
+  delete(collection: Collection, id: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------- File backend (local dev / own machine)
@@ -57,6 +59,14 @@ const fileBackend: Backend = {
       return files.filter((file) => file.endsWith(".json")).map((file) => file.slice(0, -".json".length));
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw err;
+    }
+  },
+  async delete(collection, id) {
+    try {
+      await unlink(path.join(DATA_DIR, collection, `${id}.json`));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
       throw err;
     }
   },
@@ -107,6 +117,9 @@ function upstashBackend(url: string, token: string): Backend {
       }
       return ids;
     },
+    async delete(collection, id) {
+      await command(["DEL", REDIS_PREFIX[collection] + id]);
+    },
   };
 }
 
@@ -145,6 +158,17 @@ export async function loadUser(usernameKey: string): Promise<UserRecord | undefi
 
 export async function saveUser(user: UserRecord): Promise<void> {
   await backend.write("users", userIdOf(user.key), JSON.stringify(user, null, 2));
+}
+
+/**
+ * Delete a user's whole footprint: their shop save first, then the user record. Shop first, so a
+ * delete interrupted in between leaves a user record without a shop, and the game then recreates
+ * an empty shop ($0) on the next join. Callers must first stop the shop from writing (forgetShop).
+ */
+export async function deleteUserRecords(user: UserRecord): Promise<void> {
+  checkId(user.shopId);
+  await backend.delete("shops", user.shopId);
+  await backend.delete("users", userIdOf(user.key));
 }
 
 /** Cap a skipped-record reason so it stays readable on one log line. */

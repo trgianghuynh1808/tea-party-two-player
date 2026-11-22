@@ -1,23 +1,24 @@
 import { timingSafeEqual } from "node:crypto";
 import express, { type Application } from "express";
 import { areaOf, normalizeUsername, usernameKey } from "@boba/shared";
-import { inspectUsers, listUsers, loadUser, parseShopSave } from "./persistence/ShopStore.js";
-import { openShop, type Piece, type RefundMode } from "./shop/SharedShop.js";
+import { deleteUserRecords, listUsers, loadUser, parseShopSave } from "./persistence/ShopStore.js";
+import { forgetShop, openShop, type Piece, type RefundMode } from "./shop/SharedShop.js";
 
 /**
  * Admin API (backups / restores / the /portal admin page), enabled only when ADMIN_TOKEN is set.
  * Send the token as "Authorization: Bearer <ADMIN_TOKEN>"; the token is never logged or put in URLs.
- * - GET  /admin/users                     -> all users with money and furniture counts per venue
- * - GET  /admin/storage                   -> storage diagnostics: backend name, user/shop key counts,
- *   read vs skipped users (ids + short reasons); no record contents
- * - GET  /admin/users/:name               -> the user record + their shop (money + furniture), live from the server
- * - PUT  /admin/users/:name/shop          -> body = a shop save ({ money, decorations }): replaces that user's shop
+ * - GET    /admin/users                     -> all users with money and furniture counts per venue
+ * - GET    /admin/users/:name               -> the user record + their shop (money + furniture), live from the server
+ * - PUT    /admin/users/:name/shop          -> body = a shop save ({ money, decorations }): replaces that user's shop
  *   (creates the user if they never played). Works while the server runs: open rooms update right away.
- * - GET  /admin/users/:name/decorations   -> that user's furniture with venue (tea shop / restaurant)
- * - PATCH /admin/users/:name/money        -> body { set } (new total, >= 0) or { delta } (add/remove)
+ * - DELETE /admin/users/:name               -> body { confirm: true }: deletes the user's record and shop save
+ *   (money + furniture) from storage, no backup. 409 while the user is in a room; the shop's late
+ *   saves are blocked, so a deleted user can't be written back.
+ * - GET    /admin/users/:name/decorations   -> that user's furniture with venue (tea shop / restaurant)
+ * - PATCH  /admin/users/:name/money        -> body { set } (new total, >= 0) or { delta } (add/remove)
  * - DELETE /admin/users/:name/decorations -> body { ids } or { venue } ("shop" | "restaurant"),
  *   optional { refund: "full" | "none" } (default full): removed pieces refund their FULL price
- * - POST /admin/decorations/reset         -> body { venue: "restaurant", refund: "full", dryRun? }:
+ * - POST   /admin/decorations/reset         -> body { venue: "restaurant", refund: "full", dryRun? }:
  *   removes every user's restaurant furniture (dryRun previews the totals without changing anything)
  */
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN ?? "";
@@ -73,16 +74,6 @@ export function registerAdminRoutes(app: Application): void {
     }
   });
 
-  app.get("/admin/storage", async (_req, res) => {
-    try {
-      const info = await inspectUsers();
-      res.json({ backend: info.backend, userKeys: info.userKeys, shopKeys: info.shopKeys, users: info.users.length, skipped: info.skipped });
-    } catch (err) {
-      console.error("[admin] storage diagnostics failed", err);
-      res.status(500).json({ error: String(err) });
-    }
-  });
-
   app.get("/admin/users/:name", async (req, res) => {
     const name = normalizeUsername(req.params.name);
     if (!name) return void res.status(400).json({ error: "bad name" });
@@ -108,6 +99,30 @@ export function registerAdminRoutes(app: Application): void {
       res.json({ ok: true, shopId: shop.shopId, money: shop.money, decorations: shop.pieces.length, dropped });
     } catch (err) {
       console.error("[admin] restore failed", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  app.delete("/admin/users/:name", JSON_BODY, async (req, res) => {
+    const name = normalizeUsername(req.params.name);
+    if (!name) return void res.status(400).json({ error: "bad name" });
+    if ((req.body ?? {}).confirm !== true) {
+      return void res.status(400).json({ error: "body must be { confirm: true }" });
+    }
+    try {
+      const user = await loadUser(usernameKey(name));
+      if (!user) return void res.status(404).json({ error: "user not found" });
+      const shop = await openShop(user.name, user.key, false);
+      if (shop.isInUse()) return void res.status(409).json({ error: "user is in a room" });
+      // Report the values that are about to be lost, then stop the shop's late saves before deleting.
+      const money = shop.money;
+      const decorations = shop.pieces.length;
+      forgetShop(user.key);
+      await deleteUserRecords(user);
+      console.log(`[admin] deleted user ${name} ($${money}, ${decorations} decoration(s))`);
+      res.json({ ok: true, name, money, decorations });
+    } catch (err) {
+      console.error("[admin] delete user failed", err);
       res.status(500).json({ error: String(err) });
     }
   });
