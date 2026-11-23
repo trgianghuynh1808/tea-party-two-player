@@ -39,7 +39,7 @@ After every hand-off, run the loop below on your own. Run long commands with the
    - `full`: also try up to 2 important edge scenarios and add specs for unchecked ones (max 3 new tests).
    - Open the game at `http://localhost:5173/?test=1` and use `window.__GAME__` to reach state; for room/sync features open 2 sessions and put both players in the same room.
    - Write the "## Verify" section (each item, PASS/FAIL, screenshot paths), ending with exactly `VERIFY: PASS` or `VERIFY: FAIL`. Do not change app code here. Close the browser and commit the task file and any new specs.
-3. **Review:** read the task file and `git diff main...HEAD`. Classify findings as **blocking** (bugs, behavior that differs from the goals, failing or missing test cases, security/data issues) or **non-blocking** (style, naming, small cleanups).
+3. **Review:** read the task file and `git diff main...HEAD`. Classify findings as **blocking** (bugs, behavior that differs from the goals, failing or missing test cases, security/data issues, docs left out of date per "Documentation Rules" in AGENTS.md) or **non-blocking** (style, naming, small cleanups).
 4. **Decide:**
    - `VERIFY: PASS` (or Verify mode `none`), `npm run typecheck` passes, and no blocking findings → **Ship** (below), then notify: `scripts/notify.sh "Shipped ✅" "<slug> → <commit hash>"`, report a short summary to the user, and stop.
    - Otherwise → step 5.
@@ -64,6 +64,7 @@ When the user asks for a review: read the task file (including "Test status" and
 When shipping (from Autopilot, or when the user says "ship"):
 
 1. Make sure the working tree is clean and `npm run typecheck` passes.
+   Double-check `README.md` (and `AGENTS.md` if relevant) against the code, per "Documentation Rules" in AGENTS.md. If it is out of date, update it (in the same task, or as a separate `docs:` commit before shipping) — do not ship with stale docs.
 2. Squash the branch into one commit on main:
    `git checkout main && git pull --ff-only && git merge --squash task/<slug>`
 3. Commit with one Conventional Commit message summarizing the whole task (e.g. `feat(orders): show container line last in recipe`), with a short body listing the main changes and the test cases added. Do not mention the individual step commits or fix cycles.
