@@ -200,6 +200,58 @@ test("bathroom T1: the category is registered and all its items have art on disk
   }
 });
 
+const BATHROOM_2_FLOOR = [
+  "bath_shower_glass",
+  "bath_toilet_cream",
+  "bath_tall_cabinet",
+  "bath_plant_shelf",
+  "bath_sink_wood",
+  "bath_bench_soap",
+  "bath_washers",
+  "bath_bench_plain",
+  "bath_tub_duck",
+  "bath_plant_tall",
+];
+const BATHROOM_2_WALL = [
+  "bath_mirror_framed",
+  "bath_wall_lamp",
+  "bath_towel_rail",
+  "bath_towel_hook",
+  "bath_towel_shelf_wood",
+  "bath_water_heater",
+];
+
+/** PNG IHDR holds the pixel size in bytes 16..23 (width then height, big-endian). */
+function pngSize(file: string): { width: number; height: number } {
+  const buf = readFileSync(file);
+  expect(buf.subarray(0, 8).toString("hex"), file).toBe("89504e470d0a1a0a");
+  expect(buf.subarray(12, 16).toString("ascii"), `${file} IHDR`).toBe("IHDR");
+  return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+}
+
+test("bathroom-2 T1: the 16 new items are in the bathroom category, with art on disk and the right layer", () => {
+  for (const [kinds, layer] of [
+    [BATHROOM_2_FLOOR, "object"],
+    [BATHROOM_2_WALL, "wall"],
+  ] as const) {
+    for (const kind of kinds) {
+      const def = getDecorationDef(kind);
+      expect(def, kind).toBeDefined();
+      expect(def!.category, kind).toBe("bathroom");
+      expect(def!.layer, kind).toBe(layer);
+      expect(def!.rotation ?? "none", kind).toBe("none");
+      const file = `client/public/${def!.image}`;
+      expect(existsSync(file), kind).toBe(true);
+      const { width, height } = pngSize(file);
+      expect(width, `${kind} width`).toBeGreaterThan(0);
+      expect(height, `${kind} height`).toBeGreaterThan(0);
+    }
+  }
+  for (const kind of ["bath_mirror", "bath_towel_shelf", "bath_toilet_front", "bath_bathtub"])
+    expect(getDecorationDef(kind), kind).toBeDefined();
+  expect(DECORATION_CATALOG.filter((d) => d.category === "bathroom")).toHaveLength(25);
+});
+
 // ---------------------------------------------------------------- ⟳ badge on rotatable items
 
 /** Unique per test run; shops persist per username in server/data/. */

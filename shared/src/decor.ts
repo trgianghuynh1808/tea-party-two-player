@@ -326,6 +326,23 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     wallArt("bath_mirror", "Gương", 70, "bath_mirror", 44, 56, 0x60c5f1),
     wallArt("bath_vent", "Cửa thông gió", 40, "bath_vent", 60, 30, 0x8b8b94),
     wallArt("bath_towel_shelf", "Kệ khăn", 60, "bath_towel_shelf", 64, 40, 0xcb6e28),
+    // Bathroom set 2: cut from bathroom-sheet-2.png (cut_bathroom.py); display size = (PNG - 8) / 2.
+    decor("bath_shower_glass", "Vách kính tắm", 160, "bathroom/shower_glass", 64, 20, 112, 0x9fd8e8),
+    decor("bath_toilet_cream", "Bồn cầu kem", 80, "bathroom/toilet_cream", 32, 24, 74, 0xf2ead8),
+    decor("bath_tall_cabinet", "Tủ cao có cây", 130, "bathroom/tall_cabinet", 40, 24, 118, 0xb26c24),
+    decor("bath_plant_shelf", "Kệ cây & giấy", 90, "bathroom/plant_shelf", 94, 24, 80, 0x7cb342),
+    decor("bath_sink_wood", "Bồn rửa gỗ", 120, "bathroom/sink_wood", 62, 26, 60, 0xcb6e28),
+    decor("bath_bench_soap", "Bàn giỏ & xà phòng", 70, "bathroom/bench_soap", 72, 26, 84, 0xd9a066),
+    decor("bath_washers", "Máy giặt đôi", 220, "bathroom/washers", 92, 28, 58, 0xe5e2dd),
+    decor("bath_bench_plain", "Bàn gỗ trống", 45, "bathroom/bench_plain", 70, 26, 54, 0xa9744f),
+    decor("bath_tub_duck", "Bồn tắm vịt vàng", 210, "bathroom/tub_duck", 100, 28, 80, 0xffd166),
+    decor("bath_plant_tall", "Cây lá cao", 85, "bathroom/plant_tall", 52, 22, 96, 0x6aa84f),
+    wallArt("bath_mirror_framed", "Gương khung gỗ", 70, "mirror_framed", 38, 52, 0xb26c24),
+    wallArt("bath_wall_lamp", "Đèn tường đôi", 60, "wall_lamp", 52, 38, 0xffd166),
+    wallArt("bath_towel_rail", "Thanh treo khăn", 45, "towel_rail", 72, 38, 0xcb6e28),
+    wallArt("bath_towel_hook", "Khăn treo móc", 35, "towel_hook", 38, 34, 0xb7543f),
+    wallArt("bath_towel_shelf_wood", "Kệ khăn & chai", 65, "towel_shelf_wood", 64, 50, 0xcb6e28),
+    wallArt("bath_water_heater", "Bình nước nóng", 110, "water_heater", 38, 68, 0xe5e2dd),
   ]),
 ];
 

@@ -1,49 +1,90 @@
-"""Cut the 4 head-on bathroom pieces from ../sheets/bathroom-sheet-1.png.
+"""Cut the bathroom pieces from the two bathroom sheets.
 
     .venv-art/bin/python cut_bathroom.py   # needs Pillow, NumPy, SciPy
 
-Unlike the furniture sheets this one has a dark background (~RGB 36,35,42)
-instead of transparency, so the background is separated by colour distance
-instead of alpha. The black drop shadows under the pieces and the watermark
-star in the bottom-right corner are dark too but never make it into the
-sprites: only the biggest colour-distinct blob in each box is kept (like
-cut_furniture.py), and the <=2px shadow remnants below a base average away
-when the crop is downscaled. CUTS maps name -> (box, H, target) where H is
-the on-screen height and target picks the output folder: floor pieces go to
-public/assets/decor/bathroom/, the wall hook rack to public/assets/decor/wall/.
-The sprite is pixelated to match the existing furniture: downscaled to H/2 px
-tall, palette reduced to 20 colours, 1px dark outline, blown back up x4
-(saved at 2x display height).
+Unlike the furniture sheets these have a dark background (sheet 1 ~RGB
+36,35,42; sheet 2 ~RGB 44,48,51) instead of transparency, so the background
+is separated by colour distance instead of alpha. The black drop shadows
+under the pieces never make it into the sprites: only the biggest
+colour-distinct blob in each box is kept (like cut_furniture.py), and the
+<=2px shadow remnants below a base average away when the crop is
+downscaled. CUTS maps (sheet, name) -> (box, H, target) where H is the
+on-screen height and target picks the output folder: floor pieces go to
+public/assets/decor/bathroom/, wall pieces to public/assets/decor/wall/.
+The sprite is pixelated to match the existing furniture: downscaled to
+H/2 px tall, palette reduced to 20 colours, 1px dark outline, blown back
+up x4 (saved at 2x display height).
+
+Sheet 2's tall plant grows beside the ✦ watermark, drawn in a neutral grey
+(~RGB 107,110,112) over the background between its hanging leaf and the
+trunk. plant_tall therefore drops every neutral-grey pixel (channel
+spread <= 14) before blobbing and repaints the pixels the closing borrowed
+from that star hole with their nearest really-solid colour, so no grey
+star dust reaches the sprite. Its box runs to x 1018 because the canopy
+reaches x 1015.
+
+Also writes ../sheets/bathroom-preview-2.png: the 16 new pieces on a
+neutral grey, 3x, labelled (floor row bottom-aligned, wall row top-aligned).
 """
 import os
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 from scipy import ndimage as ndi
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SHEET = os.path.join(HERE, "../sheets/bathroom-sheet-1.png")
 OUT_FLOOR = os.path.join(HERE, "../../public/assets/decor/bathroom")
 OUT_WALL = os.path.join(HERE, "../../public/assets/decor/wall")
-BG = np.array([36, 35, 42])
+PREVIEW = os.path.join(HERE, "../sheets/bathroom-preview-2.png")
 DIST_MIN = 28
 OUTLINE = (61, 44, 41)
 
-# name -> ((left, top, right, bottom), on-screen height H, "bathroom"|"wall")
+# sheet key -> (path, background colour)
+SHEETS = {
+    "1": (os.path.join(HERE, "../sheets/bathroom-sheet-1.png"), np.array([36, 35, 42])),
+    "2": (os.path.join(HERE, "../sheets/bathroom-sheet-2.png"), np.array([44, 48, 51])),
+}
+
+# (sheet, name) -> ((left, top, right, bottom), on-screen height H, "bathroom"|"wall")
 CUTS = [
-    ("cabinet_bottles", (170, 312, 352, 562), 100, "bathroom"),
-    ("hook_rack", (50, 372, 128, 455), 48, "wall"),
-    ("toilet_front", (96, 765, 200, 945), 74, "bathroom"),
-    ("trash_can", (652, 738, 716, 840), 46, "bathroom"),
+    # sheet 1: the original 4 head-on pieces (unchanged)
+    ("1", "cabinet_bottles", (170, 312, 352, 562), 100, "bathroom"),
+    ("1", "hook_rack", (50, 372, 128, 455), 48, "wall"),
+    ("1", "toilet_front", (96, 765, 200, 945), 74, "bathroom"),
+    ("1", "trash_can", (652, 738, 716, 840), 46, "bathroom"),
+    # sheet 2 floor
+    ("2", "shower_glass", (18, 108, 145, 332), 112, "bathroom"),
+    ("2", "toilet_cream", (265, 398, 330, 545), 74, "bathroom"),
+    ("2", "tall_cabinet", (253, 95, 328, 330), 118, "bathroom"),
+    ("2", "plant_shelf", (380, 385, 572, 547), 81, "bathroom"),
+    ("2", "sink_wood", (452, 198, 577, 320), 61, "bathroom"),
+    ("2", "bench_soap", (590, 378, 730, 547), 84, "bathroom"),
+    ("2", "washers", (705, 225, 890, 342), 58, "bathroom"),
+    ("2", "bench_plain", (750, 437, 890, 547), 55, "bathroom"),
+    ("2", "tub_duck", (20, 385, 212, 545), 80, "bathroom"),
+    ("2", "plant_tall", (910, 366, 1018, 557), 96, "bathroom"),
+    # sheet 2 wall
+    ("2", "mirror_framed", (476, 93, 553, 197), 52, "wall"),
+    ("2", "wall_lamp", (462, 12, 567, 88), 38, "wall"),
+    ("2", "towel_rail", (584, 52, 722, 127), 38, "wall"),
+    ("2", "towel_hook", (578, 148, 652, 216), 34, "wall"),
+    ("2", "towel_shelf_wood", (740, 35, 870, 135), 50, "wall"),
+    ("2", "water_heater", (920, 72, 997, 208), 68, "wall"),
 ]
 
+# Pieces drawn beside the grey ✦ watermark on sheet 2.
+STAR_SAFE = {"plant_tall"}
 
-def cut(sheet, box):
+
+def cut(sheet, box, bg, drop_grey=False):
     """Crop the box (+4px margin) and keep only the biggest blob, tightly trimmed."""
     left, top, right, bottom = box
     im = sheet.crop((left - 4, top - 4, right + 4, bottom + 4))
     a = np.asarray(im).copy()
-    solid = np.sqrt(((a[..., :3].astype(int) - BG) ** 2).sum(-1)) > DIST_MIN
+    rgb = a[..., :3].astype(int)
+    solid = np.sqrt(((rgb - bg) ** 2).sum(-1)) > DIST_MIN
+    if drop_grey:
+        solid &= rgb.max(-1) - rgb.min(-1) > 14  # neutral grey = the ✦ watermark
     # Join the parts of one piece (thin gaps), then keep the biggest blob.
     joined = ndi.binary_fill_holes(ndi.binary_closing(solid, iterations=3))
     lab, n = ndi.label(joined)
@@ -51,6 +92,11 @@ def cut(sheet, box):
         raise ValueError(f"nothing in {box}")
     sizes = ndi.sum(joined, lab, range(1, n + 1))
     keep = lab == (int(np.argmax(sizes)) + 1)
+    if drop_grey:
+        # The closing bridges the star hole; repaint every blob pixel that is
+        # not really solid with its nearest kept colour so the star vanishes.
+        _, (iy, ix) = ndi.distance_transform_edt(~(solid & keep), return_indices=True)
+        a[..., :3] = a[iy, ix, :3]
     out = a.copy()
     out[..., 3] = np.where(keep, 255, 0)
     out[~keep, :3] = 0
@@ -84,15 +130,55 @@ def pixelize(img, h_display):
     return Image.fromarray(out).resize(((w + 2) * 4, (ph + 2) * 4), Image.NEAREST)
 
 
+FLOOR_PNGS = [
+    "shower_glass", "toilet_cream", "tall_cabinet", "plant_shelf",
+    "sink_wood", "bench_soap", "washers", "bench_plain", "tub_duck", "plant_tall",
+]
+WALL_PNGS = [
+    "mirror_framed", "wall_lamp", "towel_rail", "towel_hook",
+    "towel_shelf_wood", "water_heater",
+]
+
+
+def preview():
+    """The 16 new pieces at their pixel-grid size x3 on flat grey, with labels."""
+    scale, pad, label_h = 3, 14, 10
+    rows = []
+    for names, folder, align in ((FLOOR_PNGS, "bathroom", "bottom"), (WALL_PNGS, "wall", "top")):
+        imgs = []
+        for n in names:
+            im = Image.open(os.path.join(OUT_FLOOR if folder == "bathroom" else OUT_WALL, n + ".png"))
+            imgs.append((n, im.resize((im.width // 4, im.height // 4), Image.NEAREST)))
+        rows.append((imgs, align, max(im.height for _, im in imgs)))
+    W = max(sum(im.width * scale for _, im in imgs) + pad * (len(imgs) + 1) for imgs, _, _ in rows)
+    H = sum(rh * scale + pad * 2 + label_h for _, _, rh in rows)
+    out = Image.new("RGBA", (W, H), (128, 128, 131, 255))
+    d = ImageDraw.Draw(out)
+    top = 0
+    for imgs, align, rh in rows:
+        x = pad
+        for name, im in imgs:
+            y = top + pad if align == "top" else top + pad + (rh - im.height) * scale
+            big = im.resize((im.width * scale, im.height * scale), Image.NEAREST)
+            out.paste(big, (x, y), big)
+            d.text((x + im.width * scale // 2 - len(name) * 3, top + pad + rh * scale + 2), name, fill=(30, 30, 34, 255))
+            x += im.width * scale + pad
+        top += rh * scale + pad * 2 + label_h
+    return out
+
+
 def main():
     os.makedirs(OUT_FLOOR, exist_ok=True)
     os.makedirs(OUT_WALL, exist_ok=True)
-    sheet = Image.open(SHEET).convert("RGBA")
-    for name, box, h_display, target in CUTS:
+    sheets = {k: Image.open(p).convert("RGBA") for k, (p, _) in SHEETS.items()}
+    for key, name, box, h_display, target in CUTS:
         out = os.path.join(OUT_WALL if target == "wall" else OUT_FLOOR, name + ".png")
-        img = pixelize(cut(sheet, box), h_display)
+        img = pixelize(cut(sheets[key], box, SHEETS[key][1], drop_grey=name in STAR_SAFE), h_display)
         img.save(out, optimize=True)
         print(f"{name}: {img.width}x{img.height} -> {os.path.relpath(out, HERE)}")
+    pv = preview()
+    pv.save(PREVIEW)
+    print(f"preview: {pv.size[0]}x{pv.size[1]} -> {os.path.relpath(PREVIEW, HERE)}")
 
 
 if __name__ == "__main__":
