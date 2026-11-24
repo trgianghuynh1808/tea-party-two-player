@@ -11,6 +11,7 @@ MODELS=(
 MEDIUM_RULES=(
   "client/=opencode-go/glm-5.3"               # UI/Phaser: dùng model mạnh hơn
   "server/=opencode-go/deepseek-v4.1-flash"   # server: thử DeepSeek, fail thì leo lên GLM
+  "tests/=opencode-go/deepseek-v4.1-flash"    # tests/: thử DeepSeek (rẻ), fail thì leo lên GLM
 )
 
 # Verify do Claude làm (gõ "verify" sau khi OpenCode xong) để tiết kiệm quota OpenCode
