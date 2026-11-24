@@ -9,7 +9,7 @@ Verify mode: light
 -
 
 ## Ngữ cảnh
-<!-- Claude ghi sẵn: file, hàm, type, hằng số các bước cần (snippet ngắn) để OpenCode khỏi phải tự tìm lại. -->
+<!-- Claude ghi sẵn: file, hàm, type, hằng số các bước cần (snippet ngắn) để OpenCode khỏi phải tự tìm lại. Gồm cả "sự thật để test": tên field/method đúng của test hook, cách cấp dữ liệu/tiền, cách phiên thứ 2 vào, thứ test runner không import được, chỗ dễ đoán nhầm. -->
 -
 
 ## Plan
@@ -17,8 +17,11 @@ Verify mode: light
 - [ ] 1. [dễ|vừa|khó] ...
 
 ## Test cases
-<!-- Claude viết khi lên plan. Tối đa 3 test, mỗi test gắn với một ý trong Mục tiêu. Mỗi dòng: tên test — kiểm tra điều gì — file spec. -->
+<!-- Claude viết khi lên plan. Tối đa 3 test, mỗi test gắn với một ý trong Mục tiêu. Mỗi test: một dòng tên — kiểm tra điều gì — file spec, rồi mô tả từng bước để OpenCode không phải tự thiết kế test. -->
 - [ ] T1. <tên> — <kiểm tra gì> — tests/<file>.spec.ts
+  - Setup: <dữ liệu ban đầu: user duy nhất, cách tạo state, 1 hay 2 phiên>
+  - Steps: <1. thao tác (hook/message/click) · 2. ... theo thứ tự>
+  - Assert: <giá trị cụ thể mong đợi sau từng thao tác>
 
 ## Trạng thái hiện tại
 
