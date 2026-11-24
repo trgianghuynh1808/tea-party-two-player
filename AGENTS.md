@@ -27,7 +27,7 @@ Guidelines for coding agents working in this repo.
 - `client/src/ui/` — DOM panels: `OrdersPanel`, `DecorPanel`, `BuildPanel`, `ShiftOverlay`, `RecipeGuide`.
 - `client/src/input/` — `KeyboardState` (WASD/arrows + Space), `TouchControls` (joystick + action button).
 - `client/src/forceLandscape.ts` — forces landscape on phones (orientation lock or CSS rotation).
-- `client/assets-src/` — source art sheets and `tools/cut_food.py`.
+- `client/assets-src/` — source art sheets and the art tools in `tools/` (`cut_food.py`, `cut_bathroom.py`, `draw_bathroom_props.py`).
 - `server/src/index.ts` — Colyseus + Express setup: room registry, `/rooms`, `/health`, admin API, static client.
 - `server/src/rooms/BobaShopRoom.ts` — room logic: message handlers, shifts, customers, orders, earnings split.
 - `server/src/shop/SharedShop.ts` — shared per-username shop state; `server/src/persistence/ShopStore.ts` — users/shops persistence.

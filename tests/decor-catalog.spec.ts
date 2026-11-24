@@ -3,6 +3,7 @@ import { inflateSync } from "node:zlib";
 import { expect, test } from "@playwright/test";
 import {
   DECORATION_CATALOG,
+  DECORATION_CATEGORIES,
   canPlaceDecoration,
   footprintOf,
   getDecorationDef,
@@ -183,6 +184,20 @@ test("furniture-views T3: bed_plaid has a pillow per view within 0..1, and norma
   }
   for (const rotation of [0, 1, 2, 3]) expect(normalizeRotation(def, rotation)).toBe(rotation);
   expect(normalizeRotation(def, 4)).toBe(0);
+});
+
+// ---------------------------------------------------------------- 🛁 bathroom set
+
+test("bathroom T1: the category is registered and all its items have art on disk, no rotation, price > 0", () => {
+  expect(DECORATION_CATEGORIES.some((c) => c.id === "bathroom")).toBe(true);
+  const items = DECORATION_CATALOG.filter((d) => d.category === "bathroom");
+  expect(items.length).toBeGreaterThan(0);
+  for (const def of items) {
+    expect(def.image, def.kind).toBeDefined();
+    expect(existsSync(`client/public/${def!.image}`), def.kind).toBe(true);
+    expect(def.rotation ?? "none", def.kind).toBe("none");
+    expect(def.price, def.kind).toBeGreaterThan(0);
+  }
 });
 
 // ---------------------------------------------------------------- ⟳ badge on rotatable items

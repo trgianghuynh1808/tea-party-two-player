@@ -154,6 +154,7 @@ export const DECORATION_CATEGORIES = [
   { id: "rugs", title: "🧶 Thảm" },
   { id: "art", title: "🖼️ Tranh & khung ảnh" },
   { id: "appliances", title: "❄️ Thiết bị" },
+  { id: "bathroom", title: "🛁 Phòng tắm" },
 ] as const;
 export type DecorationCategory = (typeof DECORATION_CATEGORIES)[number]["id"];
 
@@ -312,6 +313,19 @@ export const DECORATION_CATALOG: DecorationDef[] = [
   ...inCategory("appliances", [
     // Air conditioner: air-conditioner-original.png, cut out with cutout_white.py.
     { ...wallArt("air_conditioner", "Máy lạnh", 150, "air_conditioner", 110, 37, 0xe0e0e0), effect: "breeze" },
+  ]),
+  ...inCategory("bathroom", [
+    // Bathroom set: head-on pieces cut from bathroom-sheet-1.png (cut_bathroom.py) or
+    // drawn from code (draw_bathroom_props.py); nothing in this category is tilted.
+    decor("bath_vanity_sink", "Tủ lavabo", 140, "bathroom/bath_vanity_sink", 60, 26, 94, 0xb26c24),
+    decor("bath_bathtub", "Bồn tắm", 200, "bathroom/bath_bathtub", 100, 40, 56, 0xe5e2dd),
+    decor("bath_toilet_front", "Bồn cầu", 75, "bathroom/toilet_front", 30, 24, 74, 0xf2f2f2),
+    decor("bath_cabinet_bottles", "Tủ chai lọ", 110, "bathroom/cabinet_bottles", 44, 24, 100, 0xb26c24),
+    decor("bath_trash_can", "Thùng rác", 35, "bathroom/trash_can", 20, 16, 46, 0x52555a),
+    wallArt("bath_hook_rack", "Giá móc", 40, "hook_rack", 46, 48, 0xcb6e28),
+    wallArt("bath_mirror", "Gương", 70, "bath_mirror", 44, 56, 0x60c5f1),
+    wallArt("bath_vent", "Cửa thông gió", 40, "bath_vent", 60, 30, 0x8b8b94),
+    wallArt("bath_towel_shelf", "Kệ khăn", 60, "bath_towel_shelf", 64, 40, 0xcb6e28),
   ]),
 ];
 
