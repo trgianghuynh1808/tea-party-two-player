@@ -1,4 +1,4 @@
-import { DECORATION_CATALOG, type DecorationCategory, type DecorationDef } from "./decor";
+import { DECORATION_CATALOG, getDecorationDef, rotationCount, type DecorationCategory, type DecorationDef } from "./decor";
 
 // The world outside the tea shop: a big yard with the shop building in its top-left corner.
 // Everything lives in one coordinate system so positions, collisions and the camera stay simple:
@@ -394,4 +394,52 @@ export function planCellChange(
     if (old) return { key, kind: "", old };
   }
   return undefined;
+}
+
+// ---------------------------------------------------------------- Prop rotation (build parity with decorate)
+
+/**
+ * How many ways a built tile can face: furniture props follow their decorate-catalog def (see rotationCount),
+ * outdoor props (trees, benches...) have 2 facings (mirrored left/right), anything else can't turn.
+ * The facing index lives in a separate tileRotations map keyed by the cell's structure key.
+ */
+export function buildRotationCount(def: BuildTileDef): number {
+  if (def.shape !== "prop") return 1;
+  const decor = def.decor ? getDecorationDef(def.decor) : undefined;
+  return decor ? rotationCount(decor) : 2;
+}
+
+/** Clamp untrusted input (client messages, old saves) to a facing this tile supports. */
+export function normalizeTileRotation(def: BuildTileDef, rotation: unknown): number {
+  const r = Number(rotation);
+  return Number.isInteger(r) && r >= 0 && r < buildRotationCount(def) ? r : 0;
+}
+
+/**
+ * What moving a placed prop to another cell would do (also how it turns in place: to = from).
+ * undefined = the key holds no prop, the target is outside the yard, on the shop's lot or not empty.
+ */
+export function planTileMove(
+  tiles: TileGetter,
+  fromKey: string,
+  toCx: number,
+  toCy: number,
+): { from: string; to: string; kind: string; rotateOnly: boolean } | undefined {
+  const cell = parseTileKey(fromKey);
+  const kind = tiles.get(fromKey);
+  if (!cell || cell.layer !== "structure" || !kind) return undefined;
+  const def = getBuildTile(kind);
+  if (!def || def.shape !== "prop") return undefined;
+  const to = tileKey(toCx, toCy, "structure");
+  if (to === fromKey) return { from: fromKey, to, kind, rotateOnly: true };
+  if (!canBuildCell(toCx, toCy) || tiles.get(to)) return undefined;
+  return { from: fromKey, to, kind, rotateOnly: false };
+}
+
+/** What selling (removing) a placed prop would do: undefined = the key holds no prop. */
+export function planTileSell(tiles: TileGetter, key: string): { key: string; kind: string } | undefined {
+  if (parseTileKey(key)?.layer !== "structure") return undefined;
+  const kind = tiles.get(key);
+  const def = kind ? getBuildTile(kind) : undefined;
+  return def?.shape === "prop" && kind ? { key, kind } : undefined;
 }

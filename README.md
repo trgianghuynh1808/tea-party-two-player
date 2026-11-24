@@ -114,6 +114,13 @@ WebSocket from the same origin. Then either:
   Rugs lie on the floor, so furniture can go on top of them.
 - The **⟳** badge on a catalog card means the piece can be turned: press **R** (or the **⟳ Xoay** button) to
   rotate the piece you're placing or have selected.
+- **🔨 Xây** (build mode, in the yard) uses the same gestures as decorating for the one-cell pieces (trees,
+  outdoor props, furniture): with no material picked, click a placed piece to select it, drag it to move it
+  (green cell = fits, red = can't), drop it on **🗑** or press **Delete** to sell it back for 50%, **R** /
+  **⟳ Xoay** to turn it, and **Esc** or a click on an empty cell to deselect. Only the host can select / move /
+  turn / sell; guests still build new pieces on empty cells only. The panel starts with no material picked
+  (press the selected tool again to unpick it), and floors / walls / fences / doors keep the drag-to-draw tools.
+  Placed pieces keep their rotation when the shop is saved and for the other player.
 - One shop per username (`server/src/shop/SharedShop.ts`, save id = hash of the name), one instance per server so
   every room using it (as host's furniture or as a player's wallet) sees the same state. Money + furniture are saved (debounced ~1 s after each change, and when a room
   closes) and restored when the server starts its first room. (Kept in memory: assumes one server process.)
@@ -147,4 +154,6 @@ WebSocket from the same origin. Then either:
 
 - WASD / arrow keys: move
 - Space: interact with the nearest station (highlighted). The hint at the bottom right shows what Space will do.
+- Decorate / build modes: **R** (or **⟳ Xoay**) turns the piece being placed or selected, **Delete** sells the
+  selected yard piece, **Esc** (or a click on an empty cell) deselects.
 - Touch devices: touch anywhere on the left half for a floating joystick (8 directions); the round button on the right is the action button and shows what it will do. Add `?touch=1` to the URL to force touch controls on desktop.

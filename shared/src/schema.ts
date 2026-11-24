@@ -70,6 +70,8 @@ export class BobaShopState extends Schema {
   @type([Order]) orders = new ArraySchema<Order>();
   /** The host's buildings in the yard: tileKey(cx, cy) -> tile kind (see BUILD_TILES). */
   @type({ map: "string" }) tiles = new MapSchema<string>();
+  /** Facings of the host's props: structure tileKey(cx, cy) -> rotation index (see buildRotationCount). */
+  @type({ map: "number" }) tileRotations = new MapSchema<number>();
 
   // Shift (round) state
   @type("string") phase: string = "waiting"; // see GamePhase in @boba/shared

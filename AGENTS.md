@@ -17,14 +17,14 @@ Guidelines for coding agents working in this repo.
 - Server-held state:
   - `BobaShopRoom` (`server/src/rooms/BobaShopRoom.ts`): Colyseus schema state — players (position, direction, held item, wallet mirror, host flag, bed), stations, decorations, orders, shift phase/hostName — plus room-internal maps (move budgets, delivery timers, seat cooldowns). Max 2 players, 2-minute reconnect grace.
   - `SharedShop` (`server/src/shop/SharedShop.ts`): per-username shop (money + furniture), one instance per username cached in a server-wide map (`openShop`/`shopOf`); persisted via `ShopStore` (Upstash Redis when env vars are set, else JSON files in `server/data/`).
-- Client → server messages (`Messages` in `shared/src/index.ts`): `position` (every 50 ms), `interact`, `buy_decoration`, `move_decoration`, `sell_decoration`, `start_shift`, `use_door`, `build_tiles`, `leave_bed`. The server validates actions with the same `planInteraction` rules the client uses for previews (`shared/src/interaction.ts`), then updates the schema, which syncs to all clients.
+- Client → server messages (`Messages` in `shared/src/index.ts`): `position` (every 50 ms), `interact`, `buy_decoration`, `move_decoration`, `sell_decoration`, `start_shift`, `use_door`, `build_tiles`, `move_tile`, `sell_tile`, `leave_bed`. The server validates actions with the same `planInteraction` rules the client uses for previews (`shared/src/interaction.ts`), then updates the schema, which syncs to all clients.
 
 ## Codebase Map
 
 - `client/src/main.ts` — entry: username/lobby UI, join/create room, boots Phaser with `ShopScene`, wires DOM panels and events.
 - `client/src/scenes/ShopScene.ts` — main scene: game loop, input handling, sends `Messages.*`, renders world.
 - `client/src/scenes/` — sub-controllers/views: `CustomerController`, `DecorController`, `BuildController`, `RestaurantView`, `YardView`, `CupView`, art modules.
-- `client/src/ui/` — DOM panels: `OrdersPanel`, `DecorPanel`, `BuildPanel`, `ShiftOverlay`, `RecipeGuide`.
+- `client/src/ui/` — DOM panels: `OrdersPanel`, `DecorPanel`, `BuildPanel`, `ShiftOverlay`, `RecipeGuide`, `rotateUi` (shared ⟳ Xoay button + ⟳ badge used by both the decorate and build panels).
 - `client/src/input/` — `KeyboardState` (WASD/arrows + Space), `TouchControls` (joystick + action button).
 - `client/src/forceLandscape.ts` — forces landscape on phones (orientation lock or CSS rotation).
 - `client/assets-src/` — source art sheets and the art tools in `tools/` (`cut_food.py`, `cut_bathroom.py`, `draw_bathroom_props.py`).
@@ -54,6 +54,7 @@ npx playwright test  # e2e tests; config starts dev:server (waits for /health) t
 
 - TypeScript strict, ES2022, ESM (`"type": "module"`); double quotes, semicolons, 2-space indent; comments in English, player-facing UI text in Vietnamese.
 - Game rules and constants live in `shared/` so server and client agree: the server applies them, the client previews them. Do not duplicate constants in client/server.
+- Build mode and decorate mode must behave the same way: the same gestures to select, move, rotate (R and the ⟳ button, ⟳ badge), sell (🗑, Delete) and deselect (Esc, clicking an empty cell), and no tool is picked by default. Changing one side requires changing the other, or recording the reason in the task file.
 - Never trust the client: validate moves/interactions server-side (`planInteraction`, move budgets in `BobaShopRoom`).
 - Per-username persistent state goes through `SharedShop`; live room state stays in the Colyseus schema (`shared/src/schema.ts`).
 

@@ -7,13 +7,17 @@ import {
   cellsForTool,
   getBuildTile,
   isBlocking,
+  normalizeTileRotation,
   planCellChange,
+  planTileMove,
+  planTileSell,
   canPlaceDecoration,
   footprintOf,
   getDecorationDef,
   normalizeRotation,
   refundFor,
   snapToGrid,
+  tileKey,
   type Area,
   type PlacedDecoration,
   type ShopSave,
@@ -59,7 +63,9 @@ export type ShopEvent =
   | { type: "moved"; piece: Piece }
   | { type: "removed"; id: string }
   /** Yard tiles changed: [tileKey, kind] pairs, kind "" = removed. */
-  | { type: "tiles"; changes: [string, string][] };
+  | { type: "tiles"; changes: [string, string][] }
+  /** Prop facings changed: [tileKey, rotation] pairs, null = no prop on the key anymore. */
+  | { type: "tileRotations"; changes: [string, number | null][] };
 
 /**
  * One player's shop (money + furniture), shared by every room that uses it: the room the player
@@ -72,6 +78,8 @@ export class SharedShop {
   readonly pieces: Piece[] = [];
   /** Yard buildings: tileKey -> tile kind. */
   readonly tiles = new Map<string, string>();
+  /** Facings of yard props: structure tileKey -> rotation index (see buildRotationCount). */
+  readonly tileRotations = new Map<string, number>();
 
   private seq = 0;
   private loading?: Promise<void>;
@@ -252,16 +260,19 @@ export class SharedShop {
   removeTiles(selector: string[] | "all", refund: RefundMode): { removed: number; refunded: number } {
     const kinds = selector === "all" ? undefined : new Set(selector);
     const changes: [string, string][] = [];
+    const rotationChanges: [string, number | null][] = [];
     let refunded = 0;
     for (const [key, kind] of this.tiles) {
       if (kinds && !kinds.has(kind)) continue;
       this.tiles.delete(key);
       changes.push([key, ""]);
+      if (this.tileRotations.delete(key)) rotationChanges.push([key, null]);
       if (refund === "full") refunded += getBuildTile(kind)?.price ?? 0;
     }
     if (!changes.length) return { removed: 0, refunded: 0 };
     if (refunded) this.money += refunded;
     this.emit({ type: "tiles", changes });
+    if (rotationChanges.length) this.emit({ type: "tileRotations", changes: rotationChanges });
     this.emit({ type: "money", money: this.money });
     this.scheduleSave();
     return { removed: changes.length, refunded };
@@ -269,10 +280,10 @@ export class SharedShop {
 
   /**
    * Build (or erase) yard tiles over a dragged rectangle of cells (see cellsForTool). Cells already holding that
-   * tile are skipped; replacing or erasing a tile refunds part of its price. `blocked` cells (a player stands there)
-   * don't get walls. `payer` is whose wallet pays (default: this shop's owner); another player's wallet = a guest
-   * building on this land, who may only build on empty cells (see planCellChange's onlyEmpty).
-   * Returns an error message, or undefined on success.
+   * tile are skipped; replacing or erasing a tile refunds part of its price. `rotation` is which way a new prop
+   * faces (other shapes can't turn). `blocked` cells (a player stands there) don't get walls. `payer` is whose
+   * wallet pays (default: this shop's owner); another player's wallet = a guest building on this land, who may
+   * only build on empty cells (see planCellChange's onlyEmpty). Returns an error message, or undefined on success.
    */
   build(
     tool: unknown,
@@ -280,6 +291,7 @@ export class SharedShop {
     y0: unknown,
     x1: unknown,
     y1: unknown,
+    rotation: unknown,
     blocked: (cx: number, cy: number) => boolean,
     payer: SharedShop = this,
   ): string | undefined {
@@ -301,15 +313,83 @@ export class SharedShop {
     if (!changes.length) return def ? (guest ? "Chỉ xây được trên ô trống" : "Không xây được ở đây") : undefined;
     if (cost > payer.money) return `Không đủ tiền (cần $${cost})`;
 
+    const rotationChanges: [string, number | null][] = [];
     for (const [key, k] of changes) {
       if (k) this.tiles.set(key, k);
       else this.tiles.delete(key);
+      const newDef = getBuildTile(k);
+      if (newDef?.shape === "prop") {
+        const rot = normalizeTileRotation(newDef, rotation);
+        this.tileRotations.set(key, rot);
+        rotationChanges.push([key, rot]);
+      } else if (this.tileRotations.delete(key)) {
+        rotationChanges.push([key, null]);
+      }
     }
     payer.money -= cost;
     this.emit({ type: "tiles", changes });
+    if (rotationChanges.length) this.emit({ type: "tileRotations", changes: rotationChanges });
     payer.emit({ type: "money", money: payer.money });
     this.scheduleSave();
     if (guest) payer.scheduleSave();
+    return undefined;
+  }
+
+  /**
+   * Move and/or turn a placed prop (host only; the room validates). Moving onto the same cell = turning in
+   * place. `rotation` omitted = keep the current facing. `blocked` cells (a player stands there) refuse the
+   * move of a blocking prop. Returns an error message, or undefined on success.
+   */
+  moveTile(
+    cx: unknown,
+    cy: unknown,
+    toCx: unknown,
+    toCy: unknown,
+    rotation: unknown,
+    blocked: (cx: number, cy: number) => boolean,
+  ): string | undefined {
+    const from = tileKey(Number(cx), Number(cy), "structure");
+    const plan = planTileMove(this.tiles, from, Number(toCx), Number(toCy));
+    if (!plan) return "Không di chuyển được ô này";
+    const def = getBuildTile(plan.kind);
+    if (!def) return "Không có loại này";
+    const current = this.tileRotations.get(from) ?? 0;
+    const rot = rotation === undefined ? current : normalizeTileRotation(def, rotation);
+    if (plan.rotateOnly) {
+      if (rot === current) return undefined;
+      this.tileRotations.set(from, rot);
+      this.emit({ type: "tileRotations", changes: [[from, rot]] });
+      this.scheduleSave();
+      return undefined;
+    }
+    if (isBlocking(def) && blocked(Number(toCx), Number(toCy))) return "Có người đứng trên ô đó";
+    this.tiles.delete(from);
+    this.tiles.set(plan.to, plan.kind);
+    this.tileRotations.delete(from);
+    this.tileRotations.set(plan.to, rot);
+    this.emit({ type: "tiles", changes: [[from, ""], [plan.to, plan.kind]] });
+    this.emit({ type: "tileRotations", changes: [[from, null], [plan.to, rot]] });
+    this.scheduleSave();
+    return undefined;
+  }
+
+  /**
+   * Sell a placed prop back (host only; the room validates): refunds BUILD_REFUND_RATE of its price to this
+   * shop's owner. Returns an error message, or undefined on success.
+   */
+  sellTile(cx: unknown, cy: unknown): string | undefined {
+    const key = tileKey(Number(cx), Number(cy), "structure");
+    const plan = planTileSell(this.tiles, key);
+    if (!plan) return "Không bán được ô này";
+    const def = getBuildTile(plan.kind);
+    if (!def) return "Không có loại này";
+    this.tiles.delete(key);
+    this.tileRotations.delete(key);
+    this.money += buildRefund(def);
+    this.emit({ type: "tiles", changes: [[key, ""]] });
+    this.emit({ type: "tileRotations", changes: [[key, null]] });
+    this.emit({ type: "money", money: this.money });
+    this.scheduleSave();
     return undefined;
   }
 
@@ -320,6 +400,7 @@ export class SharedShop {
       money: this.money,
       decorations: this.pieces.map(({ kind, x, y, rotation }) => ({ kind, x, y, rotation })),
       tiles: Object.fromEntries(this.tiles),
+      tileRotations: Object.fromEntries(this.tileRotations),
     };
   }
 
@@ -332,9 +413,12 @@ export class SharedShop {
     for (const piece of this.pieces.splice(0)) this.emit({ type: "removed", id: piece.id });
     const removedTiles = [...this.tiles.keys()].map((key): [string, string] => [key, ""]);
     this.tiles.clear();
+    const removedRotations = [...this.tileRotations.keys()].map((key): [string, number | null] => [key, null]);
+    this.tileRotations.clear();
     const dropped = this.apply(save);
     for (const piece of this.pieces) this.emit({ type: "added", piece });
     this.emit({ type: "tiles", changes: [...removedTiles, ...this.tiles] });
+    this.emit({ type: "tileRotations", changes: [...removedRotations, ...this.tileRotations] });
     this.emit({ type: "money", money: this.money });
     this.scheduleSave();
     await this.flush();
@@ -381,6 +465,11 @@ export class SharedShop {
   private apply(save: ShopSave): number {
     this.money = save.money;
     for (const [key, kind] of Object.entries(save.tiles ?? {})) this.tiles.set(key, kind);
+    // Old saves have no facings: props keep facing front (rotation 0).
+    for (const [key, rot] of Object.entries(save.tileRotations ?? {})) {
+      const def = getBuildTile(this.tiles.get(key));
+      if (def?.shape === "prop") this.tileRotations.set(key, normalizeTileRotation(def, rot));
+    }
     let dropped = 0;
     for (const d of save.decorations) {
       // Re-validate in case the layout or catalog changed since the save. Pieces that no longer fit

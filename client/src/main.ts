@@ -31,7 +31,7 @@ import {
 import type { BobaShopState } from "@boba/shared/schema";
 import { FORCE_TOUCH_PARAM, isTouchDevice } from "./input/TouchControls";
 import { AREA_EVENT, BUILD_MODE_EVENT, BUILD_TOOL_EVENT, DECORATE_MODE_EVENT, ShopScene, type ShopSceneData } from "./scenes/ShopScene";
-import { BuildPanel } from "./ui/BuildPanel";
+import { BuildPanel, BUILD_ROTATE } from "./ui/BuildPanel";
 import { initForceLandscape, patchPhaserForRotation } from "./forceLandscape";
 import { DECOR_ROTATE, DecorPanel, PALETTE_DRAG_START } from "./ui/DecorPanel";
 import { OrdersPanel } from "./ui/OrdersPanel";
@@ -87,8 +87,8 @@ let decorPanel: DecorPanel | undefined;
 let decorating = false;
 let buildPanel: BuildPanel | undefined;
 let building = false;
-/** Last build tool picked (the panel is rebuilt for every room). */
-let buildTool = "floor_wood";
+/** Last build tool picked ("" = none; the panel is rebuilt for every room). */
+let buildTool = "";
 
 
 // Keep the ?touch=1 debug flag across URL rewrites so a refresh still forces touch controls.
@@ -473,10 +473,15 @@ function startGame(room: Room<BobaShopState>) {
   $state.onAdd("players", renderPlayerCount);
   $state.onRemove("players", renderPlayerCount);
 
-  buildPanel = new BuildPanel(buildRoot, room, (tool) => {
-    buildTool = tool;
-    game?.events.emit(BUILD_TOOL_EVENT, tool);
-  });
+  buildPanel = new BuildPanel(
+    buildRoot,
+    room,
+    (tool) => {
+      buildTool = tool;
+      game?.events.emit(BUILD_TOOL_EVENT, tool);
+    },
+    () => game?.events.emit(BUILD_ROTATE),
+  );
 
   // Only the host decorates (the room shows their furniture), and only between shifts, inside the tea shop.
   // Building is on the host's land outside the shop: anyone (paying from their own wallet), any time.

@@ -1,6 +1,7 @@
 import { Callbacks, type Room } from "@colyseus/sdk";
 import { DECORATION_CATALOG, DECORATION_CATEGORIES, DECORATION_REFUND_RATE, rotationCount, type DecorationDef } from "@boba/shared";
 import type { BobaShopState } from "@boba/shared/schema";
+import { addRotateBadge, makeRotateButton } from "./rotateUi";
 
 /** game.events event: the player started dragging a catalog item out of the panel. */
 export const PALETTE_DRAG_START = "palette-drag-start";
@@ -63,15 +64,7 @@ export class DecorPanel {
       "Bấm R (hoặc ⟳) để xoay món đang kéo / vừa chọn; món có ⟳ xoay được. " +
       "Khách chỉ ngồi ghế/đôn đặt sát Bàn khách (để được mang nước ra bàn).";
 
-    const rotateBtn = document.createElement("button");
-    rotateBtn.type = "button";
-    rotateBtn.className = "btn rotate-btn";
-    rotateBtn.textContent = "⟳ Xoay (R)";
-    // pointerdown + preventDefault: works while another finger drags, and doesn't steal focus from the game.
-    rotateBtn.addEventListener("pointerdown", (e) => {
-      e.preventDefault();
-      onRotate();
-    });
+    const rotateBtn = makeRotateButton(onRotate);
 
     const list = document.createElement("div");
     list.className = "decor-list";
@@ -122,8 +115,6 @@ export class DecorPanel {
     const el = document.createElement("div");
     el.className = "decor-item";
     el.title = `Kéo vào quán để mua ${def.label}`;
-    const rotatable = rotationCount(def) > 1;
-    if (rotatable) el.title += " · Xoay được (R)";
     let swatch: HTMLElement;
     if (def.image) {
       const img = document.createElement("img");
@@ -143,13 +134,7 @@ export class DecorPanel {
     const price = document.createElement("strong");
     price.textContent = `$${def.price}`;
     el.append(swatch, name, price);
-    if (rotatable) {
-      const badge = document.createElement("span");
-      badge.className = "rotate-badge";
-      badge.textContent = "⟳";
-      badge.dataset.rotatable = "1";
-      el.append(badge);
-    }
+    addRotateBadge(el, rotationCount(def) > 1);
 
     el.addEventListener("pointerdown", (e) => {
       if (el.classList.contains("disabled")) return;

@@ -275,7 +275,20 @@ export function parseShopSave(data: unknown): ShopSave {
       .filter((d) => d && getDecorationDef(d.kind) && Number.isFinite(d.x) && Number.isFinite(d.y))
       .map(({ kind, x, y, rotation }) => ({ kind, x, y, rotation: Number.isFinite(rotation) ? rotation : 0 })),
     tiles: parseTiles(save.tiles),
+    tileRotations: parseTileRotations(save.tileRotations),
   };
+}
+
+/** Prop facings from a save: only structure keys with an integer index are kept (missing in old saves). */
+function parseTileRotations(data: unknown): Record<string, number> {
+  const rotations: Record<string, number> = {};
+  if (!data || typeof data !== "object") return rotations;
+  for (const [key, rot] of Object.entries(data)) {
+    const cell = parseTileKey(key);
+    if (cell?.layer !== "structure" || !Number.isInteger(rot) || (rot as number) < 0) continue;
+    rotations[key] = rot as number;
+  }
+  return rotations;
 }
 
 /** Saves from the first yard version keyed cells as "12,7" (one tile per cell, no layers). */

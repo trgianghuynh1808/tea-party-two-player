@@ -72,6 +72,8 @@ import {
   type BuildTilesMessage,
   type DeliveredEvent,
   type MenuItem,
+  type MoveTileMessage,
+  type SellTileMessage,
   type StartShiftMessage,
   type Venue,
   type MachineOverflowEvent,
@@ -184,6 +186,12 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     },
     build_tiles: (client: Client, payload: BuildTilesMessage) => {
       this.handleBuildTiles(client, payload);
+    },
+    move_tile: (client: Client, payload: MoveTileMessage) => {
+      this.handleMoveTile(client, payload);
+    },
+    sell_tile: (client: Client, payload: SellTileMessage) => {
+      this.handleSellTile(client, payload);
     },
     leave_bed: (client: Client) => {
       const player = this.state.players.get(client.sessionId);
@@ -425,6 +433,8 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     for (const piece of this.hostShop?.pieces ?? []) this.state.decorations.push(this.toDecoration(piece));
     this.state.tiles.clear();
     for (const [key, kind] of this.hostShop?.tiles ?? []) this.state.tiles.set(key, kind);
+    this.state.tileRotations.clear();
+    for (const [key, rot] of this.hostShop?.tileRotations ?? []) this.state.tileRotations.set(key, rot);
   }
 
   private onShopEvent(event: ShopEvent) {
@@ -452,6 +462,12 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
         for (const [key, kind] of event.changes) {
           if (kind) this.state.tiles.set(key, kind);
           else this.state.tiles.delete(key);
+        }
+        return;
+      case "tileRotations":
+        for (const [key, rot] of event.changes) {
+          if (rot === null) this.state.tileRotations.delete(key);
+          else this.state.tileRotations.set(key, rot);
         }
         return;
     }
@@ -830,6 +846,17 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     this.resetMoveBudget(client.sessionId);
   }
 
+  /** No solid tile on top of someone standing in the yard (shared by build and move_tile). */
+  private blockedCell() {
+    return (cx: number, cy: number) => {
+      const r = cellRect(cx, cy);
+      for (const p of this.state.players.values()) {
+        if (isInYard(p) && inRect(p, r, PLAYER_RADIUS)) return true;
+      }
+      return false;
+    };
+  }
+
   /**
    * Building in the yard: the host's land, paid from the builder's own wallet. Guests may only build on empty
    * cells (no replacing, no eraser). Allowed during shifts too.
@@ -838,15 +865,37 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     const key = this.sessionNames.get(client.sessionId);
     if (!this.hostShop || !key) return;
     const payer = shopOf(key);
-    // No wall on top of someone standing in the yard.
-    const blocked = (cx: number, cy: number) => {
-      const r = cellRect(cx, cy);
-      for (const p of this.state.players.values()) {
-        if (isInYard(p) && inRect(p, r, PLAYER_RADIUS)) return true;
-      }
-      return false;
-    };
-    const error = this.hostShop.build(payload?.tool, payload?.x0, payload?.y0, payload?.x1, payload?.y1, blocked, payer);
+    const error = this.hostShop.build(
+      payload?.tool,
+      payload?.x0,
+      payload?.y0,
+      payload?.x1,
+      payload?.y1,
+      payload?.rotation,
+      this.blockedCell(),
+      payer,
+    );
+    if (error) client.send(ServerEvents.InteractFailed, { reason: error });
+  }
+
+  /**
+   * Moving / turning a placed prop: host only (guests may only build on empty cells). The move is refused when
+   * someone stands on the target cell. Allowed during shifts too, like building.
+   */
+  private handleMoveTile(client: Client, payload: MoveTileMessage) {
+    if (!this.hostShop || this.sessionNames.get(client.sessionId) !== this.hostKey) {
+      return client.send(ServerEvents.InteractFailed, { reason: `Chỉ chủ phòng (${this.state.hostName}) mới di chuyển được` });
+    }
+    const error = this.hostShop.moveTile(payload?.cx, payload?.cy, payload?.toCx, payload?.toCy, payload?.rotation, this.blockedCell());
+    if (error) client.send(ServerEvents.InteractFailed, { reason: error });
+  }
+
+  /** Selling a placed prop: host only (the refund goes to their wallet). */
+  private handleSellTile(client: Client, payload: SellTileMessage) {
+    if (!this.hostShop || this.sessionNames.get(client.sessionId) !== this.hostKey) {
+      return client.send(ServerEvents.InteractFailed, { reason: `Chỉ chủ phòng (${this.state.hostName}) mới bán được` });
+    }
+    const error = this.hostShop.sellTile(payload?.cx, payload?.cy);
     if (error) client.send(ServerEvents.InteractFailed, { reason: error });
   }
 

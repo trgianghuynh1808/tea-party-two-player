@@ -14,14 +14,17 @@ import {
   SHOP_DOOR_X,
   SHOP_ENTER_ZONE,
   SHOP_LOT,
+  VIEW_ORDER,
   WALL_THICKNESS,
   cellRect,
   connectMask,
   floorAt,
   getDecorationDef,
+  normalizeTileRotation,
   parseTileKey,
   propAnchor,
   structureAt,
+  tileKey,
   type BuildTileDef,
   type TileGetter,
 } from "@boba/shared";
@@ -40,20 +43,21 @@ export const propKey = (kind: string) => `build-prop-${kind}`;
 export const propUrl = (image: string) => `assets/decor/yard/${image}.png`;
 
 /**
- * How a prop is drawn: yard pixel art at PROP_SCALE, or furniture from the decorate catalog (front view)
- * at its catalog height. undefined = artwork not loaded.
+ * How a prop is drawn facing `rotation`: furniture from the decorate catalog uses its per-facing artwork
+ * (mirrored for flip pieces), outdoor pixel art is mirrored at rotation 1. undefined = artwork not loaded.
  */
-export function propTexture(scene: Phaser.Scene, def: BuildTileDef): { key: string; scale: number } | undefined {
+export function propTexture(scene: Phaser.Scene, def: BuildTileDef, rotation = 0): { key: string; scale: number; flipX: boolean } | undefined {
   const decor = def.decor ? getDecorationDef(def.decor) : undefined;
   if (decor) {
+    const view = decor.rotation === "views" ? VIEW_ORDER[rotation] : undefined;
     const front = decorTextureKey(decor.kind, "front");
-    const key = decor.views && scene.textures.exists(front) ? front : decorTextureKey(decor.kind);
+    const key = view ? decorTextureKey(decor.kind, view) : decor.views && scene.textures.exists(front) ? front : decorTextureKey(decor.kind);
     if (!scene.textures.exists(key)) return undefined;
     const height = scene.textures.getFrame(key).height;
-    return { key, scale: (decor.imageHeight ?? decor.height) / height };
+    return { key, scale: (decor.imageHeight ?? decor.height) / height, flipX: decor.rotation === "flip" && rotation === 1 };
   }
   const key = propKey(def.kind);
-  return scene.textures.exists(key) ? { key, scale: PROP_SCALE } : undefined;
+  return scene.textures.exists(key) ? { key, scale: PROP_SCALE, flipX: rotation === 1 } : undefined;
 }
 
 /** Catalog thumbnail of a prop (build panel), or undefined for tiles drawn with code. */
@@ -108,6 +112,11 @@ interface CellView {
   structure?: Phaser.GameObjects.Image;
 }
 
+/** Read access to the synced prop-facings map (tileRotations). */
+interface RotationGetter {
+  get(key: string): number | undefined;
+}
+
 /**
  * The yard outside the shop: grass, the shop's front (with its door), and the host's buildings (tiles synced in
  * state.tiles, two layers per cell). Floors are drawn with code; walls, fences and doors are pixel-art pieces
@@ -117,12 +126,14 @@ export class YardView {
   private cells = new Map<string, CellView>();
   private unsubscribers: (() => void)[] = [];
   private readonly tiles: TileGetter;
+  private readonly rotations: RotationGetter;
 
   constructor(
     private readonly scene: Phaser.Scene,
     room: Room<BobaShopState>,
   ) {
     this.tiles = { get: (key: string) => room.state.tiles?.get(key) };
+    this.rotations = { get: (key: string) => room.state.tileRotations?.get(key) };
     this.makeTextures();
     // Pixel art: keep the pieces crisp when the canvas is scaled.
     for (const key of scene.textures.getTextureKeys()) {
@@ -141,10 +152,18 @@ export class YardView {
       if (!cell) return;
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) this.redrawCell(cell.cx + dx, cell.cy + dy);
     };
+    // A facing change only redraws the prop itself.
+    const refreshRotation = (key: string) => {
+      const cell = parseTileKey(key);
+      if (cell) this.redrawCell(cell.cx, cell.cy);
+    };
     this.unsubscribers.push(
       $.onAdd("tiles", (_kind, key) => refresh(key)),
       $.onChange("tiles", (key) => refresh(key)),
       $.onRemove("tiles", (_kind, key) => refresh(key)),
+      $.onAdd("tileRotations", (_rot, key) => refreshRotation(key)),
+      $.onChange("tileRotations", (key) => refreshRotation(key)),
+      $.onRemove("tileRotations", (_rot, key) => refreshRotation(key)),
     );
   }
 
@@ -184,11 +203,13 @@ export class YardView {
     }
 
     if (structure?.shape === "prop") {
-      // Props stand on the bottom of their cell (pixel art at a whole-number scale so the pixels stay square).
-      const tex = propTexture(this.scene, structure);
+      // Props stand on the bottom of their cell (pixel art at a whole-number scale so the pixels stay square),
+      // facing whichever way the host turned them (see tileRotations).
+      const rotation = normalizeTileRotation(structure, this.rotations.get(tileKey(cx, cy, "structure")));
+      const tex = propTexture(this.scene, structure, rotation);
       if (tex) {
         const at = propAnchor(cx, cy);
-        view.structure = this.scene.add.image(at.x, at.y + PROP_ART_DROP, tex.key).setOrigin(0.5, 1).setScale(tex.scale).setDepth(at.y);
+        view.structure = this.scene.add.image(at.x, at.y + PROP_ART_DROP, tex.key).setOrigin(0.5, 1).setScale(tex.scale).setFlipX(tex.flipX).setDepth(at.y);
       }
     } else if (structure) {
       const key = pieceKey(pieceName(this.tiles, structure, cx, cy));

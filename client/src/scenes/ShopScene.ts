@@ -49,6 +49,7 @@ import {
 import { KeyboardState } from "../input/KeyboardState";
 import { SCREEN_UI, TouchControls, isTouchDevice } from "../input/TouchControls";
 import { DECOR_ROTATE, PALETTE_DRAG_START, type PaletteDragStart } from "../ui/DecorPanel";
+import { BUILD_ROTATE } from "../ui/BuildPanel";
 import { CupView, foodTextureKey, preloadCupTextures } from "./CupView";
 import { DecorController, bedPillowPoint, preloadDecorTextures } from "./DecorController";
 import { CustomerController } from "./CustomerController";
@@ -323,6 +324,7 @@ export class ShopScene extends Phaser.Scene {
     };
     const onPaletteDrag = (e: PaletteDragStart) => this.decor?.startPaletteDrag(e);
     const onRotate = () => this.decor?.rotate();
+    const onBuildRotate = () => this.build?.rotate();
     const onBuildMode = (enabled: boolean) => {
       this.building = enabled;
       this.buildWalking = false;
@@ -339,12 +341,14 @@ export class ShopScene extends Phaser.Scene {
     this.game.events.on(DECORATE_MODE_EVENT, onDecorateMode);
     this.game.events.on(PALETTE_DRAG_START, onPaletteDrag);
     this.game.events.on(DECOR_ROTATE, onRotate);
+    this.game.events.on(BUILD_ROTATE, onBuildRotate);
     this.game.events.on(BUILD_MODE_EVENT, onBuildMode);
     this.game.events.on(BUILD_TOOL_EVENT, onBuildTool);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.game.events.off(DECORATE_MODE_EVENT, onDecorateMode);
       this.game.events.off(PALETTE_DRAG_START, onPaletteDrag);
       this.game.events.off(DECOR_ROTATE, onRotate);
+      this.game.events.off(BUILD_ROTATE, onBuildRotate);
       this.game.events.off(BUILD_MODE_EVENT, onBuildMode);
       this.game.events.off(BUILD_TOOL_EVENT, onBuildTool);
       this.decor?.destroy();

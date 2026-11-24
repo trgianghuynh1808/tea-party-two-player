@@ -22,6 +22,10 @@ export type GameTestHook = {
   send(type: (typeof Messages)[keyof typeof Messages], payload?: unknown): void;
   /** Live room state (the same object as `room.state`). */
   state: BobaShopState;
+  /** The yard's buildings as a plain object: tileKey(cx, cy) -> tile kind. */
+  tiles(): Record<string, string>;
+  /** Facings of the yard's props as a plain object: structure tileKey -> rotation index. */
+  tileRotations(): Record<string, number>;
   /** Label text of every station currently showing one; [] until the scene has booted. */
   stationLabels(): string[];
 };
@@ -42,6 +46,8 @@ export function installTestHook(room: Room<BobaShopState>, getShopScene: () => S
     room,
     send: (type, payload) => room.send(type, payload),
     state: room.state,
+    tiles: () => Object.fromEntries(room.state.tiles ?? []),
+    tileRotations: () => Object.fromEntries(room.state.tileRotations ?? []),
     stationLabels: () => getShopScene()?.stationLabelTexts() ?? [],
   };
 }

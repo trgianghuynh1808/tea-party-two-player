@@ -56,6 +56,10 @@ export const Messages = {
   UseDoor: "use_door",
   /** Build (or erase) yard tiles over a dragged rectangle of cells: BuildTilesMessage. */
   BuildTiles: "build_tiles",
+  /** Move (and/or turn) a placed prop: MoveTileMessage. Host only. */
+  MoveTile: "move_tile",
+  /** Sell a placed prop (partial refund): SellTileMessage. Host only. */
+  SellTile: "sell_tile",
   /** Get out of bed (sent when a player lying down tries to walk). */
   LeaveBed: "leave_bed",
 } as const;
@@ -71,6 +75,24 @@ export interface BuildTilesMessage {
   y0: number;
   x1: number;
   y1: number;
+  /** Props: which way the new object faces (see buildRotationCount); other shapes can't turn. */
+  rotation?: number;
+}
+
+export interface MoveTileMessage {
+  /** Cell the prop stands on. */
+  cx: number;
+  cy: number;
+  /** Cell it moves to (same cell = turn in place). */
+  toCx: number;
+  toCy: number;
+  /** Which way the prop faces after the move (omitted = keep the current facing). */
+  rotation?: number;
+}
+
+export interface SellTileMessage {
+  cx: number;
+  cy: number;
 }
 
 // Server -> client events
