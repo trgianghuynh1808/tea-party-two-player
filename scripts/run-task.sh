@@ -6,6 +6,7 @@
 #   scripts/run-task.sh .agents/tasks/<file>.md
 #   VERBOSE=1 scripts/run-task.sh ...       # hiện toàn bộ output của OpenCode như cũ
 #   REUSE_SESSION=0 scripts/run-task.sh ... # mỗi nhóm bước một phiên mới (không --continue)
+#   (FRESH_RULES trong config: chỉ các bước khớp tiền tố, vd tests/, chạy phiên mới)
 #   BATCH_MAX=1 scripts/run-task.sh ...     # mỗi lần chạy chỉ 1 bước (như bản cũ)
 #   ACTIONS=0 scripts/run-task.sh ...       # ẩn các dòng hành động, chỉ hiện commit
 #   VERIFY_MODE=full scripts/run-task.sh ...# none | light (mặc định) | full — ghi đè "Verify mode:" trong file task
@@ -32,6 +33,9 @@ MODELS=(
 # Mức [vừa] chọn model theo thư mục của file đầu tiên trong bước ("tiền tố=model").
 # Không khớp quy tắc nào thì dùng MODELS[1]. Để trống = luôn dùng MODELS[1].
 MEDIUM_RULES=()
+# Bước có file đầu tiên khớp một tiền tố ở đây luôn chạy trong PHIÊN MỚI (không --continue), để context không phình
+# theo các bước trước (mỗi lượt gọi model chậm dần khi phiên dài). Plan phải tự mang đủ ngữ cảnh. Để trống = nối tiếp như thường.
+FRESH_RULES=()
 DEFAULT_VERIFY_MODEL="opencode-go/gemini-4-argon"
 DEFAULT_VERIFY_URL="http://localhost:5173"
 DEFAULT_CHECK_HINT="lệnh typecheck/lint và các test liên quan theo mục Commands trong AGENTS.md"
@@ -277,6 +281,19 @@ first_path_of() {
 }
 
 # Model cho một bước ở một mức. Mức [vừa] có thể chọn theo thư mục qua MEDIUM_RULES.
+# 1 nếu bước thuộc FRESH_RULES (cần phiên mới), 0 nếu không.
+fresh_session_for() {
+  local path rule
+  path=$(first_path_of "$1")
+  for rule in "${FRESH_RULES[@]}"; do
+    if [[ -n "$path" && "$path" == "$rule"* ]]; then
+      echo 1
+      return
+    fi
+  done
+  echo 0
+}
+
 model_for() {
   local line="$1" lvl="$2" path rule prefix
   if [[ "$lvl" == "1" && ${#MEDIUM_RULES[@]} -gt 0 ]]; then
@@ -390,7 +407,7 @@ Nếu một bước sau 2 lần sửa vẫn fail: KHÔNG tick checkbox của bư
 'Đã thử mà không được', commit file task, rồi DỪNG (không làm các bước sau)."
 
   continue_flag=0
-  if [[ "$REUSE_SESSION" == "1" ]] && (( runs > 1 )); then
+  if [[ "$REUSE_SESSION" == "1" ]] && (( runs > 1 )) && [[ "$(fresh_session_for "$first_line")" == "0" ]]; then
     continue_flag=1
   fi
   run_agent "$model" "$prompt" "bước $range" "$continue_flag"

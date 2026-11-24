@@ -14,6 +14,9 @@ MEDIUM_RULES=(
   "tests/=opencode-go/deepseek-v4.1-flash"    # tests/: thử DeepSeek (rẻ), fail thì leo lên GLM
 )
 
+# Bước viết test chạy phiên OpenCode mới (không --continue): plan đã mô tả test từng bước nên không cần lịch sử phiên
+FRESH_RULES=("tests/")
+
 # Verify do Claude làm (gõ "verify" sau khi OpenCode xong) để tiết kiệm quota OpenCode
 DEFAULT_VERIFY_AGENT="claude"
 DEFAULT_VERIFY_MODEL="opencode-go/gemini-4-argon"   # chỉ dùng khi VERIFY_AGENT=opencode
