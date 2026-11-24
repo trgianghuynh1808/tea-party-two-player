@@ -114,6 +114,9 @@ WebSocket from the same origin. Then either:
   Rugs lie on the floor, so furniture can go on top of them.
 - The **⟳** badge on a catalog card means the piece can be turned: press **R** (or the **⟳ Xoay** button) to
   rotate the piece you're placing or have selected.
+- Phones and iPads go on a table top: drop them fully onto a table, the TV stand or the piano vanity and they
+  sit raised on it. A table takes its tabletop items along when moved, and selling it sells them too (50% back
+  each). A table that still has items on it can't be turned — clear the top first.
 - **🔨 Xây** (build mode, in the yard) uses the same gestures as decorating for the one-cell pieces (trees,
   outdoor props, furniture): with no material picked, click a placed piece to select it, drag it to move it
   (green cell = fits, red = can't), drop it on **🗑** or press **Delete** to sell it back for 50%, **R** /

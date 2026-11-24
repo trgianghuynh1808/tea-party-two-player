@@ -62,7 +62,8 @@ export class DecorPanel {
     help.textContent =
       `Kéo đồ vào quán để mua. Kéo đồ trong quán để di chuyển, kéo vào 🗑 để bán lại ${DECORATION_REFUND_RATE * 100}%. ` +
       "Bấm R (hoặc ⟳) để xoay món đang kéo / vừa chọn; món có ⟳ xoay được. " +
-      "Khách chỉ ngồi ghế/đôn đặt sát Bàn khách (để được mang nước ra bàn).";
+      "Khách chỉ ngồi ghế/đôn đặt sát Bàn khách (để được mang nước ra bàn). " +
+      "Điện thoại, iPad đặt lên mặt bàn, kệ TV, bàn trang điểm.";
 
     const rotateBtn = makeRotateButton(onRotate);
 

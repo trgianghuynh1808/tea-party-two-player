@@ -27,7 +27,7 @@ Guidelines for coding agents working in this repo.
 - `client/src/ui/` — DOM panels: `OrdersPanel`, `DecorPanel`, `BuildPanel`, `ShiftOverlay`, `RecipeGuide`, `rotateUi` (shared ⟳ Xoay button + ⟳ badge used by both the decorate and build panels).
 - `client/src/input/` — `KeyboardState` (WASD/arrows + Space), `TouchControls` (joystick + action button).
 - `client/src/forceLandscape.ts` — forces landscape on phones (orientation lock or CSS rotation).
-- `client/assets-src/` — source art sheets and the art tools in `tools/` (`cut_food.py`, `cut_bathroom.py` — cuts both `bathroom-sheet-1.png` and `bathroom-sheet-2.png`, one background + cut list per sheet — `draw_bathroom_props.py`).
+- `client/assets-src/` — source art sheets and the art tools in `tools/` (`cut_food.py`, `cut_bathroom.py` — cuts both `bathroom-sheet-1.png` and `bathroom-sheet-2.png`, one background + cut list per sheet — `draw_bathroom_props.py`, `draw_gadget_props.py` — head-on phone/tablet/TV stand/piano sprites).
 - `server/src/index.ts` — Colyseus + Express setup: room registry, `/rooms`, `/health`, admin API, static client.
 - `server/src/rooms/BobaShopRoom.ts` — room logic: message handlers, shifts, customers, orders, earnings split.
 - `server/src/shop/SharedShop.ts` — shared per-username shop state; `server/src/persistence/ShopStore.ts` — users/shops persistence.
@@ -54,7 +54,8 @@ npx playwright test  # e2e tests; config starts dev:server (waits for /health) t
 
 - TypeScript strict, ES2022, ESM (`"type": "module"`); double quotes, semicolons, 2-space indent; comments in English, player-facing UI text in Vietnamese.
 - Game rules and constants live in `shared/` so server and client agree: the server applies them, the client previews them. Do not duplicate constants in client/server.
-- Build mode and decorate mode must behave the same way: the same gestures to select, move, rotate (R and the ⟳ button, ⟳ badge), sell (🗑, Delete) and deselect (Esc, clicking an empty cell), and no tool is picked by default. Changing one side requires changing the other, or recording the reason in the task file.
+- Build mode and decorate mode must behave the same way: the same gestures to select, move, rotate (R and the ⟳ button, ⟳ badge), sell (🗑, Delete) and deselect (Esc, clicking an empty cell), and no tool is picked by default. Changing one side requires changing the other, or recording the reason in the task file. Exception: pieces that don't map to one yard cell (rugs, wall art, tabletop gadgets) are decorate-only — `BUILD_TILES` only takes catalog pieces with `layer === "object"`.
+- Tabletop gadgets (`layer: "tabletop"`, e.g. phone/tablet) must fit entirely on a piece with `surface` (tables, TV stand, piano vanity). They move and sell with that piece; turning a surface that still carries gadgets is refused ("Dọn đồ trên bàn trước khi xoay"). The link is geometric (`surfaceUnder` / `piecesOnSurface` in `shared/src/placement.ts`), not a schema field.
 - Never trust the client: validate moves/interactions server-side (`planInteraction`, move budgets in `BobaShopRoom`).
 - Per-username persistent state goes through `SharedShop`; live room state stays in the Colyseus schema (`shared/src/schema.ts`).
 
