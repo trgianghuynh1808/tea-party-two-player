@@ -9,6 +9,7 @@ import {
   normalizeRotation,
   rotationCount,
 } from "@boba/shared";
+import { joinAsHost } from "./helpers";
 
 test("T1: bed_pink is gone from the catalog, its art file is deleted, and other beds remain", () => {
   expect(getDecorationDef("bed_pink")).toBeUndefined();
@@ -182,4 +183,32 @@ test("furniture-views T3: bed_plaid has a pillow per view within 0..1, and norma
   }
   for (const rotation of [0, 1, 2, 3]) expect(normalizeRotation(def, rotation)).toBe(rotation);
   expect(normalizeRotation(def, 4)).toBe(0);
+});
+
+// ---------------------------------------------------------------- ⟳ badge on rotatable items
+
+/** Unique per test run; shops persist per username in server/data/. */
+let userSeq = 0;
+const uniqueUser = () => `p1-${Date.now()}-${userSeq++}`;
+
+test("rotate-badge T1: only items with rotationCount > 1 carry the ⟳ badge in the decor panel", async ({ page }) => {
+  await joinAsHost(page, uniqueUser());
+  await page.locator("#decorate-btn").click();
+  // The panel remembers collapsed groups, so open every section before counting cards.
+  await page.evaluate(() =>
+    document.querySelectorAll<HTMLDetailsElement>("#decor-panel details.decor-section").forEach((s) => (s.open = true)),
+  );
+  const domItems = await page.evaluate(() =>
+    [...document.querySelectorAll("#decor-panel .decor-item")].map((el) => ({
+      label: el.querySelector(".name")?.textContent ?? "",
+      badge: el.querySelector(".rotate-badge")?.textContent ?? "",
+    })),
+  );
+  // Expected: one card per catalog item, badged with ⟳ iff the piece can be turned.
+  const expected = DECORATION_CATALOG.map((def) => ({
+    label: def.label,
+    badge: rotationCount(def) > 1 ? "⟳" : "",
+  }));
+  const key = (item: { label: string; badge: string }) => `${item.label}\u0000${item.badge}`;
+  expect(domItems.map(key).sort()).toStrictEqual(expected.map(key).sort());
 });

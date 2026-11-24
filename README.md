@@ -112,6 +112,8 @@ WebSocket from the same origin. Then either:
 - Drag furniture from the side panel into the shop to buy it; drag placed furniture to move it, or drop it on
   **🗑** to sell it back for 50%. Red outline = can't place there (machines, counters, other furniture).
   Rugs lie on the floor, so furniture can go on top of them.
+- The **⟳** badge on a catalog card means the piece can be turned: press **R** (or the **⟳ Xoay** button) to
+  rotate the piece you're placing or have selected.
 - One shop per username (`server/src/shop/SharedShop.ts`, save id = hash of the name), one instance per server so
   every room using it (as host's furniture or as a player's wallet) sees the same state. Money + furniture are saved (debounced ~1 s after each change, and when a room
   closes) and restored when the server starts its first room. (Kept in memory: assumes one server process.)

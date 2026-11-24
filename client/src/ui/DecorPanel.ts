@@ -1,5 +1,5 @@
 import { Callbacks, type Room } from "@colyseus/sdk";
-import { DECORATION_CATALOG, DECORATION_CATEGORIES, DECORATION_REFUND_RATE, type DecorationDef } from "@boba/shared";
+import { DECORATION_CATALOG, DECORATION_CATEGORIES, DECORATION_REFUND_RATE, rotationCount, type DecorationDef } from "@boba/shared";
 import type { BobaShopState } from "@boba/shared/schema";
 
 /** game.events event: the player started dragging a catalog item out of the panel. */
@@ -60,7 +60,7 @@ export class DecorPanel {
     help.className = "hint";
     help.textContent =
       `Kéo đồ vào quán để mua. Kéo đồ trong quán để di chuyển, kéo vào 🗑 để bán lại ${DECORATION_REFUND_RATE * 100}%. ` +
-      "Bấm R (hoặc ⟳) để xoay món đang kéo / vừa chọn. " +
+      "Bấm R (hoặc ⟳) để xoay món đang kéo / vừa chọn; món có ⟳ xoay được. " +
       "Khách chỉ ngồi ghế/đôn đặt sát Bàn khách (để được mang nước ra bàn).";
 
     const rotateBtn = document.createElement("button");
@@ -122,6 +122,8 @@ export class DecorPanel {
     const el = document.createElement("div");
     el.className = "decor-item";
     el.title = `Kéo vào quán để mua ${def.label}`;
+    const rotatable = rotationCount(def) > 1;
+    if (rotatable) el.title += " · Xoay được (R)";
     let swatch: HTMLElement;
     if (def.image) {
       const img = document.createElement("img");
@@ -141,6 +143,13 @@ export class DecorPanel {
     const price = document.createElement("strong");
     price.textContent = `$${def.price}`;
     el.append(swatch, name, price);
+    if (rotatable) {
+      const badge = document.createElement("span");
+      badge.className = "rotate-badge";
+      badge.textContent = "⟳";
+      badge.dataset.rotatable = "1";
+      el.append(badge);
+    }
 
     el.addEventListener("pointerdown", (e) => {
       if (el.classList.contains("disabled")) return;

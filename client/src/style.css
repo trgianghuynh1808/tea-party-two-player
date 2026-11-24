@@ -1218,6 +1218,7 @@ h1 {
 
 /* Press and drag an item into the shop. touch-action: none so the drag isn't a panel scroll. */
 .decor-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1243,6 +1244,24 @@ h1 {
 
 .decor-item strong {
   color: #2a9d8f;
+}
+
+/* Marks catalog items that can be turned with R / the ⟳ button. */
+.rotate-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #3d2c29;
+  border-radius: 50%;
+  background: #f6e7b4;
+  font-size: 11px;
+  line-height: 1;
+  pointer-events: none;
 }
 
 /* Build panel: materials are picked with a click (then dragged on the yard), not dragged themselves. */
