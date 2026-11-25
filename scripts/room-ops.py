@@ -5,7 +5,7 @@ Used by scripts/manager-loop.sh so the Manager only needs Claude for judgement c
 
   room-ops.py inbox <file>          handle one inbox message (exit 0 handled, 3 = needs Claude, other = error)
   room-ops.py say <role> <text>     write a message to .agents/outbox
-  room-ops.py status | stop | resume | usage
+  room-ops.py status | stop | resume | usage [days]
   room-ops.py plan-path <slug>      path of the newest plan file for a task slug
   room-ops.py check-plan <slug>     prints OK | BLOCK: <why> | REVIEW: <why>
   room-ops.py approve <slug>        mark plan APPROVED_BY_MANAGER, commit, hand off to OpenCode
@@ -615,11 +615,47 @@ def fmt_k(n):
     return f"{n / 1000:.1f}k" if n >= 1000 else str(n)
 
 
-def cmd_usage():
+def opencode_usage(days):
+    """Token/cost of OpenCode for this project from `opencode stats` (None if it cannot be read)."""
+    try:
+        p = subprocess.run(["opencode", "stats", "--days", str(days), "--models", "3", "--project", ""],
+                           capture_output=True, text=True, timeout=25)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    txt = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", p.stdout + p.stderr)
+
+    def val(label):
+        m = re.search(rf"│\s*{label}\s+(\S+)\s*│", txt)
+        return m.group(1) if m else None
+
+    if not val("Sessions"):
+        return None
+    out = [f"OpenCode ({'24 giờ qua' if days == 1 else f'{days} ngày qua'}, project này, gồm cả lần chạy tay): "
+           f"{val('Sessions')} phiên, {val('Messages')} tin · in {val('Input')} · cache đọc {val('Cache Read')} · "
+           f"out {val('Output')} · ~{val('Total Cost')}"]
+    model = None
+    for line in txt.split("\n"):
+        m = re.match(r"^│ (\S+/\S+)\s*│$", line)
+        if m:
+            model = {"name": m.group(1).split("/", 1)[1], "msgs": "?", "cost": "?"}
+            continue
+        if model:
+            mm = re.match(r"^│\s+Messages\s+(\S+)\s*│$", line)
+            if mm:
+                model["msgs"] = mm.group(1)
+            mc = re.match(r"^│\s+Cost\s+(\S+)\s*│$", line)
+            if mc:
+                out.append(f"  {model['name']}: {model['msgs']} tin, ~{mc.group(1)}")
+                model = None
+    return "\n".join(out)
+
+
+def cmd_usage(days=1):
+    days = max(1, min(days, 90))
     rows = usage_rows()
-    if not rows:
-        return "Chưa có số liệu (usage.log trống)."
-    today = datetime.now().strftime("%Y-%m-%d")
+    since = datetime.fromtimestamp(time.time() - (days - 1) * 86400).strftime("%Y-%m-%d")
+    rows = [r for r in rows if r.get("ts", "")[:10] >= since]
+    label = "Hôm nay" if days == 1 else f"{days} ngày qua"
     out = []
 
     def block(title, rs):
@@ -630,16 +666,24 @@ def cmd_usage():
                    f"cache đọc {fmt_k(sum(r.get('cache_read', 0) for r in rs))} · "
                    f"out {fmt_k(sum(r.get('output', 0) for r in rs))} · ~${sum(r.get('cost_usd', 0) for r in rs):.2f}")
 
-    block("Hôm nay", [r for r in rows if r.get("ts", "").startswith(today)])
-    for role in ("manager", "techlead"):
-        block(f"  {role}", [r for r in rows if r.get("role") == role and r.get("ts", "").startswith(today)])
+    if rows:
+        out.append(f"Claude — {label}")
+        block("  tổng", rows)
+        for role in ("manager", "techlead"):
+            block(f"  {role}", [r for r in rows if r.get("role") == role])
+        out.append("")
+        out.append("5 lần gọi Claude gần nhất:")
+        for r in rows[-5:]:
+            out.append(f"- {r.get('ts', '')[5:16]} {r.get('role')} {r.get('label')}: {r.get('turns')} lượt, "
+                       f"~${r.get('cost_usd', 0):.2f}{'' if r.get('ok', True) else ' (LỖI)'}")
+    else:
+        out.append(f"Claude — {label}: chưa có lần gọi nào được ghi (usage.log).")
+    oc = opencode_usage(days)
     out.append("")
-    out.append("5 lần gọi gần nhất:")
-    for r in rows[-5:]:
-        out.append(f"- {r.get('ts', '')[11:16]} {r.get('role')} {r.get('label')}: {r.get('turns')} lượt, "
-                   f"~${r.get('cost_usd', 0):.2f}{'' if r.get('ok', True) else ' (LỖI)'}")
+    out.append(oc if oc else "OpenCode: không đọc được `opencode stats` (opencode có trong PATH của daemon không?).")
     out.append("")
-    out.append("(Chi phí quy theo giá list API, chỉ để so sánh giữa các bước; quota gói đăng ký tính khác.)")
+    out.append("(Chi phí quy theo giá list API, chỉ để so sánh giữa các bước; quota gói đăng ký tính khác. "
+               "Gõ /usage 7 để xem 7 ngày.)")
     return "\n".join(out)
 
 
@@ -684,7 +728,7 @@ def cmd_inbox(path):
     elif cmd == "/ship":
         reply = cmd_ship()
     elif cmd == "/usage":
-        reply = cmd_usage()
+        reply = cmd_usage(int(args.split()[0]) if args.split() and args.split()[0].isdigit() else 1)
     elif cmd == "/auto":
         if e.get("AUTO_SPLIT") == "claude":
             return 3
@@ -712,8 +756,10 @@ def main(argv):
         return 0
     if c == "claude-result":
         return cmd_claude_result(*a)
-    simple = {"status": status_text, "stop": cmd_stop, "resume": cmd_resume, "usage": cmd_usage,
-              "finalize": cmd_finalize}
+    if c == "usage":
+        print(cmd_usage(int(a[0]) if a and a[0].isdigit() else 1))
+        return 0
+    simple = {"status": status_text, "stop": cmd_stop, "resume": cmd_resume, "finalize": cmd_finalize}
     if c in simple:
         print(simple[c]())
         return 0
