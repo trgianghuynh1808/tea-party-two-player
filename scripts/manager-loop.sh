@@ -126,6 +126,11 @@ run_claude() { # vai(manager|techlead) prompt [nhãn]
     esac
   fi
   printf '\n━━ %s ━━ %s\n' "$(date '+%F %T')" "$label" >> "$LOGDIR/$role.log"
+  local tl_kind=""
+  if [[ "$role" == techlead && -n "${CUR_SLUG:-}" ]]; then
+    case "$label" in *"lên plan"*|*"sửa plan"*) tl_kind=plan ;; *verify*) tl_kind=finish ;; esac
+    [[ -n "$tl_kind" ]] && { mkdir -p "$AG/timeline"; printf '%s %s_start\n' "$(date +%s)" "$tl_kind" >> "$AG/timeline/$CUR_SLUG.log"; }
+  fi
 
   if [[ "$role" == techlead && -n "${CUR_SLUG:-}" ]]; then
     ( while true; do python3 "$OPS" progress "$CUR_SLUG" >/dev/null 2>&1; sleep 5; done ) &
@@ -138,6 +143,7 @@ run_claude() { # vai(manager|techlead) prompt [nhãn]
     PROGRESS_PID=""
     report_progress "$CUR_SLUG" --flush   # lần cuối: bắt những gì xảy ra sau lượt kiểm tra cuối cùng
   fi
+  [[ -n "$tl_kind" ]] && printf '%s %s_end\n' "$(date +%s)" "$tl_kind" >> "$AG/timeline/$CUR_SLUG.log"
   text="$(printf '%s' "$raw" | python3 "$OPS" claude-result "$role" "$label" "$model")"; prc=$?
   LAST_TEXT="$text"
   while IFS= read -r l; do
