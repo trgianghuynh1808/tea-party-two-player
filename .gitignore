@@ -29,3 +29,4 @@ server/data
 .agents/board.md
 .agents/room.env
 .agents/watcher.pid
+.agents/progress/

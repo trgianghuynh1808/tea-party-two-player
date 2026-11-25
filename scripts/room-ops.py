@@ -11,6 +11,7 @@ Used by scripts/manager-loop.sh so the Manager only needs Claude for judgement c
   room-ops.py approve <slug>        mark plan APPROVED_BY_MANAGER, commit, hand off to OpenCode
   room-ops.py block <id> <reason>   mark task BLOCKED, turn AUTO_MODE off, tell the user
   room-ops.py finalize              build the ship report (outbox, APPROVE_SHIP), phase AWAITING_SHIP_APPROVAL
+  room-ops.py progress <slug>       report new progress (plan, steps, tests, verify, fix, merge) read from the task file and git
   room-ops.py claude-result <role> <label> <model>   stdin: `claude -p --output-format json`; prints text, logs usage
 """
 import glob
@@ -392,6 +393,157 @@ def cmd_finalize():
     return "finalize"
 
 
+
+# ---------- progress reports (derived from the task file, board and git; no AI) ----------
+PROGRESS_DIR = f"{AG}/progress"
+STEP_RE = re.compile(r"^- \[([ x])\] (\d+)\. (?:\[(dễ|vừa|khó)\]\s*)?(.*)$", re.M)
+IMG_EXT = ("*.png", "*.jpg", "*.jpeg", "*.webp")
+
+
+def plan_text(slug):
+    p = plan_path(slug)
+    if p and os.path.exists(p):
+        with open(p, encoding="utf8") as f:
+            return f.read()
+    if p:
+        rc, out = git("show", f"task/{slug}:{p}")
+        if rc == 0:
+            return out
+    return ""
+
+
+def section_lines(text, name):
+    out, on = [], False
+    for line in text.split("\n"):
+        if line.startswith("## "):
+            on = line.strip() == f"## {name}"
+            continue
+        if on and line.strip() and not line.lstrip().startswith("<!--"):
+            out.append(line.rstrip())
+    return out
+
+
+def short(s, n=100):
+    s = re.sub(r"\s+", " ", s).strip()
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def task_commits(slug, stg):
+    rc, out = git("log", "--reverse", "--format=%h\t%s", f"{stg}..task/{slug}")
+    if rc != 0:
+        return []
+    return [tuple(l.split("\t", 1)) for l in out.splitlines() if "\t" in l]
+
+
+def screenshots():
+    files = []
+    for ext in IMG_EXT:
+        files += glob.glob(f"{AG}/screenshots/**/{ext}", recursive=True)
+    return sorted(set(files), key=os.path.getmtime)
+
+
+def cmd_progress(slug):
+    lines = read_board()
+    t = next((t for t in tasks(lines) if t["slug"] == slug), None)
+    if not t:
+        return 0
+    stg = read_env().get("STAGING_BRANCH", "staging")
+    text = plan_text(slug)
+    steps = [(int(m.group(2)), m.group(1) == "x", m.group(3) or "", m.group(4)) for m in STEP_RE.finditer(text)]
+    tests = dict(re.findall(r"^\s*- (T\d+): (PASS|FAIL|chưa viết)", "\n".join(section_lines(text, "Test status")), re.M))
+    verify = (re.findall(r"^VERIFY:\s*(PASS|FAIL)", text, re.M) or [""])[-1]
+    commits = task_commits(slug, stg)
+    dev_commits = [(h, sub) for h, sub in commits if not sub.startswith("plan")]
+    fix_commits = [(h, sub) for h, sub in commits if re.match(r"plan\(fix-\d+\)", sub)]
+    shots = screenshots()
+
+    os.makedirs(PROGRESS_DIR, exist_ok=True)
+    sf = f"{PROGRESS_DIR}/{slug}.json"
+    fresh = not os.path.exists(sf)
+    st = {"plan": False, "steps": [], "tests": {}, "verify": "", "fix": [], "commits": [], "shots": [], "done": False,
+          "t0": time.time()}
+    if not fresh:
+        with open(sf, encoding="utf8") as f:
+            st.update(json.load(f))
+
+    def save():
+        with open(sf, "w", encoding="utf8") as f:
+            json.dump(st, f, ensure_ascii=False)
+
+    if fresh and t["state"] == "in_progress":
+        # daemon restarted in the middle of a task: start from the current state instead of replaying history
+        st.update(plan=True, steps=[n for n, d, _, _ in steps if d], tests=tests, verify=verify,
+                  fix=[h for h, _ in fix_commits], commits=[h for h, _ in dev_commits],
+                  shots=shots)
+        save()
+        return 0
+
+    sent = 0
+    total = len([1 for _ in steps])
+
+    # A. plan summary (Tech Lead)
+    if not st["plan"] and steps and t["state"] in ("plan_ready", "in_progress", "done", "shipped"):
+        mode = (re.findall(r"^Verify mode:\s*(\w+)", text, re.M) or ["light"])[0]
+        n_tests = len(re.findall(r"^- \[[ x]\] T\d+\.", text, re.M))
+        body = [f"📋 Plan {t['id']} sẵn sàng · {total} bước · {n_tests} test · Verify {mode}"]
+        for n, _, label, txt in steps[:6]:
+            body.append(f"{n}. {('[' + label + '] ') if label else ''}{short(txt, 90)}")
+        if total > 6:
+            body.append(f"… và {total - 6} bước nữa")
+        emit("techlead", "\n".join(body))
+        st["plan"] = True
+        sent += 1
+
+    # B. Senior Dev: steps finished + commits
+    new_steps = [x for x in steps if x[1] and x[0] not in st["steps"]]
+    new_commits = [c for c in dev_commits if c[0] not in st["commits"]]
+    if new_steps or new_commits:
+        body = []
+        for n, _, label, txt in new_steps:
+            body.append(f"✅ Bước {n}/{total}{(' [' + label + ']') if label else ''}: {short(txt, 90)}")
+        for h, sub in new_commits[:3]:
+            body.append(f"• commit {h} {short(sub, 80)}")
+        if len(new_commits) > 3:
+            body.append(f"• … +{len(new_commits) - 3} commit")
+        emit("dev", "\n".join(body))
+        st["steps"] += [x[0] for x in new_steps]
+        st["commits"] += [c[0] for c in new_commits]
+        sent += 1
+
+    # C. Senior Dev: test results
+    changed = [(k, v) for k, v in tests.items() if v in ("PASS", "FAIL") and st["tests"].get(k) != v]
+    if changed:
+        emit("dev", "🧪 Test: " + " · ".join(f"{k} {v}" for k, v in changed))
+        st["tests"].update(dict(changed))
+        sent += 1
+
+    # D. Tech Lead: Verify result + new screenshots
+    if verify and verify != st["verify"]:
+        new_shots = [f for f in shots if f not in st["shots"] and os.path.getmtime(f) >= st["t0"] - 5]
+        body = [f"🔎 Verify {verify}"] + [short(l, 110) for l in section_lines(text, "Verify")[:6] if not l.startswith("VERIFY:")]
+        emit("techlead", "\n".join(body), images=new_shots[-3:])
+        st["verify"] = verify
+        st["shots"] = sorted(set(st["shots"]) | set(new_shots))
+        sent += 1
+
+    # E. Tech Lead: fix cycles
+    for h, sub in fix_commits:
+        if h not in st["fix"]:
+            emit("techlead", f"🔁 {short(sub, 110)} — Tech Lead thêm bước Fix và giao lại OpenCode")
+            st["fix"].append(h)
+            sent += 1
+
+    # F. Tech Lead: merged into staging
+    if t["state"] in ("done", "shipped") and not st["done"]:
+        rc, last = git("log", "-1", "--format=%h %s", stg)
+        emit("techlead", f"🎉 {t['id']} đã merge vào {stg}" + (f": {short(last, 100)}" if rc == 0 else ""))
+        st["done"] = True
+        sent += 1
+
+    save()
+    return sent
+
+
 def usage_rows():
     rows = []
     try:
@@ -511,6 +663,9 @@ def main(argv):
               "finalize": cmd_finalize}
     if c in simple:
         print(simple[c]())
+        return 0
+    if c == "progress":
+        print(cmd_progress(a[0]))
         return 0
     if c == "plan-path":
         print(plan_path(a[0]))
