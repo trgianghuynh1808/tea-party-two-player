@@ -38,6 +38,7 @@ import {
   describeAnyItem,
   pendingOrderDrinkIds,
   comboBonusRate,
+  DECORATION_CATALOG,
   type DeliveredEvent,
   type MachineOverflowEvent,
   type OrderExpiredEvent,
@@ -266,6 +267,10 @@ export class ShopScene extends Phaser.Scene {
   }
 
   preload() {
+    // Custom furniture art is served by the game server, possibly another origin in dev: allow CORS loads.
+    if (DECORATION_CATALOG.some((d) => d.image && new URL(d.image, location.href).origin !== location.origin)) {
+      this.load.crossOrigin = "anonymous";
+    }
     for (const c of CHARACTERS) {
       this.load.spritesheet(characterKey(c.id), c.sheet, { frameWidth: c.frameWidth, frameHeight: c.frameHeight });
     }

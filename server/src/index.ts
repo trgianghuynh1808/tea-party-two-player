@@ -14,6 +14,7 @@ import {
 } from "@boba/shared";
 import { BobaShopRoom } from "./rooms/BobaShopRoom.js";
 import { registerAdminRoutes } from "./admin.js";
+import { loadCustomCatalog, registerCustomDecorRoutes } from "./customDecor.js";
 import { storageName } from "./persistence/ShopStore.js";
 
 // Room state outgrew the 8 KB default encode buffer (caused "buffer overflow" lag).
@@ -62,6 +63,8 @@ const server = defineServer({
       res.set("Access-Control-Allow-Origin", "*").set("Cache-Control", "no-store").json(body);
     });
     registerAdminRoutes(app);
+    // Public custom-furniture catalog + artwork PNGs (fetched by the client on page load).
+    registerCustomDecorRoutes(app);
     // The admin portal page (HTML, no build step): free to load, the token is entered inside.
     app.get("/portal", (_req, res) => {
       res.sendFile(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../portal/index.html"));
@@ -70,8 +73,13 @@ const server = defineServer({
   },
 });
 
+// Portal-added custom furniture must be in the catalog before any shop opens: shop saves drop
+// pieces whose kind is missing from the catalog, so this finishes before the server listens.
+const customDecors = await loadCustomCatalog();
+
 server.listen(port);
 console.log(`[BobaShop] Colyseus server listening on ws://localhost:${port}`);
 console.log(`[BobaShop] Saving users + shops to ${storageName}`);
 console.log(`[BobaShop] Admin API ${ADMIN_TOKEN ? "enabled" : "disabled (set ADMIN_TOKEN to enable)"}`);
+console.log(`[BobaShop] Custom furniture from the portal: ${customDecors} piece(s)`);
 if (serveClient) console.log(`[BobaShop] Serving client from ${clientDist} → http://localhost:${port}`);

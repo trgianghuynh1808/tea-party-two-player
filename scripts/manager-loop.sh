@@ -28,7 +28,7 @@ LOGDIR="$AG/logs"
 LOCK="$AG/manager.lock"
 SIG="$AG/manager.sig"
 ACTIVITY="$LOGDIR/activity.log"   # log gộp, có màu và giờ — cửa sổ dashboard của agent-room đọc file này
-OPS="scripts/room-ops.py"
+OPS="$AG/bin/room-ops.py"   # bản sao cố định (git-ignore): cây làm việc đổi theo nhánh nên scripts/room-ops.py có thể không tồn tại ở nhánh task cũ
 POLL="${POLL:-3}"
 CLAUDE_FLAGS="${CLAUDE_FLAGS:---dangerously-skip-permissions}"
 MANAGER_PROMPT="${MANAGER_PROMPT:-$AG/MANAGER.md}"
@@ -36,7 +36,8 @@ MANAGER_PROMPT="${MANAGER_PROMPT:-$AG/MANAGER.md}"
 
 [[ -f "$AG/room.env" ]] || { echo "⛔ Không thấy $AG/room.env — chạy: scripts/agent-room.sh init --topic <ID> --port <PORT>"; exit 1; }
 [[ -f "$MANAGER_PROMPT" ]] || { echo "⛔ Không thấy prompt Manager ($MANAGER_PROMPT)"; exit 1; }
-[[ -f "$OPS" ]] || { echo "⛔ Không thấy $OPS — chạy lại install.sh"; exit 1; }
+[[ -f scripts/room-ops.py ]] || { echo "⛔ Không thấy scripts/room-ops.py — chạy lại install.sh"; exit 1; }
+mkdir -p "$AG/bin" && cp scripts/room-ops.py "$OPS"
 command -v claude >/dev/null || { echo "⛔ Chưa cài claude CLI"; exit 1; }
 command -v python3 >/dev/null || { echo "⛔ Chưa cài python3"; exit 1; }
 mkdir -p "$INBOX/processed" "$INBOX/failed" "$OUTBOX" "$LOGDIR" "$AG/screenshots" "$AG/tasks" "$AG/status"
@@ -46,7 +47,8 @@ if [[ -f "$LOCK" ]] && kill -0 "$(cat "$LOCK" 2>/dev/null)" 2>/dev/null; then
   echo "⛔ Manager của phòng này đã chạy (pid $(cat "$LOCK"))."; exit 1
 fi
 echo $$ > "$LOCK"
-trap 'rm -f "$LOCK"; exit 0' INT TERM EXIT
+PROGRESS_PID=""
+trap '[[ -n "$PROGRESS_PID" ]] && { pkill -P "$PROGRESS_PID" 2>/dev/null; kill "$PROGRESS_PID" 2>/dev/null; }; rm -f "$LOCK"; exit 0' INT TERM EXIT
 
 c_role() { case "$1" in manager) printf '\033[36m' ;; techlead) printf '\033[33m' ;; *) printf '\033[90m' ;; esac; }
 log() {
@@ -82,10 +84,19 @@ line_slug()  { sed -nE 's/.*\(slug: `([^`]+)`\).*/\1/p' <<<"$1"; }
 has_done()   { grep -qE '^- \[x\] `T[0-9]+` \[done\]' "$BOARD" 2>/dev/null; }
 watcher_alive() { [[ -f "$AG/watcher.pid" ]] && kill -0 "$(cat "$AG/watcher.pid" 2>/dev/null)" 2>/dev/null; }
 
-run_claude() { # vai(manager|techlead) prompt [nhãn]
+report_progress() {   # slug — báo tiến độ (bước, test, verify, vòng sửa, merge) đọc từ file task và git, không tốn Claude
+  python3 "$OPS" progress "$1" >/dev/null 2>>"$LOGDIR/ops.log" || true
+}
+
+run_claude() { # vai(manager|techlead) prompt [nhãn]   (CUR_SLUG=<slug> để báo tiến độ trong lúc Tech Lead làm việc)
   local role="$1" label="${3:-$1}" col model turns raw text crc prc rc
   col="$(c_role "$role")"
   if [[ "$role" == techlead ]]; then model="$MODEL_TECHLEAD"; turns="$MAX_TURNS_TECHLEAD"; else model="$MODEL_MANAGER"; turns="$MAX_TURNS_MANAGER"; fi
+  if [[ -z "${2//[[:space:]]/}" ]]; then
+    log "⛔ ${role}: prompt rỗng (lỗi trong manager-loop.sh), không gọi claude: ${label}"
+    say_user "⛔ Lỗi nội bộ: prompt của ${role} rỗng (${label}). Báo người bảo trì kit." manager
+    return 1
+  fi
   local args=(-p "$2" --output-format json --max-turns "$turns")
   [[ -n "$model" ]] && args+=(--model "$model")
 
@@ -93,8 +104,17 @@ run_claude() { # vai(manager|techlead) prompt [nhãn]
   [[ "$role" == techlead ]] && say_user "▶ $label" techlead
   printf '\n━━ %s ━━ %s\n' "$(date '+%F %T')" "$label" >> "$LOGDIR/$role.log"
 
+  if [[ "$role" == techlead && -n "${CUR_SLUG:-}" ]]; then
+    ( while true; do python3 "$OPS" progress "$CUR_SLUG" >/dev/null 2>&1; sleep 5; done ) &
+    PROGRESS_PID=$!
+  fi
   # shellcheck disable=SC2086
   raw="$(claude "${args[@]}" $CLAUDE_FLAGS 2>>"$LOGDIR/$role.err")"; crc=$?
+  if [[ -n "$PROGRESS_PID" ]]; then
+    pkill -P "$PROGRESS_PID" 2>/dev/null; kill "$PROGRESS_PID" 2>/dev/null; wait "$PROGRESS_PID" 2>/dev/null
+    PROGRESS_PID=""
+    report_progress "$CUR_SLUG"   # lần cuối: bắt những gì xảy ra sau lượt kiểm tra cuối cùng
+  fi
   text="$(printf '%s' "$raw" | python3 "$OPS" claude-result "$role" "$label" "$model")"; prc=$?
   while IFS= read -r l; do
     printf '%s\n' "$l" >> "$LOGDIR/$role.log"
@@ -105,7 +125,6 @@ run_claude() { # vai(manager|techlead) prompt [nhãn]
   rc=0; (( crc != 0 )) && rc=$crc; (( rc == 0 && prc != 0 )) && rc=$prc
   if (( rc == 0 )); then
     log "✔ ${role}: ${label}"
-    [[ "$role" == techlead ]] && say_user "✔ $label" techlead
   else
     log "⚠ ${role}: ${label} thoát với mã $rc"
     [[ "$role" == techlead ]] && say_user "⚠ $label thất bại (mã $rc). Xem .agents/logs/techlead.log" techlead
@@ -121,7 +140,7 @@ techlead_prompt() { # phase id slug [opencode-status plan-file]
   local common="Bạn là Tech Lead (Claude Code) trong phòng tự động (AUTO_MODE=true). Làm theo CLAUDE.md, mục Autopilot/AUTO_MODE.
 Nhánh nền là '$STAGING_BRANCH' (không phải $MAIN_BRANCH). Task: $2, slug: $3 (xem tiêu đề trên .agents/board.md).
 Không hỏi người dùng, không dừng chờ input. Gặp việc không làm được: đặt task thành [BLOCKED] trên board.md, ghi lý do vào Activity Log, rồi dừng.
-Ngoài tin mốc daemon tự gửi, hãy báo kết quả quan trọng cho user bằng cách ghi MỘT file JSON vào .agents/outbox/ (ghi ra file .tmp rồi đổi tên thành <unix-ts>-techlead-<n>.json): {\"from\": \"techlead\", \"text\": \"<tối đa 4 dòng tiếng Việt>\", \"images\": [\"đường/dẫn/tương/đối.png\"]} (images không bắt buộc). Báo khi: plan xong (tiêu đề + số bước), kết quả Verify (PASS/FAIL kèm 1-3 ảnh), đã merge vào staging, hoặc BLOCKED. Không đưa secret vào tin."
+Daemon tự báo tiến độ cho user từ file task và git (plan, bước xong, test, Verify, vòng sửa, merge), nên bạn KHÔNG cần viết tin: chỉ cần giữ file task đúng mẫu (tick checkbox từng bước ngay khi xong, cập nhật mục Test status dạng T1: PASS|FAIL, viết mục ## Verify và dòng cuối VERIFY: PASS|FAIL) và lưu ảnh vào .agents/screenshots/. Chỉ ghi file JSON vào .agents/outbox/ (ghi ra .tmp rồi đổi tên thành <unix-ts>-techlead-<n>.json) khi cần user quyết định điều gì: {\"from\": \"techlead\", \"text\": \"<tối đa 4 dòng tiếng Việt>\"}. Không đưa secret vào tin."
   case "$1" in
     plan) printf '%s\n\nVIỆC CỦA BẠN: chỉ LÊN PLAN. Checkout %s, tạo nhánh task/%s, viết plan vào .agents/tasks/<ngày>-%s.md theo CLAUDE.md, commit file plan. KHÔNG chạy scripts/handoff.sh (daemon kiểm tra plan rồi mới giao). Cuối cùng đổi task %s trên board.md từ [pending] sang [plan_ready].\n' "$common" "$STAGING_BRANCH" "$3" "$3" "$2" ;;
     finish) printf '%s\n\nVIỆC CỦA BẠN: plan đã được duyệt và đã giao cho OpenCode. Daemon đã chờ giúp bạn: OpenCode báo trạng thái "%s" cho file plan %s. TUYỆT ĐỐI không chạy scripts/wait-task.sh. Làm tiếp từ bước Verify của Autopilot (nếu trạng thái done) hoặc Fix cycle (nếu stuck), tối đa %s vòng sửa.\nNếu cần Fix cycle: ghi bước Fix vào file plan, commit plan(fix-n), chạy scripts/handoff.sh <file plan> rồi KẾT THÚC phiên ngay: daemon sẽ chờ OpenCode và gọi lại bạn với ngữ cảnh mới (mọi thông tin phải nằm trong file plan).\nLưu ảnh verify vào .agents/screenshots/. Khi PASS: merge --squash nhánh task/%s vào %s (KHÔNG push, KHÔNG merge vào %s), xóa nhánh task, đổi task %s thành [done] và [x] trên board.md, ghi Activity Log. Nếu hết vòng sửa mà chưa đạt: [BLOCKED] + lý do.\n' "$common" "${4:-done}" "${5:-?}" "${MAX_FIX_CYCLES:-2}" "$3" "$STAGING_BRANCH" "$MAIN_BRANCH" "$2" ;;
@@ -194,9 +213,10 @@ tick_auto() {
         log "⛔ preflight: watcher không chạy — tắt AUTO_MODE"
         return 0
       fi
-      guard "$id:$state" && run_claude techlead "$(techlead_prompt plan "$id" "$slug")" "$id lên plan" ;;
+      guard "$id:$state" && CUR_SLUG="$slug" run_claude techlead "$(techlead_prompt plan "$id" "$slug")" "$id lên plan" ;;
     plan_ready)
       guard "$id:$state" || return 0
+      report_progress "$slug"   # gửi tóm tắt plan cho user
       verdict="$(python3 "$OPS" check-plan "$slug" 2>>"$LOGDIR/ops.log")"
       log "⚙ $id kiểm tra plan: $verdict"
       case "$verdict" in
@@ -207,6 +227,7 @@ tick_auto() {
         *) run_claude manager "$(manager_prompt APPROVE_PLAN "Task: $id (slug: $slug)"$'\n'"Kiểm tra tự động nghi ngờ: ${verdict#REVIEW: }")" "$id duyệt plan" ;;
       esac ;;
     in_progress)
+      report_progress "$slug"   # OpenCode đang code: báo bước/commit/test vừa xong
       plan="$(python3 "$OPS" plan-path "$slug" 2>>"$LOGDIR/ops.log")"
       st=""; [[ -n "$plan" ]] && st="$AG/status/$(basename "$plan" .md).status"
       st_state="none"; st_ts=0
@@ -226,7 +247,7 @@ tick_auto() {
           return 1 ;;
       esac
       fixes="$(git log --oneline "$STAGING_BRANCH..task/$slug" --grep 'plan(fix-' 2>/dev/null | wc -l | tr -d ' ')"
-      guard "$id:$st_state:$fixes" && run_claude techlead "$(techlead_prompt finish "$id" "$slug" "$st_state" "$plan")" "$id verify, review, merge" ;;
+      guard "$id:$st_state:$fixes" && CUR_SLUG="$slug" run_claude techlead "$(techlead_prompt finish "$id" "$slug" "$st_state" "$plan")" "$id verify, review, merge" ;;
     BLOCKED)
       set_env_key AUTO_MODE false
       say_user "⛔ Task $id ($slug) đang BLOCKED. Đã tắt AUTO_MODE. Xem board và .agents/logs/, rồi /resume hoặc /stop."

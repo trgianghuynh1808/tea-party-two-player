@@ -71,6 +71,8 @@ MAX_TURNS_MANAGER="20"
 MAX_TURNS_TECHLEAD="150"
 # /auto tách task: "lines" (mỗi dòng một task, không tốn Claude) hoặc "claude" (Manager tách)
 AUTO_SPLIT="lines"
+# Sau /ship, giữ lại bao nhiêu task đã ship gần nhất trên board (phần cũ hơn được gỡ và ghi vào Activity Log)
+KEEP_SHIPPED="5"
 # Tin thường (không có lệnh): "false" = trả lời mẫu, "true" = để Claude Manager trả lời (tốn quota)
 CHAT_WITH_CLAUDE="false"
 ENV
@@ -96,7 +98,7 @@ BOARD
   fi
 
   touch .gitignore
-  for e in ".agents/board.md" ".agents/room.env" ".agents/inbox/" ".agents/outbox/" ".agents/screenshots/" ".agents/logs/" ".agents/manager.lock" ".agents/manager.sig" ".agents/kit-dir" ".agents/watcher.pid"; do
+  for e in ".agents/board.md" ".agents/room.env" ".agents/inbox/" ".agents/outbox/" ".agents/screenshots/" ".agents/logs/" ".agents/manager.lock" ".agents/manager.sig" ".agents/kit-dir" ".agents/watcher.pid" ".agents/progress/" ".agents/bin/"; do
     grep -qxF "$e" .gitignore || { echo "$e" >> .gitignore; echo "  ✓ .gitignore: $e"; }
   done
 

@@ -144,6 +144,16 @@ WebSocket from the same origin. Then either:
   empty shop never overwrites the real save.
 - Catalog and placement rules: `shared/src/decor.ts`.
 
+### Custom furniture via the portal
+
+The admin portal (`http://localhost:2567/portal`, requires `ADMIN_TOKEN`) has **🪑 Nội thất tuỳ chỉnh**: upload one
+PNG/JPG showing several items on a plain background, press **Phân tích** to cut them out in the browser, then define
+each piece (name, price, category, floor/wall/tabletop type, footprint, art height, rotation, role, table surface)
+and press **Lưu**. Saved pieces apply to both decorate and build mode for every player; players already in the game
+must reload the page to see them. Definitions and cut-out PNGs are stored with the same backend as the shops
+(Upstash Redis or `server/data/`, see below) and served at `/custom-decor/<kind>.png`. The portal also lists the added
+pieces and can delete them, unless a shop still owns one.
+
 ### Setting up Upstash (free)
 
 1. Create a free account at upstash.com → **Create Database** (Redis, pick a region near the Render server,

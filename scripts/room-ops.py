@@ -5,18 +5,20 @@ Used by scripts/manager-loop.sh so the Manager only needs Claude for judgement c
 
   room-ops.py inbox <file>          handle one inbox message (exit 0 handled, 3 = needs Claude, other = error)
   room-ops.py say <role> <text>     write a message to .agents/outbox
-  room-ops.py status | stop | resume | usage
+  room-ops.py status | stop | resume | usage [days]
   room-ops.py plan-path <slug>      path of the newest plan file for a task slug
   room-ops.py check-plan <slug>     prints OK | BLOCK: <why> | REVIEW: <why>
   room-ops.py approve <slug>        mark plan APPROVED_BY_MANAGER, commit, hand off to OpenCode
   room-ops.py block <id> <reason>   mark task BLOCKED, turn AUTO_MODE off, tell the user
   room-ops.py finalize              build the ship report (outbox, APPROVE_SHIP), phase AWAITING_SHIP_APPROVAL
+  room-ops.py progress <slug>       report new progress (plan, steps, tests, verify, fix, merge) read from the task file and git
   room-ops.py claude-result <role> <label> <model>   stdin: `claude -p --output-format json`; prints text, logs usage
 """
 import glob
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -238,6 +240,53 @@ def cmd_auto(args):
         "\nAUTO_MODE bật, Tech Lead sẽ lên plan."
 
 
+def cleanup_after_ship(lines, keep):
+    """Tidy up after a successful /ship. Returns a short summary. Never raises."""
+    out = []
+    try:
+        shipped = sorted([t for t in tasks(lines) if t["state"] == "shipped"], key=lambda t: int(t["id"][1:]))
+        # 1. per-task runtime state of everything already shipped
+        n_status = n_prog = 0
+        for t in shipped:
+            for f in glob.glob(f"{AG}/status/*{t['slug']}*.status"):
+                os.remove(f); n_status += 1
+            pf = f"{PROGRESS_DIR}/{t['slug']}.json"
+            if os.path.exists(pf):
+                os.remove(pf); n_prog += 1
+        if n_status or n_prog:
+            out.append(f"{n_status} status, {n_prog} progress")
+        # 2. verification screenshots -> archive/<stamp>/, keep the last 3 batches
+        shots = screenshots()
+        if shots:
+            dest = f"{AG}/screenshots/archive/{datetime.now():%Y%m%d-%H%M}"
+            for f in shots:
+                rel = os.path.relpath(f, f"{AG}/screenshots")
+                os.makedirs(os.path.dirname(os.path.join(dest, rel)), exist_ok=True)
+                shutil.move(f, os.path.join(dest, rel))
+            out.append(f"{len(shots)} ảnh → archive")
+        arch = sorted(glob.glob(f"{AG}/screenshots/archive/*/"))
+        for d in arch[:-3]:
+            shutil.rmtree(d, ignore_errors=True)
+        # 3. board: keep the newest `keep` shipped tasks, summarize the rest in the Activity Log
+        old = shipped[:-keep] if keep > 0 and len(shipped) > keep else []
+        if old:
+            for t in sorted(old, key=lambda t: t["i"], reverse=True):
+                del lines[t["i"]]
+            log_line(lines, f"Dọn board: gỡ {', '.join(t['id'] for t in old)} (đã ship).")
+            out.append(f"board gỡ {len(old)} task cũ")
+        # 4. message files older than 7 days
+        cutoff, n_old = time.time() - 7 * 86400, 0
+        for d in ("inbox/processed", "inbox/failed", "outbox/sent", "outbox/failed"):
+            for f in glob.glob(f"{AG}/{d}/*.json"):
+                if os.path.getmtime(f) < cutoff:
+                    os.remove(f); n_old += 1
+        if n_old:
+            out.append(f"{n_old} tin cũ")
+    except Exception as e:  # cleanup must never break a ship
+        out.append(f"lỗi khi dọn ({e})")
+    return ", ".join(out)
+
+
 def cmd_ship():
     lines = read_board()
     phase = get_phase(lines)
@@ -273,8 +322,13 @@ def cmd_ship():
                 set_state(lines, t["id"], "shipped")
         set_header(lines, "Current Phase", "SHIPPED")
         log_line(lines, f"/ship: merge {stg} vào {main} ({sha}).")
+        try:
+            keep = int(read_env().get("KEEP_SHIPPED", "5"))
+        except ValueError:
+            keep = 5
+        cleaned = cleanup_after_ship(lines, keep)
         write_board(lines)
-        return msg
+        return msg + (f"\n🧹 Đã dọn: {cleaned}." if cleaned else "")
     finally:
         git("checkout", stg)
 
@@ -383,13 +437,164 @@ def cmd_finalize():
     rc, log = git("log", "--oneline", f"{main}..{stg}")
     if rc == 0 and log:
         out += ["", f"Commit trên {stg} chưa có trong {main}:"] + [f"- {l}" for l in log.splitlines()[:15]]
-    shots = sorted(glob.glob(f"{AG}/screenshots/**/*.png", recursive=True), key=os.path.getmtime)[-6:]
+    shots = screenshots()[-6:]
     out += ["", "Bấm Ship hoặc gõ /ship để duyệt, /stop để giữ lại."]
     set_auto(lines, False, "AWAITING_SHIP_APPROVAL")
     log_line(lines, "FINALIZE: tất cả task done, chờ /ship.")
     write_board(lines)
     emit("manager", "\n".join(out), images=shots, requires="APPROVE_SHIP")
     return "finalize"
+
+
+
+# ---------- progress reports (derived from the task file, board and git; no AI) ----------
+PROGRESS_DIR = f"{AG}/progress"
+STEP_RE = re.compile(r"^- \[([ x])\] (\d+)\. (?:\[(dễ|vừa|khó)\]\s*)?(.*)$", re.M)
+IMG_EXT = ("*.png", "*.jpg", "*.jpeg", "*.webp")
+
+
+def plan_text(slug):
+    p = plan_path(slug)
+    if p and os.path.exists(p):
+        with open(p, encoding="utf8") as f:
+            return f.read()
+    if p:
+        rc, out = git("show", f"task/{slug}:{p}")
+        if rc == 0:
+            return out
+    return ""
+
+
+def section_lines(text, name):
+    out, on = [], False
+    for line in text.split("\n"):
+        if line.startswith("## "):
+            on = line.strip() == f"## {name}"
+            continue
+        if on and line.strip() and not line.lstrip().startswith("<!--"):
+            out.append(line.rstrip())
+    return out
+
+
+def short(s, n=100):
+    s = re.sub(r"\s+", " ", s).strip()
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def task_commits(slug, stg):
+    rc, out = git("log", "--reverse", "--format=%h\t%s", f"{stg}..task/{slug}")
+    if rc != 0:
+        return []
+    return [tuple(l.split("\t", 1)) for l in out.splitlines() if "\t" in l]
+
+
+def screenshots():
+    files = []
+    for ext in IMG_EXT:
+        files += glob.glob(f"{AG}/screenshots/**/{ext}", recursive=True)
+    return sorted({f for f in files if "/archive/" not in f}, key=os.path.getmtime)
+
+
+def cmd_progress(slug):
+    lines = read_board()
+    t = next((t for t in tasks(lines) if t["slug"] == slug), None)
+    if not t:
+        return 0
+    stg = read_env().get("STAGING_BRANCH", "staging")
+    text = plan_text(slug)
+    steps = [(int(m.group(2)), m.group(1) == "x", m.group(3) or "", m.group(4)) for m in STEP_RE.finditer(text)]
+    tests = dict(re.findall(r"^\s*- (T\d+): (PASS|FAIL|chưa viết)", "\n".join(section_lines(text, "Test status")), re.M))
+    verify = (re.findall(r"^VERIFY:\s*(PASS|FAIL)", text, re.M) or [""])[-1]
+    commits = task_commits(slug, stg)
+    dev_commits = [(h, sub) for h, sub in commits if not sub.startswith("plan")]
+    fix_commits = [(h, sub) for h, sub in commits if re.match(r"plan\(fix-\d+\)", sub)]
+    shots = screenshots()
+
+    os.makedirs(PROGRESS_DIR, exist_ok=True)
+    sf = f"{PROGRESS_DIR}/{slug}.json"
+    fresh = not os.path.exists(sf)
+    st = {"plan": False, "steps": [], "tests": {}, "verify": "", "fix": [], "commits": [], "shots": [], "done": False,
+          "t0": time.time()}
+    if not fresh:
+        with open(sf, encoding="utf8") as f:
+            st.update(json.load(f))
+
+    def save():
+        with open(sf, "w", encoding="utf8") as f:
+            json.dump(st, f, ensure_ascii=False)
+
+    if fresh and t["state"] == "in_progress":
+        # daemon restarted in the middle of a task: start from the current state instead of replaying history
+        st.update(plan=True, steps=[n for n, d, _, _ in steps if d], tests=tests, verify=verify,
+                  fix=[h for h, _ in fix_commits], commits=[h for h, _ in dev_commits],
+                  shots=shots)
+        save()
+        return 0
+
+    sent = 0
+    total = len([1 for _ in steps])
+
+    # A. plan summary (Tech Lead)
+    if not st["plan"] and steps and t["state"] in ("plan_ready", "in_progress", "done", "shipped"):
+        mode = (re.findall(r"^Verify mode:\s*(\w+)", text, re.M) or ["light"])[0]
+        n_tests = len(re.findall(r"^- \[[ x]\] T\d+\.", text, re.M))
+        body = [f"📋 Plan {t['id']} sẵn sàng · {total} bước · {n_tests} test · Verify {mode}"]
+        for n, _, label, txt in steps[:6]:
+            body.append(f"{n}. {('[' + label + '] ') if label else ''}{short(txt, 90)}")
+        if total > 6:
+            body.append(f"… và {total - 6} bước nữa")
+        emit("techlead", "\n".join(body))
+        st["plan"] = True
+        sent += 1
+
+    # B. Senior Dev: steps finished + commits
+    new_steps = [x for x in steps if x[1] and x[0] not in st["steps"]]
+    new_commits = [c for c in dev_commits if c[0] not in st["commits"]]
+    if new_steps or new_commits:
+        body = []
+        for n, _, label, txt in new_steps:
+            body.append(f"✅ Bước {n}/{total}{(' [' + label + ']') if label else ''}: {short(txt, 90)}")
+        for h, sub in new_commits[:3]:
+            body.append(f"• commit {h} {short(sub, 80)}")
+        if len(new_commits) > 3:
+            body.append(f"• … +{len(new_commits) - 3} commit")
+        emit("dev", "\n".join(body))
+        st["steps"] += [x[0] for x in new_steps]
+        st["commits"] += [c[0] for c in new_commits]
+        sent += 1
+
+    # C. Senior Dev: test results
+    changed = [(k, v) for k, v in tests.items() if v in ("PASS", "FAIL") and st["tests"].get(k) != v]
+    if changed:
+        emit("dev", "🧪 Test: " + " · ".join(f"{k} {v}" for k, v in changed))
+        st["tests"].update(dict(changed))
+        sent += 1
+
+    # D. Tech Lead: Verify result + new screenshots
+    if verify and verify != st["verify"]:
+        new_shots = [f for f in shots if f not in st["shots"] and os.path.getmtime(f) >= st["t0"] - 5]
+        body = [f"🔎 Verify {verify}"] + [short(l, 110) for l in section_lines(text, "Verify")[:6] if not l.startswith("VERIFY:")]
+        emit("techlead", "\n".join(body), images=new_shots[-3:])
+        st["verify"] = verify
+        st["shots"] = sorted(set(st["shots"]) | set(new_shots))
+        sent += 1
+
+    # E. Tech Lead: fix cycles
+    for h, sub in fix_commits:
+        if h not in st["fix"]:
+            emit("techlead", f"🔁 {short(sub, 110)} — Tech Lead thêm bước Fix và giao lại OpenCode")
+            st["fix"].append(h)
+            sent += 1
+
+    # F. Tech Lead: merged into staging
+    if t["state"] in ("done", "shipped") and not st["done"]:
+        rc, last = git("log", "-1", "--format=%h %s", stg)
+        emit("techlead", f"🎉 {t['id']} đã merge vào {stg}" + (f": {short(last, 100)}" if rc == 0 else ""))
+        st["done"] = True
+        sent += 1
+
+    save()
+    return sent
 
 
 def usage_rows():
@@ -410,11 +615,47 @@ def fmt_k(n):
     return f"{n / 1000:.1f}k" if n >= 1000 else str(n)
 
 
-def cmd_usage():
+def opencode_usage(days):
+    """Token/cost of OpenCode for this project from `opencode stats` (None if it cannot be read)."""
+    try:
+        p = subprocess.run(["opencode", "stats", "--days", str(days), "--models", "3", "--project", ""],
+                           capture_output=True, text=True, timeout=25)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    txt = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", p.stdout + p.stderr)
+
+    def val(label):
+        m = re.search(rf"│\s*{label}\s+(\S+)\s*│", txt)
+        return m.group(1) if m else None
+
+    if not val("Sessions"):
+        return None
+    out = [f"OpenCode ({'24 giờ qua' if days == 1 else f'{days} ngày qua'}, project này, gồm cả lần chạy tay): "
+           f"{val('Sessions')} phiên, {val('Messages')} tin · in {val('Input')} · cache đọc {val('Cache Read')} · "
+           f"out {val('Output')} · ~{val('Total Cost')}"]
+    model = None
+    for line in txt.split("\n"):
+        m = re.match(r"^│ (\S+/\S+)\s*│$", line)
+        if m:
+            model = {"name": m.group(1).split("/", 1)[1], "msgs": "?", "cost": "?"}
+            continue
+        if model:
+            mm = re.match(r"^│\s+Messages\s+(\S+)\s*│$", line)
+            if mm:
+                model["msgs"] = mm.group(1)
+            mc = re.match(r"^│\s+Cost\s+(\S+)\s*│$", line)
+            if mc:
+                out.append(f"  {model['name']}: {model['msgs']} tin, ~{mc.group(1)}")
+                model = None
+    return "\n".join(out)
+
+
+def cmd_usage(days=1):
+    days = max(1, min(days, 90))
     rows = usage_rows()
-    if not rows:
-        return "Chưa có số liệu (usage.log trống)."
-    today = datetime.now().strftime("%Y-%m-%d")
+    since = datetime.fromtimestamp(time.time() - (days - 1) * 86400).strftime("%Y-%m-%d")
+    rows = [r for r in rows if r.get("ts", "")[:10] >= since]
+    label = "Hôm nay" if days == 1 else f"{days} ngày qua"
     out = []
 
     def block(title, rs):
@@ -425,16 +666,24 @@ def cmd_usage():
                    f"cache đọc {fmt_k(sum(r.get('cache_read', 0) for r in rs))} · "
                    f"out {fmt_k(sum(r.get('output', 0) for r in rs))} · ~${sum(r.get('cost_usd', 0) for r in rs):.2f}")
 
-    block("Hôm nay", [r for r in rows if r.get("ts", "").startswith(today)])
-    for role in ("manager", "techlead"):
-        block(f"  {role}", [r for r in rows if r.get("role") == role and r.get("ts", "").startswith(today)])
+    if rows:
+        out.append(f"Claude — {label}")
+        block("  tổng", rows)
+        for role in ("manager", "techlead"):
+            block(f"  {role}", [r for r in rows if r.get("role") == role])
+        out.append("")
+        out.append("5 lần gọi Claude gần nhất:")
+        for r in rows[-5:]:
+            out.append(f"- {r.get('ts', '')[5:16]} {r.get('role')} {r.get('label')}: {r.get('turns')} lượt, "
+                       f"~${r.get('cost_usd', 0):.2f}{'' if r.get('ok', True) else ' (LỖI)'}")
+    else:
+        out.append(f"Claude — {label}: chưa có lần gọi nào được ghi (usage.log).")
+    oc = opencode_usage(days)
     out.append("")
-    out.append("5 lần gọi gần nhất:")
-    for r in rows[-5:]:
-        out.append(f"- {r.get('ts', '')[11:16]} {r.get('role')} {r.get('label')}: {r.get('turns')} lượt, "
-                   f"~${r.get('cost_usd', 0):.2f}{'' if r.get('ok', True) else ' (LỖI)'}")
+    out.append(oc if oc else "OpenCode: không đọc được `opencode stats` (opencode có trong PATH của daemon không?).")
     out.append("")
-    out.append("(Chi phí quy theo giá list API, chỉ để so sánh giữa các bước; quota gói đăng ký tính khác.)")
+    out.append("(Chi phí quy theo giá list API, chỉ để so sánh giữa các bước; quota gói đăng ký tính khác. "
+               "Gõ /usage 7 để xem 7 ngày.)")
     return "\n".join(out)
 
 
@@ -479,7 +728,7 @@ def cmd_inbox(path):
     elif cmd == "/ship":
         reply = cmd_ship()
     elif cmd == "/usage":
-        reply = cmd_usage()
+        reply = cmd_usage(int(args.split()[0]) if args.split() and args.split()[0].isdigit() else 1)
     elif cmd == "/auto":
         if e.get("AUTO_SPLIT") == "claude":
             return 3
@@ -507,10 +756,15 @@ def main(argv):
         return 0
     if c == "claude-result":
         return cmd_claude_result(*a)
-    simple = {"status": status_text, "stop": cmd_stop, "resume": cmd_resume, "usage": cmd_usage,
-              "finalize": cmd_finalize}
+    if c == "usage":
+        print(cmd_usage(int(a[0]) if a and a[0].isdigit() else 1))
+        return 0
+    simple = {"status": status_text, "stop": cmd_stop, "resume": cmd_resume, "finalize": cmd_finalize}
     if c in simple:
         print(simple[c]())
+        return 0
+    if c == "progress":
+        print(cmd_progress(a[0]))
         return 0
     if c == "plan-path":
         print(plan_path(a[0]))
