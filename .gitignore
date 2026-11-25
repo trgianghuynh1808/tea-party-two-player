@@ -30,3 +30,4 @@ server/data
 .agents/room.env
 .agents/watcher.pid
 .agents/progress/
+.agents/bin/

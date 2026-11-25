@@ -28,7 +28,7 @@ LOGDIR="$AG/logs"
 LOCK="$AG/manager.lock"
 SIG="$AG/manager.sig"
 ACTIVITY="$LOGDIR/activity.log"   # log gộp, có màu và giờ — cửa sổ dashboard của agent-room đọc file này
-OPS="scripts/room-ops.py"
+OPS="$AG/bin/room-ops.py"   # bản sao cố định (git-ignore): cây làm việc đổi theo nhánh nên scripts/room-ops.py có thể không tồn tại ở nhánh task cũ
 POLL="${POLL:-3}"
 CLAUDE_FLAGS="${CLAUDE_FLAGS:---dangerously-skip-permissions}"
 MANAGER_PROMPT="${MANAGER_PROMPT:-$AG/MANAGER.md}"
@@ -36,7 +36,8 @@ MANAGER_PROMPT="${MANAGER_PROMPT:-$AG/MANAGER.md}"
 
 [[ -f "$AG/room.env" ]] || { echo "⛔ Không thấy $AG/room.env — chạy: scripts/agent-room.sh init --topic <ID> --port <PORT>"; exit 1; }
 [[ -f "$MANAGER_PROMPT" ]] || { echo "⛔ Không thấy prompt Manager ($MANAGER_PROMPT)"; exit 1; }
-[[ -f "$OPS" ]] || { echo "⛔ Không thấy $OPS — chạy lại install.sh"; exit 1; }
+[[ -f scripts/room-ops.py ]] || { echo "⛔ Không thấy scripts/room-ops.py — chạy lại install.sh"; exit 1; }
+mkdir -p "$AG/bin" && cp scripts/room-ops.py "$OPS"
 command -v claude >/dev/null || { echo "⛔ Chưa cài claude CLI"; exit 1; }
 command -v python3 >/dev/null || { echo "⛔ Chưa cài python3"; exit 1; }
 mkdir -p "$INBOX/processed" "$INBOX/failed" "$OUTBOX" "$LOGDIR" "$AG/screenshots" "$AG/tasks" "$AG/status"
@@ -91,6 +92,11 @@ run_claude() { # vai(manager|techlead) prompt [nhãn]   (CUR_SLUG=<slug> để b
   local role="$1" label="${3:-$1}" col model turns raw text crc prc rc
   col="$(c_role "$role")"
   if [[ "$role" == techlead ]]; then model="$MODEL_TECHLEAD"; turns="$MAX_TURNS_TECHLEAD"; else model="$MODEL_MANAGER"; turns="$MAX_TURNS_MANAGER"; fi
+  if [[ -z "${2//[[:space:]]/}" ]]; then
+    log "⛔ ${role}: prompt rỗng (lỗi trong manager-loop.sh), không gọi claude: ${label}"
+    say_user "⛔ Lỗi nội bộ: prompt của ${role} rỗng (${label}). Báo người bảo trì kit." manager
+    return 1
+  fi
   local args=(-p "$2" --output-format json --max-turns "$turns")
   [[ -n "$model" ]] && args+=(--model "$model")
 
@@ -134,7 +140,7 @@ techlead_prompt() { # phase id slug [opencode-status plan-file]
   local common="Bạn là Tech Lead (Claude Code) trong phòng tự động (AUTO_MODE=true). Làm theo CLAUDE.md, mục Autopilot/AUTO_MODE.
 Nhánh nền là '$STAGING_BRANCH' (không phải $MAIN_BRANCH). Task: $2, slug: $3 (xem tiêu đề trên .agents/board.md).
 Không hỏi người dùng, không dừng chờ input. Gặp việc không làm được: đặt task thành [BLOCKED] trên board.md, ghi lý do vào Activity Log, rồi dừng.
-Daemon tự báo tiến độ cho user từ file task và git (plan, bước xong, test, Verify, vòng sửa, merge), nên bạn KHÔNG cần viết tin: chỉ cần giữ file task đúng mẫu (tick checkbox từng bước ngay khi xong, cập nhật "Test status" dạng "T1: PASS|FAIL", viết mục "## Verify" và dòng cuối "VERIFY: PASS|FAIL") và lưu ảnh vào .agents/screenshots/. Chỉ ghi file JSON vào .agents/outbox/ (ghi ra .tmp rồi đổi tên thành <unix-ts>-techlead-<n>.json) khi cần user quyết định điều gì: {\"from\": \"techlead\", \"text\": \"<tối đa 4 dòng tiếng Việt>\"}. Không đưa secret vào tin."
+Daemon tự báo tiến độ cho user từ file task và git (plan, bước xong, test, Verify, vòng sửa, merge), nên bạn KHÔNG cần viết tin: chỉ cần giữ file task đúng mẫu (tick checkbox từng bước ngay khi xong, cập nhật mục Test status dạng T1: PASS|FAIL, viết mục ## Verify và dòng cuối VERIFY: PASS|FAIL) và lưu ảnh vào .agents/screenshots/. Chỉ ghi file JSON vào .agents/outbox/ (ghi ra .tmp rồi đổi tên thành <unix-ts>-techlead-<n>.json) khi cần user quyết định điều gì: {\"from\": \"techlead\", \"text\": \"<tối đa 4 dòng tiếng Việt>\"}. Không đưa secret vào tin."
   case "$1" in
     plan) printf '%s\n\nVIỆC CỦA BẠN: chỉ LÊN PLAN. Checkout %s, tạo nhánh task/%s, viết plan vào .agents/tasks/<ngày>-%s.md theo CLAUDE.md, commit file plan. KHÔNG chạy scripts/handoff.sh (daemon kiểm tra plan rồi mới giao). Cuối cùng đổi task %s trên board.md từ [pending] sang [plan_ready].\n' "$common" "$STAGING_BRANCH" "$3" "$3" "$2" ;;
     finish) printf '%s\n\nVIỆC CỦA BẠN: plan đã được duyệt và đã giao cho OpenCode. Daemon đã chờ giúp bạn: OpenCode báo trạng thái "%s" cho file plan %s. TUYỆT ĐỐI không chạy scripts/wait-task.sh. Làm tiếp từ bước Verify của Autopilot (nếu trạng thái done) hoặc Fix cycle (nếu stuck), tối đa %s vòng sửa.\nNếu cần Fix cycle: ghi bước Fix vào file plan, commit plan(fix-n), chạy scripts/handoff.sh <file plan> rồi KẾT THÚC phiên ngay: daemon sẽ chờ OpenCode và gọi lại bạn với ngữ cảnh mới (mọi thông tin phải nằm trong file plan).\nLưu ảnh verify vào .agents/screenshots/. Khi PASS: merge --squash nhánh task/%s vào %s (KHÔNG push, KHÔNG merge vào %s), xóa nhánh task, đổi task %s thành [done] và [x] trên board.md, ghi Activity Log. Nếu hết vòng sửa mà chưa đạt: [BLOCKED] + lý do.\n' "$common" "${4:-done}" "${5:-?}" "${MAX_FIX_CYCLES:-2}" "$3" "$STAGING_BRANCH" "$MAIN_BRANCH" "$2" ;;
