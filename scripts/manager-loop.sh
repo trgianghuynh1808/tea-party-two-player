@@ -94,14 +94,20 @@ run_claude() { # vai(manager|techlead) prompt [nhãn]   (CUR_SLUG=<slug> để b
   if [[ "$role" == techlead ]]; then model="$MODEL_TECHLEAD"; turns="$MAX_TURNS_TECHLEAD"; else model="$MODEL_MANAGER"; turns="$MAX_TURNS_MANAGER"; fi
   if [[ -z "${2//[[:space:]]/}" ]]; then
     log "⛔ ${role}: prompt rỗng (lỗi trong manager-loop.sh), không gọi claude: ${label}"
-    say_user "⛔ Lỗi nội bộ: prompt của ${role} rỗng (${label}). Báo người bảo trì kit." manager
+    say_user "Ối, mình gặp lỗi nội bộ 😵 prompt của **${role}** bị rỗng (${label}). Bạn báo người bảo trì kit giúp mình nhé." manager
     return 1
   fi
   local args=(-p "$2" --output-format json --max-turns "$turns")
   [[ -n "$model" ]] && args+=(--model "$model")
 
   log "▶ ${role}: ${label}${model:+ [$model]}"
-  [[ "$role" == techlead ]] && say_user "▶ $label" techlead
+  if [[ "$role" == techlead ]]; then
+    case "$label" in
+      *"lên plan"*) say_user "Mình bắt đầu **lên plan** cho **${label%% *}** nha 📝" techlead ;;
+      *verify*)     say_user "Dev báo xong rồi, mình qua **verify + review** **${label%% *}** đây 🔎" techlead ;;
+      *)            say_user "Mình bắt đầu: ${label} 🛠" techlead ;;
+    esac
+  fi
   printf '\n━━ %s ━━ %s\n' "$(date '+%F %T')" "$label" >> "$LOGDIR/$role.log"
 
   if [[ "$role" == techlead && -n "${CUR_SLUG:-}" ]]; then
@@ -127,7 +133,7 @@ run_claude() { # vai(manager|techlead) prompt [nhãn]   (CUR_SLUG=<slug> để b
     log "✔ ${role}: ${label}"
   else
     log "⚠ ${role}: ${label} thoát với mã $rc"
-    [[ "$role" == techlead ]] && say_user "⚠ $label thất bại (mã $rc). Xem .agents/logs/techlead.log" techlead
+    [[ "$role" == techlead ]] && say_user "Ối, lần chạy **$label** bị lỗi (mã $rc) 😢 Bạn xem \`.agents/logs/techlead.log\` giúp mình nha." techlead
   fi
   return $rc
 }
@@ -140,7 +146,7 @@ techlead_prompt() { # phase id slug [opencode-status plan-file]
   local common="Bạn là Tech Lead (Claude Code) trong phòng tự động (AUTO_MODE=true). Làm theo CLAUDE.md, mục Autopilot/AUTO_MODE.
 Nhánh nền là '$STAGING_BRANCH' (không phải $MAIN_BRANCH). Task: $2, slug: $3 (xem tiêu đề trên .agents/board.md).
 Không hỏi người dùng, không dừng chờ input. Gặp việc không làm được: đặt task thành [BLOCKED] trên board.md, ghi lý do vào Activity Log, rồi dừng.
-Daemon tự báo tiến độ cho user từ file task và git (plan, bước xong, test, Verify, vòng sửa, merge), nên bạn KHÔNG cần viết tin: chỉ cần giữ file task đúng mẫu (tick checkbox từng bước ngay khi xong, cập nhật mục Test status dạng T1: PASS|FAIL, viết mục ## Verify và dòng cuối VERIFY: PASS|FAIL) và lưu ảnh vào .agents/screenshots/. Chỉ ghi file JSON vào .agents/outbox/ (ghi ra .tmp rồi đổi tên thành <unix-ts>-techlead-<n>.json) khi cần user quyết định điều gì: {\"from\": \"techlead\", \"text\": \"<tối đa 4 dòng tiếng Việt>\"}. Không đưa secret vào tin."
+Daemon tự báo tiến độ cho user từ file task và git (plan, bước xong, test, Verify, vòng sửa, merge), nên bạn KHÔNG cần viết tin: chỉ cần giữ file task đúng mẫu (tick checkbox từng bước ngay khi xong, cập nhật mục Test status dạng T1: PASS|FAIL, viết mục ## Verify và dòng cuối VERIFY: PASS|FAIL) và lưu ảnh vào .agents/screenshots/. Chỉ ghi file JSON vào .agents/outbox/ (ghi ra .tmp rồi đổi tên thành <unix-ts>-techlead-<n>.json) khi cần user quyết định điều gì: {\"from\": \"techlead\", \"text\": \"...\"}. Giọng văn: tiếng Việt thân thiện, thoải mái, xưng mình và gọi bạn, có thể dùng emoji vừa phải. Trình bày dễ đọc: tách mục bằng dòng trống, dùng **chữ đậm** cho tiêu đề, gạch đầu dòng - cho danh sách, dấu ngược cho tên file hoặc lệnh. Ngắn gọn, tối đa khoảng 8 dòng. Không đưa secret vào tin."
   case "$1" in
     plan) printf '%s\n\nVIỆC CỦA BẠN: chỉ LÊN PLAN. Checkout %s, tạo nhánh task/%s, viết plan vào .agents/tasks/<ngày>-%s.md theo CLAUDE.md, commit file plan. KHÔNG chạy scripts/handoff.sh (daemon kiểm tra plan rồi mới giao). Cuối cùng đổi task %s trên board.md từ [pending] sang [plan_ready].\n' "$common" "$STAGING_BRANCH" "$3" "$3" "$2" ;;
     finish) printf '%s\n\nVIỆC CỦA BẠN: plan đã được duyệt và đã giao cho OpenCode. Daemon đã chờ giúp bạn: OpenCode báo trạng thái "%s" cho file plan %s. TUYỆT ĐỐI không chạy scripts/wait-task.sh. Làm tiếp từ bước Verify của Autopilot (nếu trạng thái done) hoặc Fix cycle (nếu stuck), tối đa %s vòng sửa.\nNếu cần Fix cycle: ghi bước Fix vào file plan, commit plan(fix-n), chạy scripts/handoff.sh <file plan> rồi KẾT THÚC phiên ngay: daemon sẽ chờ OpenCode và gọi lại bạn với ngữ cảnh mới (mọi thông tin phải nằm trong file plan).\nLưu ảnh verify vào .agents/screenshots/. Khi PASS: merge --squash nhánh task/%s vào %s (KHÔNG push, KHÔNG merge vào %s), xóa nhánh task, đổi task %s thành [done] và [x] trên board.md, ghi Activity Log. Nếu hết vòng sửa mà chưa đạt: [BLOCKED] + lý do.\n' "$common" "${4:-done}" "${5:-?}" "${MAX_FIX_CYCLES:-2}" "$3" "$STAGING_BRANCH" "$MAIN_BRANCH" "$2" ;;
@@ -156,7 +162,7 @@ guard() { # key
   if (( n > 2 )); then
     set_env_key AUTO_MODE false
     log "⛔ $1 không tiến triển sau 2 lần — tắt AUTO_MODE"
-    say_user "⛔ Phòng bị kẹt ở '$1' (đã thử 2 lần, trạng thái không đổi). Đã tắt AUTO_MODE. Xem .agents/logs/. Gõ /resume để chạy lại."
+    say_user "Mình bị kẹt ở \`$1\` rồi 😵 đã thử 2 lần mà không nhúc nhích được.\n\nMình tắt chế độ tự động để khỏi tốn quota. Bạn xem \`.agents/logs/\` giúp mình, rồi gõ \`/resume\` để thử lại nhé."
     rm -f "$SIG"
     return 1
   fi
@@ -173,7 +179,7 @@ handle_inbox() {
       0) mv "$f" "$INBOX/processed/"; log "⚙ ${summary:-lệnh} (không dùng Claude)" ;;
       3) claude_files+=("$f") ;;
       *) mv "$f" "$INBOX/failed/"; log "⚠ lỗi khi xử lý $(basename "$f") (xem ops.log)"
-         say_user "⚠️ Lỗi khi xử lý tin nhắn (xem .agents/logs/ops.log). Tin đã chuyển sang inbox/failed/." ;;
+         say_user "Ối, mình xử lý tin nhắn của bạn bị lỗi 😢 Xem \`.agents/logs/ops.log\` giúp mình nha (tin đã chuyển sang \`inbox/failed/\`)." ;;
     esac
   done
   if (( ${#claude_files[@]} )); then
@@ -182,7 +188,7 @@ handle_inbox() {
       mv "${claude_files[@]}" "$INBOX/processed/"
     else
       mv "${claude_files[@]}" "$INBOX/failed/"
-      say_user "⚠️ Manager lỗi khi xử lý tin nhắn (xem .agents/logs/manager.log). Tin đã chuyển sang inbox/failed/."
+      say_user "Ối, Manager xử lý tin nhắn bị lỗi 😢 Xem \`.agents/logs/manager.log\` giúp mình nha (tin đã chuyển sang \`inbox/failed/\`)."
     fi
   fi
   return 0
@@ -198,7 +204,7 @@ tick_auto() {
     if has_done; then
       log "⚙ chốt batch, báo cáo xin duyệt ship"
       python3 "$OPS" finalize >/dev/null 2>>"$LOGDIR/ops.log" || {
-        set_env_key AUTO_MODE false; say_user "⛔ Không tạo được báo cáo chốt batch (xem ops.log). Đã tắt AUTO_MODE."; }
+        set_env_key AUTO_MODE false; say_user "Mình không tạo được báo cáo chốt batch 😢 Xem \`.agents/logs/ops.log\` nhé. Mình tắt chế độ tự động rồi."; }
       return 0
     fi
     return 1
@@ -209,7 +215,7 @@ tick_auto() {
       # Tiền đề: watcher OpenCode phải sống trước khi bắt đầu task (không thì hand-off sẽ treo ở 'queued')
       if ! watcher_alive; then
         set_env_key AUTO_MODE false
-        say_user "⛔ Senior Dev watcher (OpenCode) không chạy nên chưa bắt đầu $id. Đã tắt AUTO_MODE. Chạy scripts/agent-room.sh start rồi /resume. Dùng /health để kiểm tra."
+        say_user "Senior Dev (OpenCode) chưa online nên mình chưa dám bắt đầu **$id** 😴\n\n**Cách xử lý**\n- Bật lại: \`scripts/agent-room.sh start\`\n- Kiểm tra: \`/health\`\n- Rồi gõ \`/resume\` để mình chạy tiếp\n\nMình đã tắt chế độ tự động trong lúc chờ."
         log "⛔ preflight: watcher không chạy — tắt AUTO_MODE"
         return 0
       fi
@@ -221,7 +227,6 @@ tick_auto() {
       log "⚙ $id kiểm tra plan: $verdict"
       case "$verdict" in
         OK) python3 "$OPS" approve "$slug" >>"$LOGDIR/ops.log" 2>&1 \
-              && say_user "✅ $id: plan hợp lệ, đã tự duyệt và giao OpenCode." \
               || log "⚠ $id: duyệt/hand-off lỗi (task đã được đánh dấu BLOCKED, xem ops.log)" ;;
         BLOCK*) python3 "$OPS" block "$id" "${verdict#BLOCK: }" >/dev/null 2>>"$LOGDIR/ops.log" ;;
         *) run_claude manager "$(manager_prompt APPROVE_PLAN "Task: $id (slug: $slug)"$'\n'"Kiểm tra tự động nghi ngờ: ${verdict#REVIEW: }")" "$id duyệt plan" ;;
@@ -238,9 +243,9 @@ tick_auto() {
           if [[ "$st_state" == queued ]] && (( $(date +%s) - ${st_ts:-0} > 180 )); then
             set_env_key AUTO_MODE false
             if watcher_alive; then
-              say_user "⛔ $id 'queued' hơn 3 phút dù watcher đang chạy: job có thể đã bị bỏ qua (xem pane watcher/OpenCode, nhánh git hiện tại). Đã tắt AUTO_MODE."
+              say_user "**$id** đã chờ OpenCode hơn 3 phút mà vẫn chưa được nhận 🤔 Watcher vẫn đang chạy nên có thể job bị bỏ qua. Bạn xem pane watcher và nhánh git hiện tại giúp mình nha. Mình tắt chế độ tự động rồi."
             else
-              say_user "⛔ $id 'queued' hơn 3 phút và watcher OpenCode không chạy. Đã tắt AUTO_MODE. Chạy scripts/agent-room.sh start rồi /resume."
+              say_user "**$id** đã chờ hơn 3 phút mà watcher OpenCode không chạy 😴 Bạn chạy \`scripts/agent-room.sh start\` rồi gõ \`/resume\` giúp mình nhé. Mình tắt chế độ tự động rồi."
             fi
             log "⛔ $id queued quá lâu — tắt AUTO_MODE"
           fi
@@ -250,7 +255,7 @@ tick_auto() {
       guard "$id:$st_state:$fixes" && CUR_SLUG="$slug" run_claude techlead "$(techlead_prompt finish "$id" "$slug" "$st_state" "$plan")" "$id verify, review, merge" ;;
     BLOCKED)
       set_env_key AUTO_MODE false
-      say_user "⛔ Task $id ($slug) đang BLOCKED. Đã tắt AUTO_MODE. Xem board và .agents/logs/, rồi /resume hoặc /stop."
+      say_user "**$id** đang bị chặn 🚧 (\`$slug\`)\nMình tắt chế độ tự động rồi. Bạn xem board và \`.agents/logs/\`, sau đó gõ \`/resume\` hoặc \`/stop\` nhé."
       log "$id BLOCKED — tắt AUTO_MODE" ;;
     *) log "⚠ Trạng thái lạ '$state' ở $id — bỏ qua"; set_env_key AUTO_MODE false ;;
   esac

@@ -11,7 +11,9 @@ Do only the mode you are given, then stop. Be brief: every call costs quota. Do 
    `.agents/outbox/`, `.agents/tasks/`, and run git/scripts as stated below.
 2. Everything you tell the user goes to `.agents/outbox/<unix-ts>-<n>.json`:
    `{"text": "...", "images": ["relative/path.png"]}` (`images` optional). Write a `.tmp` file first, then rename it.
-   Reply in Vietnamese, short.
+   Reply in Vietnamese, friendly and relaxed (call yourself "mình" and the user "bạn", a light emoji is fine), and easy to read:
+   separate sections with blank lines, put titles in **bold**, use `- ` bullets for lists (one item per line, never a run-on sentence),
+   and backticks around file names and commands. Keep it short (about 8 lines).
 3. Never edit `.agents/room.env` except the `AUTO_MODE` line.
 4. Task line format on `board.md` (keep it exactly): ``- [ ] `T01` [pending] Title (slug: `task-01-title`)``.
    States: `pending` → `plan_ready` → `in_progress` → `done` (`[x]`) → `shipped`; or `BLOCKED`.

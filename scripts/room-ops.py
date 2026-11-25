@@ -5,6 +5,7 @@ Used by scripts/manager-loop.sh so the Manager only needs Claude for judgement c
 
   room-ops.py inbox <file>          handle one inbox message (exit 0 handled, 3 = needs Claude, other = error)
   room-ops.py say <role> <text>     write a message to .agents/outbox
+  room-ops.py say-steps <role> <head> <step line>...   same, with the plan steps listed under <head>
   room-ops.py status | stop | resume | usage [days]
   room-ops.py plan-path <slug>      path of the newest plan file for a task slug
   room-ops.py check-plan <slug>     prints OK | BLOCK: <why> | REVIEW: <why>
@@ -32,8 +33,18 @@ OUTBOX = f"{AG}/outbox"
 USAGE_LOG = f"{AG}/logs/usage.log"
 TASK_RE = re.compile(r"^- \[( |x)\] `(T\d+)` \[(\w+)\] (.*?) \(slug: `([^`]+)`\)\s*$")
 
-HELP = ("Mình nhận các lệnh: /auto <checklist>, /status, /health, /usage, /stop, /resume, /ship. "
-        "Gõ / để xem menu. Tin thường không được xử lý để tiết kiệm quota.")
+HELP = ("Mình chỉ hiểu mấy lệnh này thôi nha 😅\n"
+        "- `/auto <việc cần làm>` · mỗi dòng một việc\n"
+        "- `/status` · xem tiến độ\n"
+        "- `/health` · kiểm tra các agent\n"
+        "- `/usage` · xem mức dùng token\n"
+        "- `/stop` · dừng lại\n"
+        "- `/resume` · chạy tiếp\n"
+        "- `/ship` · đưa lên main\n"
+        "Gõ `/` để xem menu. Tin thường mình không đọc để tiết kiệm quota nhé 🌱")
+
+STATE_VI = {"pending": "chờ lên plan", "planning": "đang lên plan", "plan_ready": "plan xong, chờ duyệt",
+            "in_progress": "OpenCode đang code", "done": "xong, chờ ship", "shipped": "đã ship", "BLOCKED": "bị chặn"}
 
 
 # ---------- room.env ----------
@@ -155,7 +166,14 @@ def slugify(s):
 
 
 ICON = {"pending": "⏳", "planning": "📝", "plan_ready": "📋", "in_progress": "🔧", "done": "✅",
-        "shipped": "🚀", "BLOCKED": "⛔"}
+        "shipped": "🚀", "BLOCKED": "🚧"}
+
+
+def one_line_status():
+    lines = read_board()
+    ts = tasks(lines)
+    finished = [t for t in ts if t["state"] in ("done", "shipped")]
+    return f"Hiện tại: **{get_phase(lines)}** · {len(finished)}/{len(ts)} việc xong"
 
 
 def status_text():
@@ -163,12 +181,15 @@ def status_text():
     ts = tasks(lines)
     e = read_env()
     finished = [t for t in ts if t["state"] in ("done", "shipped")]
-    out = [f"Phase {get_phase(lines)} · AUTO_MODE {'ON' if e.get('AUTO_MODE') == 'true' else 'OFF'} · "
-           f"{len(finished)}/{len(ts)} task xong"]
-    for t in ts:
-        out.append(f"{ICON.get(t['state'], '•')} {t['id']} [{t['state']}] {t['title']}")
-    if not ts:
-        out.append("Board trống. Gõ /auto <checklist> để bắt đầu.")
+    out = ["📋 **Tình hình dự án**",
+           f"- Giai đoạn: **{get_phase(lines)}** · chế độ tự động: **{'BẬT' if e.get('AUTO_MODE') == 'true' else 'TẮT'}**",
+           f"- Tiến độ: **{len(finished)}/{len(ts)}** việc xong"]
+    if ts:
+        out += ["", "**Danh sách việc**"]
+        for t in ts:
+            out.append(f"{ICON.get(t['state'], '•')} **{t['id']}** · {short(t['title'], 80)} ({STATE_VI.get(t['state'], t['state'])})")
+    else:
+        out += ["", "Board đang trống nè 🍃 Gõ `/auto <việc cần làm>` để mình bắt đầu nhé."]
     return "\n".join(out)
 
 
@@ -177,17 +198,17 @@ def cmd_stop():
     set_auto(lines, False, "IDLE")
     log_line(lines, "/stop: AUTO_MODE tắt, phase IDLE.")
     write_board(lines)
-    return "⏹ Đã tắt AUTO_MODE (phase IDLE). Task đang chạy dở sẽ không được tiếp tục cho tới khi /resume."
+    return "Okê, mình dừng lại đây ⏹\nChế độ tự động đã tắt. Việc đang dở sẽ nằm yên cho tới khi bạn gõ `/resume` nha."
 
 
 def cmd_resume():
     lines = read_board()
     e = read_env()
     if e.get("AUTO_MODE") == "true":
-        return "AUTO_MODE đang bật rồi."
+        return "Mình đang chạy sẵn rồi mà 😄 Bạn gõ `/status` để xem tiến độ nhé."
     ts = [t for t in tasks(lines) if not t["done"]]
     if not ts:
-        return "Không có task nào chưa xong để chạy tiếp."
+        return "Không còn việc nào dang dở để chạy tiếp đâu 🎉"
     for t in ts:
         if t["state"] == "BLOCKED":
             set_state(lines, t["id"], "pending")
@@ -198,7 +219,7 @@ def cmd_resume():
         os.remove(f"{AG}/manager.sig")
     except FileNotFoundError:
         pass
-    return f"▶ Chạy tiếp: còn {len(ts)} task chưa xong."
+    return f"Tiếp tục thôi! ▶️ Còn **{len(ts)} việc** chưa xong, mình chạy lại ngay nè."
 
 
 def clean_item(line):
@@ -212,14 +233,14 @@ def cmd_auto(args):
     items = [clean_item(l) for l in args.splitlines()]
     items = [i for i in items if i]
     if not items:
-        return "Cách dùng: /auto <checklist>, mỗi dòng một task."
+        return "Bạn cho mình biết việc cần làm nhé 📝\nCách dùng: `/auto <việc cần làm>`, mỗi dòng một việc."
     e = read_env()
     main, stg = e.get("MAIN_BRANCH", "main"), e.get("STAGING_BRANCH", "staging")
     rc, _ = git("show-ref", "--verify", "--quiet", f"refs/heads/{stg}")
     if rc != 0:
         rc, out = git("branch", stg, main)
         if rc != 0:
-            return f"⛔ Không tạo được nhánh {stg} từ {main}: {out}"
+            return f"Ối, mình không tạo được nhánh `{stg}` từ `{main}` 😢\n{out}"
     lines = read_board()
     nums = [int(t["id"][1:]) for t in tasks(lines)]
     n = max(nums) + 1 if nums else 1
@@ -236,8 +257,9 @@ def cmd_auto(args):
     set_auto(lines, True, "RUNNING")
     log_line(lines, f"/auto: thêm {len(new)} task, AUTO_MODE bật.")
     write_board(lines)
-    return "🚀 Đã nhận " + str(len(new)) + " task:\n" + "\n".join(f"{i + 1}. {t}" for i, t in enumerate(items)) + \
-        "\nAUTO_MODE bật, Tech Lead sẽ lên plan."
+    return ("Nhận rồi nha! 🚀 Mình ghi **" + str(len(new)) + " việc** vào board:\n\n"
+            + "\n".join(f"{i + 1}. {short(t, 110)}" for i, t in enumerate(items))
+            + "\n\nĐã bật chế độ tự động, Tech Lead sẽ lên plan ngay đây ✨")
 
 
 def cleanup_after_ship(lines, keep):
@@ -256,7 +278,9 @@ def cleanup_after_ship(lines, keep):
         if n_status or n_prog:
             out.append(f"{n_status} status, {n_prog} progress")
         # 2. verification screenshots -> archive/<stamp>/, keep the last 3 batches
-        shots = screenshots()
+        # never move files git tracks: that would leave deleted tracked files and a dirty tree (hand-off needs a clean one)
+        tracked = set(git("ls-files", f"{AG}/screenshots")[1].splitlines())
+        shots = [f for f in screenshots() if f not in tracked]
         if shots:
             dest = f"{AG}/screenshots/archive/{datetime.now():%Y%m%d-%H%M}"
             for f in shots:
@@ -291,31 +315,33 @@ def cmd_ship():
     lines = read_board()
     phase = get_phase(lines)
     if phase != "AWAITING_SHIP_APPROVAL":
-        return f"Chưa có gì chờ duyệt ship (phase {phase})."
+        return f"Chưa có gì chờ duyệt ship hết (đang ở giai đoạn **{phase}**) 🙈"
     e = read_env()
     main, stg = e.get("MAIN_BRANCH", "main"), e.get("STAGING_BRANCH", "staging")
     rc, out = git("status", "--porcelain")
     if out:
-        return "⛔ Chưa ship: cây git còn file chưa commit:\n" + "\n".join(out.splitlines()[:8])
+        return ("Khoan đã, mình chưa ship được vì cây git còn file chưa commit ⚠️\n"
+                + "\n".join(f"- `{l[3:].strip()}`" for l in out.splitlines()[:8])
+                + "\nBạn commit hoặc bỏ mấy file này rồi gõ `/ship` lại nhé.")
     has_remote = bool(git("remote")[1])
     rc, out = git("checkout", main)
     if rc != 0:
-        return f"⛔ Không checkout được {main}: {out}"
+        return f"Ối, mình không chuyển sang được nhánh `{main}` 😢\n{out[:300]}"
     try:
         if has_remote:
             rc, out = git("pull", "--ff-only")
             if rc != 0:
-                return f"⛔ Chưa ship: git pull --ff-only lỗi: {out[:400]}"
+                return f"Mình chưa ship được: `git pull --ff-only` báo lỗi 😢\n{out[:400]}\nBạn xem giúp mình nhé, mình không tự ép đâu."
         n = len([t for t in tasks(lines) if t["state"] == "done"])
         rc, out = git("merge", "--no-ff", stg, "-m", f"Merge {stg} into {main} ({n} task)")
         if rc != 0:
             git("merge", "--abort")
-            return f"⛔ Merge lỗi (đã huỷ merge, không đổi gì): {out[:400]}"
+            return f"Merge bị lỗi nên mình đã huỷ luôn, chưa đổi gì hết nha 🙏\n{out[:400]}"
         sha = git("rev-parse", "--short", "HEAD")[1]
-        msg = f"🚀 Đã merge {stg} vào {main} ({sha})."
+        msg = f"Ship xong rồi nè! 🚀 Mình đã merge `{stg}` vào `{main}` (`{sha}`)."
         if has_remote:
             rc, out = git("push", "origin", main)
-            msg += " Đã push." if rc == 0 else f"\n⚠️ Merge xong nhưng push lỗi: {out[:300]}"
+            msg += " Đã push lên remote luôn." if rc == 0 else f"\n⚠️ Merge xong rồi nhưng push bị lỗi: {out[:300]}"
         lines = read_board()
         for t in tasks(lines):
             if t["state"] == "done":
@@ -328,7 +354,7 @@ def cmd_ship():
             keep = 5
         cleaned = cleanup_after_ship(lines, keep)
         write_board(lines)
-        return msg + (f"\n🧹 Đã dọn: {cleaned}." if cleaned else "")
+        return msg + (f"\n\n🧹 **Dọn dẹp xong:** {cleaned}." if cleaned else "")
     finally:
         git("checkout", stg)
 
@@ -400,6 +426,9 @@ def cmd_approve(slug):
         rc, out = git("commit", "-m", f"plan: approved {slug}")
         if rc != 0:
             return cmd_block(t["id"], f"commit duyệt plan lỗi: {out[:200]}")
+    # Báo user TRƯỚC khi hand-off: ngay khi job vào queue, watcher có thể gửi "Bắt đầu code" trong vòng vài giây,
+    # nên tin này phải nằm trong outbox trước đó để thứ tự hiển thị đúng.
+    emit("manager", f"Plan **{t['id']}** ổn áp rồi, mình duyệt và giao cho OpenCode nhé ✅")
     pr = subprocess.run(["scripts/handoff.sh", p], capture_output=True, text=True)
     if pr.returncode != 0:
         return cmd_block(t["id"], "hand-off lỗi: " + (pr.stdout + pr.stderr).strip()[-300:])
@@ -416,7 +445,8 @@ def cmd_block(task_id, reason):
     set_auto(lines, False, "BLOCKED")
     log_line(lines, f"{task_id}: BLOCKED — {reason}")
     write_board(lines)
-    msg = f"⛔ {task_id} bị chặn: {reason}\nĐã tắt AUTO_MODE. Xem plan/log rồi /resume hoặc /stop."
+    msg = (f"Ối, **{task_id}** bị chặn rồi 🚧\n\n**Lý do:** {reason}\n\n"
+           "Mình tắt chế độ tự động rồi. Bạn xem plan và log, sau đó gõ `/resume` để chạy lại hoặc `/stop` để dừng nhé.")
     emit("manager", msg)
     return msg
 
@@ -426,19 +456,19 @@ def cmd_finalize():
     e = read_env()
     main, stg = e.get("MAIN_BRANCH", "main"), e.get("STAGING_BRANCH", "staging")
     done = [t for t in tasks(lines) if t["state"] == "done"]
-    out = ["✅ Tất cả task đã xong, chờ duyệt ship.", "", "Task hoàn thành:"]
+    out = ["Xong hết rồi nè! 🎉 Giờ chỉ còn chờ bạn duyệt ship thôi.", "", "**Việc đã hoàn thành**"]
     for t in done:
         v = ""
         for f in glob.glob(f"{AG}/tasks/*{t['slug']}*.md"):
             m = re.findall(r"^VERIFY:\s*(PASS|FAIL)", open(f, encoding="utf8").read(), re.M)
             if m:
-                v = f" (Verify {m[-1]})"
-        out.append(f"- {t['id']}: {t['title']}{v}")
+                v = f" · Verify {m[-1]}"
+        out.append(f"- **{t['id']}** · {short(t['title'], 90)}{v}")
     rc, log = git("log", "--oneline", f"{main}..{stg}")
     if rc == 0 and log:
-        out += ["", f"Commit trên {stg} chưa có trong {main}:"] + [f"- {l}" for l in log.splitlines()[:15]]
+        out += ["", f"**Commit mới trên nhánh {stg}** (chưa có trong {main})"] + [f"- `{l.split(' ', 1)[0]}` {short(l.split(' ', 1)[1] if ' ' in l else '', 90)}" for l in log.splitlines()[:15]]
     shots = screenshots()[-6:]
-    out += ["", "Bấm Ship hoặc gõ /ship để duyệt, /stop để giữ lại."]
+    out += ["", "Bấm **Ship** hoặc gõ `/ship` để mình đưa lên `main` nhé, còn muốn giữ lại thì gõ `/stop` 💌"]
     set_auto(lines, False, "AWAITING_SHIP_APPROVAL")
     log_line(lines, "FINALIZE: tất cả task done, chờ /ship.")
     write_board(lines)
@@ -478,7 +508,17 @@ def section_lines(text, name):
 
 def short(s, n=100):
     s = re.sub(r"\s+", " ", s).strip()
-    return s if len(s) <= n else s[: n - 1] + "…"
+    if len(s) <= n:
+        return s
+    cut = s[: n - 1]
+    if " " in cut[n // 2:]:
+        cut = cut[: cut.rfind(" ")]
+    cut = cut.rstrip(" ,;:-(")
+    if cut.count("`") % 2:
+        cut += "`"
+    if cut.count("**") % 2:
+        cut += "**"
+    return cut + "…"
 
 
 def task_commits(slug, stg):
@@ -538,11 +578,13 @@ def cmd_progress(slug):
     if not st["plan"] and steps and t["state"] in ("plan_ready", "in_progress", "done", "shipped"):
         mode = (re.findall(r"^Verify mode:\s*(\w+)", text, re.M) or ["light"])[0]
         n_tests = len(re.findall(r"^- \[[ x]\] T\d+\.", text, re.M))
-        body = [f"📋 Plan {t['id']} sẵn sàng · {total} bước · {n_tests} test · Verify {mode}"]
+        body = [f"Plan **{t['id']}** xong rồi nè 📋", "",
+                "**Tổng quan**", f"- {total} bước · {n_tests} test · Verify: **{mode}**", "", "**Các bước**"]
         for n, _, label, txt in steps[:6]:
-            body.append(f"{n}. {('[' + label + '] ') if label else ''}{short(txt, 90)}")
+            body.append(f"{n}. {('**' + label + '** · ') if label else ''}{short(txt, 100)}")
         if total > 6:
             body.append(f"… và {total - 6} bước nữa")
+        body += ["", "Mình kiểm tra nhanh rồi giao OpenCode nhé 🛠"]
         emit("techlead", "\n".join(body))
         st["plan"] = True
         sent += 1
@@ -551,13 +593,17 @@ def cmd_progress(slug):
     new_steps = [x for x in steps if x[1] and x[0] not in st["steps"]]
     new_commits = [c for c in dev_commits if c[0] not in st["commits"]]
     if new_steps or new_commits:
-        body = []
-        for n, _, label, txt in new_steps:
-            body.append(f"✅ Bước {n}/{total}{(' [' + label + ']') if label else ''}: {short(txt, 90)}")
+        if new_steps:
+            nums = ", ".join(str(x[0]) for x in new_steps)
+            body = [f"✅ **Bước {nums}/{total}** xong rồi nè!" if len(new_steps) == 1 else f"✅ **Bước {nums}/{total}** xong hết rồi nè!"]
+            for n, _, label, txt in new_steps:
+                body.append(f"- {short(txt, 100)}")
+        else:
+            body = ["📝 Mình vừa commit thêm chút xíu"]
         for h, sub in new_commits[:3]:
-            body.append(f"• commit {h} {short(sub, 80)}")
+            body.append(f"- commit `{h}` {short(sub, 80)}")
         if len(new_commits) > 3:
-            body.append(f"• … +{len(new_commits) - 3} commit")
+            body.append(f"- … và {len(new_commits) - 3} commit nữa")
         emit("dev", "\n".join(body))
         st["steps"] += [x[0] for x in new_steps]
         st["commits"] += [c[0] for c in new_commits]
@@ -566,14 +612,20 @@ def cmd_progress(slug):
     # C. Senior Dev: test results
     changed = [(k, v) for k, v in tests.items() if v in ("PASS", "FAIL") and st["tests"].get(k) != v]
     if changed:
-        emit("dev", "🧪 Test: " + " · ".join(f"{k} {v}" for k, v in changed))
+        emit("dev", "🧪 **Kết quả test**\n" + "\n".join(f"- {k} {'✅ PASS' if v == 'PASS' else '❌ FAIL'}" for k, v in changed))
         st["tests"].update(dict(changed))
         sent += 1
 
     # D. Tech Lead: Verify result + new screenshots
     if verify and verify != st["verify"]:
         new_shots = [f for f in shots if f not in st["shots"] and os.path.getmtime(f) >= st["t0"] - 5]
-        body = [f"🔎 Verify {verify}"] + [short(l, 110) for l in section_lines(text, "Verify")[:6] if not l.startswith("VERIFY:")]
+        notes = [short(l.lstrip("-* ").strip(), 110) for l in section_lines(text, "Verify")[:6] if not l.startswith("VERIFY:")]
+        body = ["🔎 **Verify PASS** ✅ Mọi thứ chạy đúng như mong đợi!" if verify == "PASS"
+                else "🔎 **Verify chưa qua** ❌ Mình thấy có chỗ chưa đúng, đang xem lại nha."]
+        if notes:
+            body += ["", "**Ghi chú**"] + [f"- {n}" for n in notes]
+        if new_shots:
+            body += ["", "Ảnh chụp màn hình ở dưới nè 📸"]
         emit("techlead", "\n".join(body), images=new_shots[-3:])
         st["verify"] = verify
         st["shots"] = sorted(set(st["shots"]) | set(new_shots))
@@ -582,14 +634,21 @@ def cmd_progress(slug):
     # E. Tech Lead: fix cycles
     for h, sub in fix_commits:
         if h not in st["fix"]:
-            emit("techlead", f"🔁 {short(sub, 110)} — Tech Lead thêm bước Fix và giao lại OpenCode")
+            n_fix = (re.findall(r"plan\(fix-(\d+)\)", sub) or ["?"])[0]
+            todo = []
+            for _n, _done, _label, _txt in steps:
+                if not _done and _txt.lstrip().lower().startswith("fix"):
+                    todo.append("- " + short(re.sub(r"^Fix:\s*", "", _txt.lstrip(), flags=re.I), 100))
+            todo = todo[:3]
+            emit("techlead", f"Có chút trục trặc nên mình mở **vòng sửa {n_fix}** rồi giao lại OpenCode nha 🔁"
+                 + ("\n\n**Sẽ sửa**\n" + "\n".join(todo) if todo else ""))
             st["fix"].append(h)
             sent += 1
 
     # F. Tech Lead: merged into staging
     if t["state"] in ("done", "shipped") and not st["done"]:
         rc, last = git("log", "-1", "--format=%h %s", stg)
-        emit("techlead", f"🎉 {t['id']} đã merge vào {stg}" + (f": {short(last, 100)}" if rc == 0 else ""))
+        emit("techlead", f"🎉 **{t['id']}** đã merge vào nhánh `{stg}` rồi nè!" + (f"\n- `{last.split(' ', 1)[0]}` {short(last.split(' ', 1)[1] if ' ' in last else '', 100)}" if rc == 0 else ""))
         st["done"] = True
         sent += 1
 
@@ -630,9 +689,9 @@ def opencode_usage(days):
 
     if not val("Sessions"):
         return None
-    out = [f"OpenCode ({'24 giờ qua' if days == 1 else f'{days} ngày qua'}, project này, gồm cả lần chạy tay): "
-           f"{val('Sessions')} phiên, {val('Messages')} tin · in {val('Input')} · cache đọc {val('Cache Read')} · "
-           f"out {val('Output')} · ~{val('Total Cost')}"]
+    out = [f"⌨️ **OpenCode** · {'24 giờ qua' if days == 1 else f'{days} ngày qua'} (cả lần bạn chạy tay)",
+           f"- {val('Sessions')} phiên · {val('Messages')} tin nhắn · ~{val('Total Cost')}",
+           f"- token: vào {val('Input')} · cache đọc {val('Cache Read')} · ra {val('Output')}"]
     model = None
     for line in txt.split("\n"):
         m = re.match(r"^│ (\S+/\S+)\s*│$", line)
@@ -645,7 +704,7 @@ def opencode_usage(days):
                 model["msgs"] = mm.group(1)
             mc = re.match(r"^│\s+Cost\s+(\S+)\s*│$", line)
             if mc:
-                out.append(f"  {model['name']}: {model['msgs']} tin, ~{mc.group(1)}")
+                out.append(f"- model `{model['name']}`: {model['msgs']} tin · ~{mc.group(1)}")
                 model = None
     return "\n".join(out)
 
@@ -655,35 +714,33 @@ def cmd_usage(days=1):
     rows = usage_rows()
     since = datetime.fromtimestamp(time.time() - (days - 1) * 86400).strftime("%Y-%m-%d")
     rows = [r for r in rows if r.get("ts", "")[:10] >= since]
-    label = "Hôm nay" if days == 1 else f"{days} ngày qua"
-    out = []
+    label = "hôm nay" if days == 1 else f"{days} ngày qua"
+    out = ["📊 **Mức dùng**", ""]
 
-    def block(title, rs):
-        if not rs:
-            return
-        out.append(f"{title}: {len(rs)} lần gọi, {sum(r.get('turns', 0) for r in rs)} lượt, "
-                   f"in {fmt_k(sum(r.get('input', 0) + r.get('cache_create', 0) for r in rs))} · "
-                   f"cache đọc {fmt_k(sum(r.get('cache_read', 0) for r in rs))} · "
-                   f"out {fmt_k(sum(r.get('output', 0) for r in rs))} · ~${sum(r.get('cost_usd', 0) for r in rs):.2f}")
+    def line(title, rs):
+        return (f"- {title}: {len(rs)} lần gọi · {sum(r.get('turns', 0) for r in rs)} lượt · "
+                f"vào {fmt_k(sum(r.get('input', 0) + r.get('cache_create', 0) for r in rs))} · "
+                f"cache đọc {fmt_k(sum(r.get('cache_read', 0) for r in rs))} · "
+                f"ra {fmt_k(sum(r.get('output', 0) for r in rs))} · ~${sum(r.get('cost_usd', 0) for r in rs):.2f}")
 
     if rows:
-        out.append(f"Claude — {label}")
-        block("  tổng", rows)
+        out.append(f"🧠 **Claude** · {label}")
+        out.append(line("tổng", rows))
         for role in ("manager", "techlead"):
-            block(f"  {role}", [r for r in rows if r.get("role") == role])
-        out.append("")
-        out.append("5 lần gọi Claude gần nhất:")
+            rs = [r for r in rows if r.get("role") == role]
+            if rs:
+                out.append(line(role, rs))
+        out += ["", "**5 lần gọi gần nhất**"]
         for r in rows[-5:]:
-            out.append(f"- {r.get('ts', '')[5:16]} {r.get('role')} {r.get('label')}: {r.get('turns')} lượt, "
-                       f"~${r.get('cost_usd', 0):.2f}{'' if r.get('ok', True) else ' (LỖI)'}")
+            out.append(f"- {r.get('ts', '')[5:16]} · {r.get('role')} · {r.get('label')} · {r.get('turns')} lượt · "
+                       f"~${r.get('cost_usd', 0):.2f}{'' if r.get('ok', True) else ' ❌ lỗi'}")
     else:
-        out.append(f"Claude — {label}: chưa có lần gọi nào được ghi (usage.log).")
+        out.append(f"🧠 **Claude** · {label}: chưa có lần gọi nào được ghi (usage.log) 🍃")
     oc = opencode_usage(days)
     out.append("")
-    out.append(oc if oc else "OpenCode: không đọc được `opencode stats` (opencode có trong PATH của daemon không?).")
-    out.append("")
-    out.append("(Chi phí quy theo giá list API, chỉ để so sánh giữa các bước; quota gói đăng ký tính khác. "
-               "Gõ /usage 7 để xem 7 ngày.)")
+    out.append(oc if oc else "⌨️ **OpenCode**: mình không đọc được `opencode stats` 😢 (opencode có trong PATH của daemon không?)")
+    out += ["", "💡 Chi phí tính theo giá list API, chỉ để so sánh các bước với nhau; quota gói đăng ký tính khác. "
+            "Gõ `/usage 7` để xem 7 ngày nha."]
     return "\n".join(out)
 
 
@@ -736,7 +793,7 @@ def cmd_inbox(path):
     elif cmd is None:
         if e.get("CHAT_WITH_CLAUDE") == "true":
             return 3
-        reply = HELP + "\n" + status_text().split("\n")[0]
+        reply = HELP + "\n\n" + one_line_status()
     else:
         reply = HELP
     emit("manager", reply)
@@ -752,7 +809,15 @@ def main(argv):
     if c == "inbox":
         return cmd_inbox(a[0])
     if c == "say":
-        emit(a[0], a[1])
+        emit(a[0], a[1].replace("\\n", "\n"))  # shell callers write \n inside "..." strings
+        return 0
+    if c == "say-steps":  # say-steps <role> <head> <plan step line>...
+        a[1] = a[1].replace("\\n", "\n")
+        rows = []
+        for line in a[2:]:
+            m = STEP_RE.match(line)
+            rows.append(f"{m.group(2)}. {short(m.group(4), 100)}" if m else short(line, 100))
+        emit(a[0], a[1] + ("\n\n" + "\n".join(rows) if rows else ""))
         return 0
     if c == "claude-result":
         return cmd_claude_result(*a)
