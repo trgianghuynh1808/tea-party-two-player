@@ -42,7 +42,7 @@ HELP = ("Mình chỉ hiểu mấy lệnh này thôi nha 😅\n"
         "- `/health` · kiểm tra các agent\n"
         "- `/usage` · xem mức dùng token\n"
         "- `/plan <câu hỏi>` · hỏi đáp, phân tích project (chỉ đọc, không sửa gì)\n"
-        "- `/automode on|off` · bật hoặc tắt chế độ tự động\n"
+        "- `/automode on|off` · bật: tự duyệt plan · tắt: bạn duyệt từng plan (ship luôn cần bạn)\n"
         "- `/config` · xem hoặc đổi cấu hình (`/config approval auto`)\n"
         "- `/approve` · `/revise <góp ý>` · `/reject` · duyệt, nhờ sửa hoặc hủy plan đang chờ\n"
         "- `/clear` · dọn board và trạng thái cũ (lưu bản sao board)\n"
@@ -103,7 +103,7 @@ BOOL_WORDS = {"true": "true", "on": "true", "bật": "true", "bat": "true", "yes
               "false": "false", "off": "false", "tắt": "false", "tat": "false", "no": "false", "0": "false"}
 # name used in chat, env key, board label, kind, default, explanation. Only these can be changed from chat (never ports, branches, ids).
 CONFIG = [
-    ("approval", "PLAN_APPROVAL", "Plan Approval", ("ask", "auto"), "auto", "auto = tự duyệt, chỉ dừng khi rủi ro nghiêm trọng, thiếu ngữ cảnh hoặc bị chặn (rồi làm task kế tiếp) · ask = luôn chờ bạn duyệt bằng thẻ"),
+    ("approval", "PLAN_APPROVAL", "Plan Approval", ("ask", "auto"), "auto", "auto = tự duyệt, chỉ dừng khi rủi ro nghiêm trọng, thiếu ngữ cảnh hoặc bị chặn (rồi làm task kế tiếp) · ask = luôn chờ bạn duyệt bằng thẻ. Giống `/automode on|off`"),
     ("links", "COMMIT_LINKS", "Commit Links", "bool", "true", "bật = daemon push nhánh task lên GitHub để báo cáo có link commit"),
     ("split", "AUTO_SPLIT", "Auto Split", ("lines", "claude"), "lines", "lines = mỗi dòng của /task là một task · claude = Manager tách"),
     ("chat", "CHAT_WITH_CLAUDE", "Chat With Claude", "bool", "false", "bật = Claude trả lời tin thường (tốn quota)"),
@@ -241,7 +241,8 @@ def status_text():
     e = read_env()
     finished = [t for t in ts if t["state"] in ("done", "shipped", "cancelled")]
     out = ["📋 **Tình hình dự án**",
-           f"- Giai đoạn: **{get_phase(lines)}** · chế độ tự động: **{'BẬT' if e.get('AUTO_MODE') == 'true' else 'TẮT'}**",
+           f"- Giai đoạn: **{get_phase(lines)}** · {'đang chạy' if e.get('AUTO_MODE') == 'true' else 'tạm dừng'}",
+           f"- Chế độ tự động: **{'TẮT: bạn duyệt từng plan' if e.get('PLAN_APPROVAL', 'auto') == 'ask' else 'BẬT: tự duyệt plan'}** (ship luôn cần bạn)",
            f"- Tiến độ: **{len(finished)}/{len(ts)}** việc xong"]
     if ts:
         out += ["", "**Danh sách việc**"]
@@ -262,35 +263,36 @@ def status_text():
 
 
 def cmd_automode(args):
+    """Auto mode = who approves plans. It never stops the work: /stop pauses, /resume continues."""
     arg = (args.split() or ["status"])[0].lower()
-    if arg in BOOL_WORDS and BOOL_WORDS[arg] == "false":
-        return cmd_stop()
-    lines = read_board()
     e = read_env()
-    on = e.get("AUTO_MODE") == "true"
+    auto = e.get("PLAN_APPROVAL", "auto") != "ask"
+    running = e.get("AUTO_MODE") == "true"
     if arg not in BOOL_WORDS:
-        unfinished = [t for t in tasks(lines) if not t["done"]]
-        return (f"Chế độ tự động đang **{'BẬT' if on else 'TẮT'}** {'▶️' if on else '⏹'}\n"
-                f"- Còn {len(unfinished)} việc chưa xong · duyệt plan: **{e.get('PLAN_APPROVAL', 'auto')}**\n"
-                "Gõ `/automode on` để bật, `/automode off` để tắt, `/config` để xem cấu hình.")
-    if on:
-        return "Chế độ tự động đang bật rồi mà 😄 Bạn gõ `/status` để xem tiến độ nhé."
-    unfinished = [t for t in tasks(lines) if not t["done"]]
-    blocked = [t for t in unfinished if t["state"] == "BLOCKED"]
-    set_auto(lines, True, "RUNNING" if unfinished else "IDLE")
-    log_line(lines, "/automode on: chế độ tự động bật.")
+        return (f"Chế độ tự động đang **{'BẬT' if auto else 'TẮT'}** {'▶️' if auto else '✋'}\n"
+                + ("- Plan ổn thì mình giao OpenCode luôn, chỉ dừng hỏi bạn khi plan có rủi ro nghiêm trọng\n" if auto else
+                   "- Mỗi plan mình gửi thẻ để bạn duyệt trước khi code\n")
+                + "- Ship luôn cần bạn duyệt\n"
+                + f"- Hệ thống đang **{'chạy' if running else 'tạm dừng (gõ /resume để chạy tiếp)'}**\n"
+                "Gõ `/automode on` hoặc `/automode off` để đổi.")
+    want = BOOL_WORDS[arg] == "true"
+    if want == auto:
+        return f"Chế độ tự động đang {'bật' if auto else 'tắt'} rồi mà 😄 Bạn gõ `/status` để xem tiến độ nhé."
+    set_env("PLAN_APPROVAL", "auto" if want else "ask")
+    lines = read_board()
+    log_line(lines, f"/automode {'on' if want else 'off'}: duyệt plan {'tự động' if want else 'bởi bạn'}.")
     write_board(lines)
-    out = ["Đã **bật chế độ tự động** ▶️", ""]
-    out.append(f"- Có **{len(unfinished)} việc** đang chờ, mình xử lý lần lượt nè" if unfinished else
-               "- Board đang trống: gõ `/task <việc cần làm>` để giao việc")
-    out.append(f"- Duyệt plan: **{'bạn duyệt bằng thẻ' if e.get('PLAN_APPROVAL', 'auto') == 'ask' else 'tự duyệt'}**")
-    if blocked:
-        out.append(f"- ⚠️ {len(blocked)} task đang BLOCKED, gõ `/resume` để thử lại")
-    try:
-        with open(f"{AG}/watcher.pid", encoding="utf8") as f:
-            os.kill(int(f.read().strip()), 0)
-    except (OSError, ValueError):
-        out.append("- ⚠️ Senior Dev watcher (OpenCode) chưa chạy nên chưa giao việc được, dùng `/health` để kiểm tra")
+    waiting = [t for t in tasks(lines) if t["state"] == "awaiting_plan"]
+    if want:
+        out = ["Đã **bật chế độ tự động** ▶️", "", "- Plan ổn thì mình giao OpenCode luôn, không hỏi bạn",
+               "- Chỉ dừng hỏi khi plan có rủi ro nghiêm trọng, thiếu ngữ cảnh hoặc bị chặn (rồi làm task kế tiếp)", "- Ship vẫn cần bạn duyệt"]
+        if waiting:
+            out.append(f"- {len(waiting)} plan đang chờ bạn vẫn cần `/approve`, chế độ mới áp dụng cho các plan sau")
+    else:
+        out = ["Đã **tắt chế độ tự động** ✋ Mình vẫn làm việc bình thường, chỉ dừng ở hai chỗ:", "",
+               "- **Duyệt plan:** mỗi plan mình gửi thẻ để bạn duyệt", "- **Ship:** bạn duyệt như mọi khi"]
+    if not running:
+        out.append("- ⏸ Hệ thống đang tạm dừng vì `/stop`, gõ `/resume` để chạy tiếp")
     return "\n".join(out)
 
 
@@ -509,15 +511,14 @@ def cmd_auto(args):
     last = max([t["i"] for t in tasks(lines)] or
                [next((i for i, l in enumerate(lines) if l.startswith("## Checklist")), marker - 1)])
     lines[last + 1:last + 1] = new
-    on = e.get("AUTO_MODE") == "true"
-    if on:
-        set_header(lines, "Current Phase", "RUNNING")
-    log_line(lines, f"/task: thêm {len(new)} task, chế độ tự động {'đang bật' if on else 'đang tắt'}.")
+    auto = e.get("PLAN_APPROVAL", "auto") != "ask"
+    set_auto(lines, True, "RUNNING")
+    log_line(lines, f"/task: thêm {len(new)} task.")
     write_board(lines)
     return ("Nhận rồi nha! 🚀 Mình ghi **" + str(len(new)) + " việc** vào board:\n\n"
             + "\n".join(f"{i + 1}. {short(t, 110)}" for i, t in enumerate(items))
-            + ("\n\nChế độ tự động đang bật, Tech Lead sẽ lên plan ngay đây ✨" if on else
-               "\n\nChế độ tự động đang **tắt** nên mình chưa bắt đầu ⏸ Gõ `/automode on` khi bạn muốn mình chạy."))
+            + "\n\nTech Lead sẽ lên plan ngay đây ✨ "
+            + ("Plan ổn thì mình giao OpenCode luôn." if auto else "Plan nào xong mình cũng gửi thẻ để bạn duyệt."))
 
 
 def cleanup_after_ship(lines, keep):
