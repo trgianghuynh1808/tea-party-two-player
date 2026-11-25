@@ -33,3 +33,4 @@
 - [2026-11-25 12:45] T02: handoff bị chặn vì working tree dơ (board.md/room.env), giao lại thành công; verify PASS, squash vào staging, xoá nhánh task. Done.
 - [2026-11-25 12:36] FINALIZE: tất cả task done, Phase AWAITING_SHIP_APPROVAL, AUTO_MODE=false, chờ /ship.
 - [2026-11-25 12:37] /ship: merge staging vào main (6c7473a) và push thành công. Phase SHIPPED.
+- [2026-11-25 12:48] Trả lời /status (SHIPPED, 2/2 done).
