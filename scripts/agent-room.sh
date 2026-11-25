@@ -2,7 +2,7 @@
 # Quản lý "phòng" (một project = một phòng). Chạy ở thư mục gốc của project.
 #
 #   scripts/agent-room.sh init --topic <ID> --port <PORT> [--name <tên>]   tạo .agents/, room.env, board.md, đăng ký bridge
-#   scripts/agent-room.sh start                                            chạy manager-loop.sh + watch-tasks.sh ngầm (pm2 hoặc tmux)
+#   scripts/agent-room.sh start                                            bật bridge (nếu chưa chạy) + manager-loop.sh + watch-tasks.sh ngầm (pm2 hoặc tmux)
 #   scripts/agent-room.sh stop                                             dừng các daemon của phòng
 #   scripts/agent-room.sh status                                           trạng thái tiến trình + board.md
 #
@@ -112,8 +112,18 @@ PY
   echo "Xong. Tiếp theo: scripts/agent-room.sh start   (nhớ commit .gitignore)"
 }
 
+ensure_bridge() {   # bật bridge bot nếu chưa chạy (cần .agents/kit-dir do install.sh ghi)
+  local kit; kit="$(cat "$AG/kit-dir" 2>/dev/null || true)"
+  if [[ -x "$kit/bridge-bot/bridge.sh" ]]; then
+    "$kit/bridge-bot/bridge.sh" start || echo "⚠️  Không bật được bridge — phòng vẫn chạy, nhưng Telegram chưa nối."
+  else
+    echo "⚠️  Không thấy bridge-bot (.agents/kit-dir). Tự chạy bridge nếu cần."
+  fi
+}
+
 cmd_start() {
   [[ -f "$AG/room.env" ]] || die "Chưa init phòng này."
+  ensure_bridge
   local name r; name="$(room_name)"; r="$(runner)"
   case "$r" in
     pm2)
