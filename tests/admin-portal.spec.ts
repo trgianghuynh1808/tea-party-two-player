@@ -332,3 +332,37 @@ test("T8: portal favicon — the icon link points at a loadable svg", async ({ p
   expect(response.headers()["content-type"]).toContain("svg");
   expect(await response.text()).toContain("<svg");
 });
+
+test("T9: portal select — the option list keeps dark text on a light background with a dark color scheme", async ({ browser }) => {
+  // The portal is a light UI: a browser/OS in dark mode must not make the select's text unreadable.
+  const context = await browser.newContext({ colorScheme: "dark" });
+  const page = await context.newPage();
+  try {
+    await page.goto(`${SERVER}/portal`);
+    await page.evaluate(() => {
+      document.body.insertAdjacentHTML("beforeend", "<select><option>A</option></select>");
+    });
+
+    const styles = await page.evaluate(() => {
+      const select = document.querySelector("body > select")!;
+      const option = select.querySelector("option")!;
+      const selectStyle = getComputedStyle(select);
+      const optionStyle = getComputedStyle(option);
+      return {
+        selectColor: selectStyle.color,
+        selectBackground: selectStyle.backgroundColor,
+        optionColor: optionStyle.color,
+        optionBackground: optionStyle.backgroundColor,
+        bodyColorScheme: getComputedStyle(document.body).colorScheme,
+      };
+    });
+
+    expect(styles.selectColor).toBe("rgb(58, 47, 40)");
+    expect(styles.selectBackground).toBe("rgb(255, 255, 255)");
+    expect(styles.optionColor).toBe("rgb(58, 47, 40)");
+    expect(styles.optionBackground).toBe("rgb(255, 255, 255)");
+    expect(styles.bodyColorScheme).toContain("light");
+  } finally {
+    await context.close();
+  }
+});
