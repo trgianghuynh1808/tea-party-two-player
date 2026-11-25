@@ -1141,19 +1141,22 @@ def step_report(slug, total, done_steps, commits, changed, linked, notes=None):
         for n, _, label, txt in done_steps:
             out.append(f"- **Bước {n}** · mức **{label or 'vừa'}**")
             out.append(f"  {short(txt, 200)}")
-    out += ["", "**Commit**"]
-    if commits:
-        for h, sub in commits[:8]:
-            out.append(f"- [{h}]({base}/commit/{h}) {short(sub, 90)}" if linked and base else f"- `{h}` {short(sub, 90)}")
-        if len(commits) > 8:
-            out.append(f"- … và {len(commits) - 8} commit nữa")
-    else:
-        out.append("- Bước này chưa có commit mới")
-    out += ["", "**Kết quả test**"]
-    if changed:
-        out += [f"- {k} {'✅ PASS' if v == 'PASS' else '❌ FAIL'}" for k, v in changed]
-    else:
-        out.append("- Bước này chưa có test nào đổi kết quả")
+    # With finished steps the Commit/Test sections always show (an honest "none yet"); the leftover report shows only what exists.
+    if commits or done_steps:
+        out += ["", "**Commit**"]
+        if commits:
+            for h, sub in commits[:8]:
+                out.append(f"- [{h}]({base}/commit/{h}) {short(sub, 90)}" if linked and base else f"- `{h}` {short(sub, 90)}")
+            if len(commits) > 8:
+                out.append(f"- … và {len(commits) - 8} commit nữa")
+        else:
+            out.append("- Bước này chưa có commit mới")
+    if changed or done_steps:
+        out += ["", "**Kết quả test**"]
+        if changed:
+            out += [f"- {k} {'✅ PASS' if v == 'PASS' else '❌ FAIL'}" for k, v in changed]
+        else:
+            out.append("- Bước này chưa có test nào đổi kết quả")
     if notes:
         out += ["", "**Lưu ý**"] + [f"- ⚠️ {short(n, 200)}" for n in notes[:5]]
     return "\n".join(out)
@@ -1290,7 +1293,8 @@ def _cmd_progress(slug, flush=False):
     changed = [(k, v) for k, v in tests.items() if v in ("PASS", "FAIL") and st["tests"].get(k) != v]
     new_notes = [n for n in task_notes(text) if n not in st.get("notes", [])]   # notes ride along like commits and tests
     settled = flush or (time.time() - plan_mtime(slug) >= SETTLE_S)
-    if (done_steps and settled) or (flush and (new_commits or changed or new_notes)):
+    # Notes alone never make a message: with no step, commit or test to report they wait for the end-of-task report (F), which lists them all.
+    if (done_steps and settled) or (flush and (new_commits or changed)):
         linked = push_task_branch(slug, st) if new_commits else False
         emit("dev", step_report(slug, total, done_steps, new_commits, changed, linked, new_notes))
         st["steps"] += [x[0] for x in done_steps]
