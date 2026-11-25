@@ -1,8 +1,22 @@
 import { timingSafeEqual } from "node:crypto";
 import express, { type Application } from "express";
-import { areaOf, normalizeUsername, usernameKey } from "@boba/shared";
-import { deleteUserRecords, listUsers, loadUser, parseShopSave } from "./persistence/ShopStore.js";
+import {
+  CUSTOM_DECOR_MAX_IMAGE_BYTES,
+  CUSTOM_DECOR_MAX_ITEMS,
+  CUSTOM_DECOR_PREFIX,
+  DECORATION_CATALOG,
+  addCustomDecoration,
+  areaOf,
+  decorPropKind,
+  isCustomDecoration,
+  normalizeUsername,
+  parseCustomDecoration,
+  removeCustomDecoration,
+  usernameKey,
+} from "@boba/shared";
+import { deleteCustomDecor, deleteUserRecords, listUsers, loadUser, parseShopSave, saveCustomDecor, type CustomDecorRecord } from "./persistence/ShopStore.js";
 import { forgetShop, openShop, type Piece, type RefundMode } from "./shop/SharedShop.js";
+import { deleteCustomDecorImage, getCustomDecorImage, setCustomDecorImage } from "./customDecor.js";
 
 /**
  * Admin API (backups / restores / the /portal admin page), enabled only when ADMIN_TOKEN is set.
@@ -23,6 +37,12 @@ import { forgetShop, openShop, type Piece, type RefundMode } from "./shop/Shared
  *   { refund: "full" | "none" } (default full): removed tiles refund their FULL price per cell
  * - POST   /admin/decorations/reset         -> body { venue: "restaurant", refund: "full", dryRun? }:
  *   removes every user's restaurant furniture (dryRun previews the totals without changing anything)
+ * - GET    /admin/custom-decor              -> the portal-added custom furniture (catalog definitions)
+ * - POST   /admin/custom-decor              -> body { def, imageBase64? }: add a custom piece, or replace
+ *   one by posting the same kind (the artwork is kept when imageBase64 is omitted; a new piece needs
+ *   a PNG, signature-checked and <= CUSTOM_DECOR_MAX_IMAGE_BYTES; 409 over CUSTOM_DECOR_MAX_ITEMS)
+ * - DELETE /admin/custom-decor/:kind        -> removes the piece; 404 if unknown, 409 while any user's
+ *   furniture or yard still uses it
  */
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN ?? "";
 const JSON_BODY = express.json({ limit: "100kb" });
@@ -44,6 +64,37 @@ async function shopOfUser(name: string) {
   const user = await loadUser(usernameKey(name));
   if (!user) return { error: 404 as const };
   return { shop: await openShop(user.name, user.key, false) };
+}
+
+/** Kind for a new custom piece: custom_<slug from the label>, with a random suffix while the slug is taken. */
+function generateCustomKind(label: string): string {
+  const slug =
+    label
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 40) || "item";
+  if (!getCustomDecorImage(`${CUSTOM_DECOR_PREFIX}${slug}`)) return `${CUSTOM_DECOR_PREFIX}${slug}`;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const kind = `${CUSTOM_DECOR_PREFIX}${slug.slice(0, 35)}_${Math.random().toString(36).slice(2, 6)}`;
+    if (!getCustomDecorImage(kind)) return kind;
+  }
+  return `${CUSTOM_DECOR_PREFIX}${slug.slice(0, 30)}_${Date.now().toString(36)}`;
+}
+
+/** Decode an uploaded artwork: must be a PNG (signature 89 50 4E 47) within the size limit. */
+function parseImagePng(imageBase64: unknown): { png?: Buffer; error?: string } {
+  if (typeof imageBase64 !== "string" || !imageBase64.trim()) return { error: "món mới cần kèm ảnh PNG (imageBase64)" };
+  const png = Buffer.from(imageBase64.replace(/^data:image\/png;base64,/, ""), "base64");
+  if (png.length < 4 || png[0] !== 0x89 || png[1] !== 0x50 || png[2] !== 0x4e || png[3] !== 0x47) {
+    return { error: "imageBase64 không phải file PNG hợp lệ" };
+  }
+  if (png.length > CUSTOM_DECOR_MAX_IMAGE_BYTES) {
+    return { error: `ảnh PNG lớn hơn giới hạn ${CUSTOM_DECOR_MAX_IMAGE_BYTES} bytes` };
+  }
+  return { png };
 }
 
 export function registerAdminRoutes(app: Application): void {
@@ -280,6 +331,72 @@ export function registerAdminRoutes(app: Application): void {
       res.json({ users, pieces, refund: refundTotal, removed: pieces, refunded: refundTotal });
     } catch (err) {
       console.error("[admin] restaurant reset failed", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  // ---------------------------------------------------------------- Custom furniture (portal)
+
+  app.get("/admin/custom-decor", (_req, res) => {
+    res.json({ items: DECORATION_CATALOG.filter((d) => isCustomDecoration(d.kind)) });
+  });
+
+  app.post("/admin/custom-decor", express.json({ limit: "1mb" }), async (req, res) => {
+    const body = (req.body ?? {}) as { def?: unknown; imageBase64?: unknown };
+    if (!body.def || typeof body.def !== "object") return void res.status(400).json({ error: "body must be { def, imageBase64? }" });
+    const given = body.def as Record<string, unknown>;
+    // No kind yet: derive one from the label (kinds can't change after creation).
+    const kind = typeof given.kind === "string" && given.kind ? given.kind : generateCustomKind(typeof given.label === "string" ? given.label : "");
+    const def = parseCustomDecoration({ ...given, kind });
+    if (!def) return void res.status(400).json({ error: "def không hợp lệ: kiểm kind, tên (1–40 ký tự), giá, nhóm, loại và kích thước (4–400)" });
+    try {
+      const existing = getCustomDecorImage(def.kind);
+      let png: Buffer | undefined;
+      if (body.imageBase64 !== undefined) {
+        const parsed = parseImagePng(body.imageBase64);
+        if (parsed.error) return void res.status(400).json({ error: parsed.error });
+        png = parsed.png;
+      }
+      if (!existing && !png) return void res.status(400).json({ error: "món mới cần kèm ảnh PNG (imageBase64)" });
+      if (!existing && DECORATION_CATALOG.filter((d) => isCustomDecoration(d.kind)).length >= CUSTOM_DECOR_MAX_ITEMS) {
+        return void res.status(409).json({ error: `đã đạt giới hạn ${CUSTOM_DECOR_MAX_ITEMS} món tuỳ chỉnh` });
+      }
+      const artwork = png ?? existing!;
+      const record: CustomDecorRecord = { version: 1, def, imagePng: artwork.toString("base64") };
+      await saveCustomDecor(def.kind, record);
+      addCustomDecoration(def);
+      setCustomDecorImage(def.kind, artwork);
+      console.log(`[admin] saved custom decor ${def.kind} (${def.label}), ${artwork.length} byte PNG`);
+      res.json({ ok: true, def });
+    } catch (err) {
+      console.error("[admin] save custom decor failed", err);
+      res.status(500).json({ error: String(err) });
+    }
+  });
+
+  app.delete("/admin/custom-decor/:kind", async (req, res) => {
+    const kind = req.params.kind;
+    try {
+      if (!getCustomDecorImage(kind)) return void res.status(404).json({ error: "không có món tuỳ chỉnh này" });
+      // Refuse while any player still owns a piece (or a yard cell) of it: deleting would drop
+      // the kind from their save and leave paid furniture pointing at nothing.
+      const tileKind = decorPropKind(kind);
+      for (const user of await listUsers()) {
+        const shop = await openShop(user.name, user.key, false);
+        if (shop.pieces.some((piece) => piece.kind === kind)) {
+          return void res.status(409).json({ error: `${user.name} còn dùng món này trong quán/nhà hàng` });
+        }
+        for (const tile of shop.tiles.values()) {
+          if (tile === tileKind) return void res.status(409).json({ error: `${user.name} còn dùng món này trong sân` });
+        }
+      }
+      await deleteCustomDecor(kind);
+      removeCustomDecoration(kind);
+      deleteCustomDecorImage(kind);
+      console.log(`[admin] deleted custom decor ${kind}`);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error("[admin] delete custom decor failed", err);
       res.status(500).json({ error: String(err) });
     }
   });

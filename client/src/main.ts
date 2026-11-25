@@ -30,6 +30,7 @@ import {
 } from "@boba/shared";
 import type { BobaShopState } from "@boba/shared/schema";
 import { FORCE_TOUCH_PARAM, isTouchDevice } from "./input/TouchControls";
+import { loadCustomCatalog } from "./customCatalog";
 import { AREA_EVENT, BUILD_MODE_EVENT, BUILD_TOOL_EVENT, DECORATE_MODE_EVENT, ShopScene, type ShopSceneData } from "./scenes/ShopScene";
 import { BuildPanel, BUILD_ROTATE } from "./ui/BuildPanel";
 import { initForceLandscape, patchPhaserForRotation } from "./forceLandscape";
@@ -291,11 +292,17 @@ function describeError(err: unknown): string {
   return e?.message || "Có lỗi xảy ra, thử lại nhé.";
 }
 
+/** Custom furniture catalog, fetched once before the first join (panels and textures are built after it). */
+let customCatalogLoaded: Promise<void> | undefined;
+
 async function enter(action: () => Promise<Room<BobaShopState>>) {
   if (busy) return;
   setBusy(true);
   lobbyError.textContent = "";
   try {
+    // Portal-added furniture must be in the catalog before the panels and the scene preload are built.
+    customCatalogLoaded ??= loadCustomCatalog(endpoint);
+    await customCatalogLoaded;
     startGame(await action());
   } catch (err) {
     console.error(err);

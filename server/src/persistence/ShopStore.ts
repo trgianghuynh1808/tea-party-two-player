@@ -2,21 +2,22 @@ import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { canBuildCell, getBuildTile, getDecorationDef, isValidShopId, layerOf, parseTileKey, tileKey, type ShopSave } from "@boba/shared";
+import { canBuildCell, getBuildTile, getDecorationDef, isValidShopId, layerOf, parseTileKey, tileKey, type DecorationDef, type ShopSave } from "@boba/shared";
 
 /**
- * The game's database: two collections.
+ * The game's database: three collections.
  * - users: one record per username (display name, timestamps, and the id of the user's shop).
  * - shops: money + furniture, linked from the user record by shopId.
+ * - decor: portal-added custom furniture (definition + cut-out PNG), one record per kind.
  *
  * Two backends:
  * - Upstash Redis (REST API) when UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are set
- *   (keys boba:user:<id> and boba:shop:<shopId>). Use this on hosts with an ephemeral disk
- *   (Render free wipes it on every restart/sleep/deploy).
- * - Otherwise JSON files: <DATA_DIR>/users/<id>.json and <DATA_DIR>/shops/<shopId>.json
- *   (DATA_DIR defaults to server/data).
+ *   (keys boba:user:<id>, boba:shop:<shopId> and boba:decor:<kind>). Use this on hosts with an
+ *   ephemeral disk (Render free wipes it on every restart/sleep/deploy).
+ * - Otherwise JSON files: <DATA_DIR>/users/<id>.json, <DATA_DIR>/shops/<shopId>.json and
+ *   <DATA_DIR>/decor/<kind>.json (DATA_DIR defaults to server/data).
  */
-type Collection = "users" | "shops";
+type Collection = "users" | "shops" | "decor";
 
 interface Backend {
   name: string;
@@ -75,7 +76,7 @@ const fileBackend: Backend = {
 // ---------------------------------------------------------------- Upstash Redis backend (cloud)
 
 const REDIS_TIMEOUT_MS = 10_000;
-const REDIS_PREFIX: Record<Collection, string> = { users: "boba:user:", shops: "boba:shop:" };
+const REDIS_PREFIX: Record<Collection, string> = { users: "boba:user:", shops: "boba:shop:", decor: "boba:decor:" };
 
 function upstashBackend(url: string, token: string): Backend {
   /** Run one Redis command through the Upstash REST API: POST ["CMD", ...args]. */
@@ -328,4 +329,37 @@ export async function loadShop(shopId: string): Promise<ShopSave | undefined> {
 export async function saveShop(shopId: string, save: ShopSave): Promise<void> {
   checkId(shopId);
   await backend.write("shops", shopId, JSON.stringify(save, null, 2));
+}
+
+// ---------------------------------------------------------------- Custom furniture (admin portal)
+
+/** A portal-added furniture piece as stored: its catalog definition plus the cut-out PNG (base64). */
+export interface CustomDecorRecord {
+  version: 1;
+  def: DecorationDef;
+  /** Served at GET /custom-decor/<kind>.png. */
+  imagePng: string;
+}
+
+export async function saveCustomDecor(kind: string, record: CustomDecorRecord): Promise<void> {
+  await backend.write("decor", kind, JSON.stringify(record, null, 2));
+}
+
+/** Every stored custom piece. Corrupt records are skipped with a warning so one bad record can't stop the server. */
+export async function loadCustomDecors(): Promise<CustomDecorRecord[]> {
+  const records: CustomDecorRecord[] = [];
+  for (const id of await backend.list("decor")) {
+    const raw = await backend.read("decor", id);
+    if (raw === undefined) continue;
+    try {
+      records.push(JSON.parse(raw) as CustomDecorRecord);
+    } catch {
+      console.warn(`[ShopStore] skipped corrupt custom decor record ${id}`);
+    }
+  }
+  return records;
+}
+
+export async function deleteCustomDecor(kind: string): Promise<void> {
+  await backend.delete("decor", kind);
 }

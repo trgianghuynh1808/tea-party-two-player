@@ -3,6 +3,7 @@ import { BUILD_REFUND_RATE, BUILD_TILES, DECORATION_CATEGORIES, ERASE_TOOL, buil
 import { propThumbnail } from "../scenes/YardView";
 import { isTouchDevice } from "../input/TouchControls";
 import { addRotateBadge, makeRotateButton } from "./rotateUi";
+import { decorImageUrl } from "../customCatalog";
 import type { BobaShopState } from "@boba/shared/schema";
 
 /** game.events event: turn the prop being placed / the selected prop (⟳ button, build mode). */
@@ -105,7 +106,7 @@ export class BuildPanel {
     const el = Object.assign(document.createElement("button"), { type: "button", className: "decor-item build-item" });
     let swatch: HTMLElement;
     if (image) {
-      swatch = Object.assign(document.createElement("img"), { className: pixelArt ? "swatch-img pixel" : "swatch-img", src: `${import.meta.env.BASE_URL}${image}`, alt: "" });
+      swatch = Object.assign(document.createElement("img"), { className: pixelArt ? "swatch-img pixel" : "swatch-img", src: decorImageUrl(image), alt: "" });
     } else {
       swatch = Object.assign(document.createElement("span"), { className: "swatch" });
       swatch.style.background = `linear-gradient(135deg, ${color} 60%, ${accent} 60%)`;

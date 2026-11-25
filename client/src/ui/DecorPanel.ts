@@ -2,6 +2,7 @@ import { Callbacks, type Room } from "@colyseus/sdk";
 import { DECORATION_CATALOG, DECORATION_CATEGORIES, DECORATION_REFUND_RATE, rotationCount, type DecorationDef } from "@boba/shared";
 import type { BobaShopState } from "@boba/shared/schema";
 import { addRotateBadge, makeRotateButton } from "./rotateUi";
+import { decorImageUrl } from "../customCatalog";
 
 /** game.events event: the player started dragging a catalog item out of the panel. */
 export const PALETTE_DRAG_START = "palette-drag-start";
@@ -120,7 +121,7 @@ export class DecorPanel {
     if (def.image) {
       const img = document.createElement("img");
       img.className = "swatch-img";
-      img.src = `${import.meta.env.BASE_URL}${def.image}`;
+      img.src = decorImageUrl(def.image);
       img.alt = "";
       img.draggable = false;
       swatch = img;

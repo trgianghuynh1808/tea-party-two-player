@@ -150,7 +150,7 @@ export const isSolidShape = (shape: BuildShape) => shape === "wall" || shape ===
 /** Build kind of a decorate-catalog piece placed in the yard (prefixed so it never clashes with yard kinds). */
 export const decorPropKind = (decorKind: string) => `decor_${decorKind}`;
 
-function decorProp(d: DecorationDef): BuildTileDef {
+export function decorProp(d: DecorationDef): BuildTileDef {
   return {
     kind: decorPropKind(d.kind),
     label: d.label,

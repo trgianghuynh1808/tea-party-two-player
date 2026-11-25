@@ -147,6 +147,8 @@ import {
   tileKey,
   type TileGetter,
 } from "./world";
+/** Custom furniture added through the admin portal. */
+export * from "./customDecor";
 export * from "./seating";
 import { distanceToBox, footprintBox } from "./seating";
 import { getDecorationDef, type PlacedDecoration } from "./decor";
