@@ -2,12 +2,12 @@ import { rm } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
 import {
   DECOR_ROOMS,
-  SERVER_PORT,
   canPlaceDecoration,
   getDecorationDef,
   refundFor,
 } from "@boba/shared";
 import { joinAsHost, shopFile, userFile, writeShopSave } from "./helpers";
+import { TEST_SERVER_URL } from "./ports";
 
 /**
  * Tabletop gadgets (task .agents/tasks/2026-11-24-gadgets-tabletop.md):
@@ -18,7 +18,7 @@ import { joinAsHost, shopFile, userFile, writeShopSave } from "./helpers";
  * - T3: a save restores the table and its phone, while an orphan phone (no table) is dropped.
  */
 
-const SERVER = `http://localhost:${SERVER_PORT}`;
+const SERVER = TEST_SERVER_URL;
 const ADMIN_TOKEN = "test-admin-token";
 const AUTH = { Authorization: `Bearer ${ADMIN_TOKEN}` };
 

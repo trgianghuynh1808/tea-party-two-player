@@ -1,6 +1,7 @@
 import { devices, expect, test, type Browser, type Page } from "@playwright/test";
-import { SERVER_PORT, YARD_COLS, YARD_ROWS, canBuildCell, tileKey } from "@boba/shared";
+import { YARD_COLS, YARD_ROWS, canBuildCell, tileKey } from "@boba/shared";
 import { joinAsHost } from "./helpers";
+import { TEST_CLIENT_URL, TEST_SERVER_URL } from "./ports";
 
 /**
  * Mobile build UI after the build/decorate parity update (task .agents/tasks/2026-11-25-task-04-mobile-build-ui-test.md):
@@ -9,7 +10,7 @@ import { joinAsHost } from "./helpers";
  * - T2: pick a tool, build one pine through the room, re-click unpicks, closing build mode hides the panel.
  */
 
-const SERVER = `http://localhost:${SERVER_PORT}`;
+const SERVER = TEST_SERVER_URL;
 const ADMIN_TOKEN = "test-admin-token";
 const AUTH = { Authorization: `Bearer ${ADMIN_TOKEN}` };
 
@@ -38,7 +39,7 @@ const phoneContext = (browser: Browser) =>
   browser.newContext({
     ...devices["iPhone 13"],
     deviceScaleFactor: 1,
-    baseURL: "http://localhost:5173",
+    baseURL: TEST_CLIENT_URL,
   });
 
 /** An element's box lies inside the viewport (the turned page's rects are already in screen space). */
