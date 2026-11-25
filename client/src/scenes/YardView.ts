@@ -43,10 +43,10 @@ export const propKey = (kind: string) => `build-prop-${kind}`;
 export const propUrl = (image: string) => `assets/decor/yard/${image}.png`;
 
 /**
- * How a prop is drawn facing `rotation`: furniture from the decorate catalog uses its per-facing artwork
- * (mirrored for flip pieces), outdoor pixel art is mirrored at rotation 1. undefined = artwork not loaded.
+ * How a prop is drawn facing `rotation`: furniture from the decorate catalog uses its per-facing artwork,
+ * outdoor pixel art has a single facing. undefined = artwork not loaded.
  */
-export function propTexture(scene: Phaser.Scene, def: BuildTileDef, rotation = 0): { key: string; scale: number; flipX: boolean } | undefined {
+export function propTexture(scene: Phaser.Scene, def: BuildTileDef, rotation = 0): { key: string; scale: number } | undefined {
   const decor = def.decor ? getDecorationDef(def.decor) : undefined;
   if (decor) {
     const view = decor.rotation === "views" ? VIEW_ORDER[rotation] : undefined;
@@ -54,10 +54,10 @@ export function propTexture(scene: Phaser.Scene, def: BuildTileDef, rotation = 0
     const key = view ? decorTextureKey(decor.kind, view) : decor.views && scene.textures.exists(front) ? front : decorTextureKey(decor.kind);
     if (!scene.textures.exists(key)) return undefined;
     const height = scene.textures.getFrame(key).height;
-    return { key, scale: (decor.imageHeight ?? decor.height) / height, flipX: decor.rotation === "flip" && rotation === 1 };
+    return { key, scale: (decor.imageHeight ?? decor.height) / height };
   }
   const key = propKey(def.kind);
-  return scene.textures.exists(key) ? { key, scale: PROP_SCALE, flipX: rotation === 1 } : undefined;
+  return scene.textures.exists(key) ? { key, scale: PROP_SCALE } : undefined;
 }
 
 /** Catalog thumbnail of a prop (build panel), or undefined for tiles drawn with code. */
@@ -209,7 +209,7 @@ export class YardView {
       const tex = propTexture(this.scene, structure, rotation);
       if (tex) {
         const at = propAnchor(cx, cy);
-        view.structure = this.scene.add.image(at.x, at.y + PROP_ART_DROP, tex.key).setOrigin(0.5, 1).setScale(tex.scale).setFlipX(tex.flipX).setDepth(at.y);
+        view.structure = this.scene.add.image(at.x, at.y + PROP_ART_DROP, tex.key).setOrigin(0.5, 1).setScale(tex.scale).setDepth(at.y);
       }
     } else if (structure) {
       const key = pieceKey(pieceName(this.tiles, structure, cx, cy));

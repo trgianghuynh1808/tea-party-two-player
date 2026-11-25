@@ -1,16 +1,22 @@
 import { existsSync, readFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { inflateSync } from "node:zlib";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import {
   DECORATION_CATALOG,
   DECORATION_CATEGORIES,
+  DECOR_ROOMS,
+  buildRotationCount,
   canPlaceDecoration,
   footprintOf,
+  getBuildTile,
   getDecorationDef,
   normalizeRotation,
+  parseCustomDecoration,
   rotationCount,
 } from "@boba/shared";
-import { joinAsHost } from "./helpers";
+import { joinAsHost, shopFile, userFile } from "./helpers";
+import { TEST_SERVER_URL } from "./ports";
 
 test("T1: bed_pink is gone from the catalog, its art file is deleted, and other beds remain", () => {
   expect(getDecorationDef("bed_pink")).toBeUndefined();
@@ -256,7 +262,7 @@ test("bathroom-2 T1: the 16 new items are in the bathroom category, with art on 
 
 /** Unique per test run; shops persist per username in server/data/. */
 let userSeq = 0;
-const uniqueUser = () => `p1-${Date.now()}-${userSeq++}`;
+const uniqueUser = () => `p1-${Date.now().toString(36)}-${userSeq++}`;
 
 test("rotate-badge T1: only items with rotationCount > 1 carry the ⟳ badge in the decor panel", async ({ page }) => {
   await joinAsHost(page, uniqueUser());
@@ -278,4 +284,143 @@ test("rotate-badge T1: only items with rotationCount > 1 carry the ⟳ badge in 
   }));
   const key = (item: { label: string; badge: string }) => `${item.label}\u0000${item.badge}`;
   expect(domItems.map(key).sort()).toStrictEqual(expected.map(key).sort());
+});
+
+// ---------------------------------------------------------------- only 4-view pieces can rotate
+
+const SERVER = TEST_SERVER_URL;
+const ADMIN_TOKEN = "test-admin-token";
+const AUTH = { Authorization: `Bearer ${ADMIN_TOKEN}` };
+
+type PlacedState = { id: string; kind: string; x: number; y: number; rotation: number };
+
+/** The part of `window.__GAME__` these tests use (full shape: client/src/testHook.ts). */
+type GameHook = {
+  send(type: string, payload?: unknown): void;
+  state: { decorations: Iterable<PlacedState> };
+};
+
+const decorationsOf = (page: Page) =>
+  page.evaluate(() => {
+    const g = (window as { __GAME__?: GameHook }).__GAME__;
+    return g ? Array.from(g.state.decorations, (d) => ({ id: d.id, kind: d.kind, x: d.x, y: d.y, rotation: d.rotation })) : [];
+  });
+
+const buyDecoration = (page: Page, x: number, y: number, kind: string, rotation: number) =>
+  page.evaluate(
+    ([k, px, py, rot]) => (window as { __GAME__?: GameHook }).__GAME__?.send("buy_decoration", { kind: k, x: px, y: py, rotation: rot }),
+    [kind, x, y, rotation] as const,
+  );
+
+/** A free shop-floor spot (10 px grid) where `kind` at `rotation` fits clear of `others`. */
+function decorSpot(kind: string, others: PlacedState[], rotation = 0): { x: number; y: number } {
+  const floor = DECOR_ROOMS[0].floor;
+  for (let y = floor.minY; y <= floor.maxY; y += 10)
+    for (let x = floor.minX; x <= floor.maxX; x += 10)
+      if (canPlaceDecoration(kind, x, y, others, undefined, rotation)) return { x, y };
+  throw new Error(`no free spot for ${kind}`);
+}
+
+test("only-4-views T1: only pieces with all 4 view images can rotate (decorate + build + custom)", () => {
+  const hasFourViews = (def: (typeof DECORATION_CATALOG)[number]) =>
+    (["front", "left", "back", "right"] as const).every((view) => def.views?.[view] !== undefined);
+
+  for (const def of DECORATION_CATALOG) {
+    const expected = def.rotation === "views" && hasFourViews(def) ? 4 : 1;
+    expect(rotationCount(def), def.kind).toBe(expected);
+    expect((def.rotation ?? "none") as string, def.kind).not.toBe("flip");
+    expect((def.rotation ?? "none") as string, def.kind).not.toBe("rotate");
+  }
+  // Rugs lie flat: one artwork, no turning.
+  for (const def of DECORATION_CATALOG.filter((d) => d.layer === "floor")) expect(rotationCount(def), def.kind).toBe(1);
+
+  // Build mode follows the same rule: one-image furniture/props can't turn, 4-view furniture can.
+  expect(buildRotationCount(getBuildTile("pine_s")!)).toBe(1);
+  expect(buildRotationCount(getBuildTile("decor_bed_red")!)).toBe(1);
+  expect(buildRotationCount(getBuildTile("decor_sofa_lilac")!)).toBe(4);
+
+  // A custom piece sent with an old "flip" rotation loads as "none" (not rejected, never turns).
+  const custom = parseCustomDecoration({
+    kind: "custom_flip_probe",
+    label: "Flip probe",
+    price: 10,
+    layer: "object",
+    width: 20,
+    height: 20,
+    imageHeight: 20,
+    rotation: "flip",
+  });
+  expect(custom?.rotation).toBe("none");
+  expect(custom && rotationCount(custom)).toBe(1);
+});
+
+test("only-4-views T2: the server clamps a one-image piece to facing 0 but keeps a 4-view piece turned", async ({
+  page,
+  request,
+}) => {
+  const hostName = uniqueUser();
+  try {
+    await joinAsHost(page, hostName);
+    const patch = await request.patch(`${SERVER}/admin/users/${encodeURIComponent(hostName)}/money`, {
+      headers: AUTH,
+      data: { set: 1000 },
+    });
+    expect(patch.status()).toBe(200);
+
+    // Both buys ask for rotation 1: the bed has one image, the sofa has all 4 views.
+    const bed = decorSpot("bed_red", []);
+    await buyDecoration(page, bed.x, bed.y, "bed_red", 1);
+    const sofa = decorSpot("sofa_lilac", [{ id: "bed", kind: "bed_red", x: bed.x, y: bed.y, rotation: 0 }], 1);
+    await buyDecoration(page, sofa.x, sofa.y, "sofa_lilac", 1);
+
+    await expect.poll(async () => (await decorationsOf(page)).length).toBe(2);
+    await expect
+      .poll(async () => {
+        const pieces = await decorationsOf(page);
+        const bedPiece = pieces.find((d) => d.kind === "bed_red");
+        const sofaPiece = pieces.find((d) => d.kind === "sofa_lilac");
+        return bedPiece && sofaPiece ? [bedPiece.rotation, sofaPiece.rotation] : [];
+      })
+      .toStrictEqual([0, 1]);
+  } finally {
+    await rm(shopFile(hostName), { force: true });
+    await rm(userFile(hostName), { force: true });
+  }
+});
+
+test("only-4-views T3: only 4-view pieces show the ⟳ badge in the decorate and build panels", async ({ page }) => {
+  await joinAsHost(page, uniqueUser());
+
+  // Decorate panel: read the badges by card name.
+  await page.locator("#decorate-btn").click();
+  await page.evaluate(() =>
+    document.querySelectorAll<HTMLDetailsElement>("#decor-panel details.decor-section").forEach((s) => (s.open = true)),
+  );
+  const decorBadges = (await page.evaluate(() =>
+    Object.fromEntries(
+      [...document.querySelectorAll("#decor-panel .decor-item")].map((el) => [
+        el.querySelector(".name")?.textContent ?? "",
+        !!el.querySelector(".rotate-badge"),
+      ]),
+    ),
+  )) as Record<string, boolean>;
+  expect(decorBadges["Giường chăn đỏ"]).toBe(false);
+  expect(decorBadges["Đôn gỗ"]).toBe(false);
+  expect(decorBadges["Thảm bánh mì"]).toBe(false);
+  expect(decorBadges["Sofa tím oải hương"]).toBe(true);
+  expect(decorBadges["Kệ sách"]).toBe(true);
+
+  // Build panel: opening it closes Decorate; players start in the yard so it is enabled.
+  await page.locator("#build-btn").click();
+  await page.locator("#build-panel .build-item").first().waitFor();
+  const buildBadges = (await page.evaluate(() =>
+    Object.fromEntries(
+      [...document.querySelectorAll("#build-panel .build-item")].map((el) => [
+        el.querySelector(".name")?.textContent ?? "",
+        !!el.querySelector(".rotate-badge"),
+      ]),
+    ),
+  )) as Record<string, boolean>;
+  expect(buildBadges["Thông nhỏ"]).toBe(false);
+  expect(buildBadges["Sofa tím oải hương"]).toBe(true);
 });

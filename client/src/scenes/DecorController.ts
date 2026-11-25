@@ -49,8 +49,8 @@ export function preloadDecorTextures(scene: Phaser.Scene) {
 
 /**
  * World point of a bed's pillow (where a sleeper's head goes), from DecorationDef.pillow and the drawn artwork
- * (bottom-aligned on the footprint like buildDecorVisual, mirrored when flipped). Beds with per-facing artwork
- * (pillows) read the pillow of the current view instead, never flipped.
+ * (bottom-aligned on the footprint like buildDecorVisual). Beds with per-facing artwork (pillows) read the
+ * pillow of the current view instead.
  */
 export function bedPillowPoint(scene: Phaser.Scene, bed: { kind: string; x: number; y: number; rotation?: number }): { x: number; y: number } {
   const def = getDecorationDef(bed.kind);
@@ -70,9 +70,7 @@ export function bedPillowPoint(scene: Phaser.Scene, bed: { kind: string; x: numb
   const key = decorTextureKey(def.kind);
   const source = scene.textures.exists(key) ? scene.textures.get(key).getSourceImage() : undefined;
   const artWidth = source ? (source.width * artHeight) / source.height : def.width;
-  const flipped = def.rotation === "flip" && bed.rotation === 1;
-  const fx = flipped ? 1 - def.pillow.x : def.pillow.x;
-  return { x: bed.x + (fx - 0.5) * artWidth, y: bed.y + def.height / 2 - artHeight * (1 - def.pillow.y) };
+  return { x: bed.x + (def.pillow.x - 0.5) * artWidth, y: bed.y + def.height / 2 - artHeight * (1 - def.pillow.y) };
 }
 
 /** Views furniture shares one scale, set by the front artwork's height, so every facing keeps the same pixel/world ratio. */
@@ -100,15 +98,13 @@ function buildDecorVisual(
   if (scene.textures.exists(key)) {
     const img = scene.add.image(0, 0, key).setAlpha(alpha);
     if (def.layer === "floor" || def.layer === "wall" || def.layer === "tabletop") {
-      // Flat art filling its box (wall art never turns; top-down gadgets can't either).
-      // Top-down art: size it unrotated, then turn it (a quarter turn swaps its on-screen width/height).
-      img.setDisplaySize(def.width, def.height).setAngle(def.rotation === "rotate" ? rotation * 90 : 0);
+      // Flat art filling its box: rugs, wall art and tabletop gadgets never turn.
+      img.setDisplaySize(def.width, def.height);
       const effect = def.effect === "breeze" ? buildBreeze(scene, def.width, def.height / 2, alpha) : [];
       return { objects: [img, ...effect], width: size.width, halfHeight: size.height / 2, hasArt: true };
     }
     // Views share the front artwork's scale (not each view's own height) so all facings render at the same ratio.
     img.setOrigin(0.5, 1).setY(def.height / 2).setScale(viewsScale(scene, def) ?? (def.imageHeight ?? def.height) / img.height);
-    if (def.rotation === "flip") img.setFlipX(rotation === 1);
     const top = Math.max(def.height / 2, img.displayHeight - def.height / 2);
     return { objects: [img], width: Math.max(def.width, img.displayWidth), halfHeight: top, hasArt: true };
   }
