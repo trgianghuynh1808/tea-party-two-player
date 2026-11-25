@@ -58,9 +58,22 @@ while true; do
   echo "🚀 Nhận task từ Claude: $task"
   echo "════════════════════════════════════════════"
 
+  # File plan chỉ có trên nhánh task/<slug>: nếu cây làm việc đang ở nhánh khác (vd staging), chuyển sang nhánh task
   if [[ ! -f "$task" ]]; then
-    echo "⚠️  Không thấy file task: $task"
+    slug=$(basename "$task" .md | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}-//')
+    if git show-ref --quiet "refs/heads/task/$slug" && [[ -z "$(git status --porcelain)" ]]; then
+      echo "↪  Không thấy $task ở nhánh hiện tại, chuyển sang task/$slug"
+      git checkout -q "task/$slug" || true
+    fi
+  fi
+
+  if [[ ! -f "$task" ]]; then
+    echo "⚠️  Không thấy file task: $task (nhánh $(git rev-parse --abbrev-ref HEAD))"
     notify "Giao task lỗi" "Không thấy file $task"
+    # Báo cho bên chờ biết ngay, nếu không status kẹt ở 'queued' và wait-task.sh chỉ đoán "watcher không chạy"
+    mkdir -p "$STATUS_DIR"
+    printf 'stuck %s\n' "$(date +%s)" > "$STATUS_DIR/$(basename "$task" .md).status"
+    say_user dev "Không thấy file task $(basename "$task") (đang ở nhánh $(git rev-parse --abbrev-ref HEAD)). Task bị đánh dấu stuck."
   else
     set_status "$task" running
     say_user dev "Bắt đầu code: $(basename "$task" .md)"

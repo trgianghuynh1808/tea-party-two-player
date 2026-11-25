@@ -63,6 +63,16 @@ AUTO_MODE="false"
 STAGING_BRANCH="staging"
 MAIN_BRANCH="main"
 MAX_FIX_CYCLES="2"
+# Model theo vai (alias haiku | sonnet | opus hoặc id đầy đủ). Trống = mặc định của claude CLI.
+MODEL_MANAGER=""
+MODEL_TECHLEAD=""
+# Giới hạn số lượt mỗi lần gọi (chặn một lần chạy lạc đốt quota)
+MAX_TURNS_MANAGER="20"
+MAX_TURNS_TECHLEAD="150"
+# /auto tách task: "lines" (mỗi dòng một task, không tốn Claude) hoặc "claude" (Manager tách)
+AUTO_SPLIT="lines"
+# Tin thường (không có lệnh): "false" = trả lời mẫu, "true" = để Claude Manager trả lời (tốn quota)
+CHAT_WITH_CLAUDE="false"
 ENV
     echo "  ✓ $AG/room.env"
   fi
