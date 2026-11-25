@@ -2,8 +2,8 @@
 # Daemon của một phòng: chạy ở thư mục gốc project (agent-room start gọi script này).
 # Mỗi vòng quyết định MỘT việc rồi làm; việc cứng chạy bằng code (scripts/room-ops.py), Claude chỉ được gọi khi cần phán đoán.
 #
-#   inbox có tin            → room-ops.py xử lý (/status /stop /resume /ship /usage /auto, tin thường)
-#                             Claude Manager chỉ khi: AUTO_SPLIT="claude" (/auto) hoặc CHAT_WITH_CLAUDE="true" (tin thường)
+#   inbox có tin            → room-ops.py xử lý (/status /stop /resume /ship /usage /task, tin thường)
+#                             Claude Manager chỉ khi: AUTO_SPLIT="claude" (/task) hoặc CHAT_WITH_CLAUDE="true" (tin thường)
 #   AUTO_MODE=true, task đầu tiên chưa xong:
 #     [pending]             → Tech Lead (Claude) lên plan, không handoff
 #     [plan_ready]          → room-ops.py check-plan: OK → tự duyệt + handoff · BLOCK → chặn · REVIEW → Claude Manager xem
@@ -232,7 +232,7 @@ Yêu cầu cho tin nhắn:
 - Tiếng Việt, thân thiện và thoải mái (xưng mình, gọi bạn, emoji vừa phải), dễ đọc: tách mục bằng dòng trống, tiêu đề in đậm bằng **, danh sách dùng gạch đầu dòng với một ý mỗi dòng, tên file và lệnh đặt trong dấu backtick.
 - Mở đầu bằng câu trả lời ngắn gọn cho câu hỏi. Có mục **Góc nhìn Tech Lead** nêu ý chính về kỹ thuật.
 - Chỉ dùng thông tin trong phân tích của Tech Lead và board, không bịa thêm. Nếu Tech Lead nói chưa chắc thì giữ nguyên sự chưa chắc đó.
-- Nếu có hướng làm cụ thể, thêm mục **Nếu bạn muốn mình làm** với các dòng lệnh /auto gợi ý (mỗi dòng một việc nhỏ) để bạn copy. Nhắc đây mới là gợi ý, chưa có gì được làm.
+- Nếu có hướng làm cụ thể, thêm mục **Nếu bạn muốn mình làm** với các dòng lệnh /task gợi ý (mỗi dòng một việc nhỏ) để bạn copy. Nhắc đây mới là gợi ý, chưa có gì được làm.
 - Tối đa khoảng 25 dòng. Chỉ trả về nội dung tin nhắn, không thêm lời dẫn và không bọc trong khối code.
 EOF
 }

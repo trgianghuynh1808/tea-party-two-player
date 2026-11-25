@@ -37,7 +37,7 @@ USAGE_LOG = f"{AG}/logs/usage.log"
 TASK_RE = re.compile(r"^- \[( |x)\] `(T\d+)` \[(\w+)\] (.*?) \(slug: `([^`]+)`\)\s*$")
 
 HELP = ("Mình chỉ hiểu mấy lệnh này thôi nha 😅\n"
-        "- `/auto <việc cần làm>` · mỗi dòng một việc\n"
+        "- `/task <việc cần làm>` · giao việc, mỗi dòng một việc\n"
         "- `/status` · xem tiến độ\n"
         "- `/health` · kiểm tra các agent\n"
         "- `/usage` · xem mức dùng token\n"
@@ -105,7 +105,7 @@ BOOL_WORDS = {"true": "true", "on": "true", "bật": "true", "bat": "true", "yes
 CONFIG = [
     ("approval", "PLAN_APPROVAL", "Plan Approval", ("ask", "auto"), "auto", "auto = tự duyệt, chỉ dừng khi rủi ro nghiêm trọng, thiếu ngữ cảnh hoặc bị chặn (rồi làm task kế tiếp) · ask = luôn chờ bạn duyệt bằng thẻ"),
     ("links", "COMMIT_LINKS", "Commit Links", "bool", "true", "bật = daemon push nhánh task lên GitHub để báo cáo có link commit"),
-    ("split", "AUTO_SPLIT", "Auto Split", ("lines", "claude"), "lines", "lines = mỗi dòng của /auto là một task · claude = Manager tách"),
+    ("split", "AUTO_SPLIT", "Auto Split", ("lines", "claude"), "lines", "lines = mỗi dòng của /task là một task · claude = Manager tách"),
     ("chat", "CHAT_WITH_CLAUDE", "Chat With Claude", "bool", "false", "bật = Claude trả lời tin thường (tốn quota)"),
     ("model_manager", "MODEL_MANAGER", "Manager Model", "model", "", "haiku, sonnet, opus hoặc id đầy đủ; `default` = mặc định của claude"),
     ("model_techlead", "MODEL_TECHLEAD", "Tech Lead Model", "model", "", "như trên"),
