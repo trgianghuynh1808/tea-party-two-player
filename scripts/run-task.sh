@@ -42,6 +42,13 @@ DEFAULT_CHECK_HINT="lệnh typecheck/lint và các test liên quan theo mục Co
 DEFAULT_VERIFY_HINT=""
 DEFAULT_VERIFY_AGENT="claude"     # claude = Claude Verify (Autopilot) · opencode = OpenCode tự Verify ngay sau khi code xong
 
+# A headless OpenCode run cannot answer a permission prompt, so a step that touches a path outside the project (e.g. a file in /tmp)
+# stalls until it is rejected. Allow the system temp folders up front; an OPENCODE_PERMISSION you set yourself wins.
+if [[ -z "${OPENCODE_PERMISSION:-}" ]]; then
+  OPENCODE_PERMISSION='{"external_directory":{"/tmp/*":"allow","/private/tmp/*":"allow","/var/folders/*":"allow"}}'
+fi
+export OPENCODE_PERMISSION
+
 CONFIG=".agents/config.sh"
 # shellcheck source=/dev/null
 if [[ -f "$CONFIG" ]]; then source "$CONFIG"; fi
