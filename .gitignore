@@ -31,3 +31,4 @@ server/data
 .agents/watcher.pid
 .agents/progress/
 .agents/bin/
+.agents/kit-version
