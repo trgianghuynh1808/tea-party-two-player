@@ -35,3 +35,5 @@ server/data
 .agents/plan.pid
 .agents/plan/
 .agents/board-archive/
+.agents/plan-feedback/
+.agents/notices/

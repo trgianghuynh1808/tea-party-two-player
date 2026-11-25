@@ -8,9 +8,11 @@ Used by scripts/manager-loop.sh so the Manager only needs Claude for judgement c
   room-ops.py say-file <role> <file>   same, text taken verbatim from a file
   room-ops.py inbox-args <file>     print the arguments of an inbox message (the /plan question)
   room-ops.py say-steps <role> <head> <step line>...   same, with the plan steps listed under <head>
+  room-ops.py step-start <total> <model> <step line>...   the Dev message when steps START (difficulty, model, description)
   room-ops.py status | stop | resume | usage [days]
   room-ops.py plan-path <slug>      path of the newest plan file for a task slug
   room-ops.py check-plan <slug>     prints OK | BLOCK: <why> | REVIEW: <why>
+  room-ops.py review-note <id> <reasons>   tell the user why a doubted plan was still approved
   room-ops.py approve <slug>        mark plan APPROVED_BY_MANAGER, commit, hand off to OpenCode
   room-ops.py block <id> <reason>   mark task BLOCKED, turn AUTO_MODE off, tell the user
   room-ops.py finalize              build the ship report (outbox, APPROVE_SHIP), phase AWAITING_SHIP_APPROVAL
@@ -41,6 +43,9 @@ HELP = ("Mình chỉ hiểu mấy lệnh này thôi nha 😅\n"
         "- `/health` · kiểm tra các agent\n"
         "- `/usage` · xem mức dùng token\n"
         "- `/plan <câu hỏi>` · hỏi đáp, phân tích project (chỉ đọc, không sửa gì)\n"
+        "- `/automode on|off` · bật hoặc tắt chế độ tự động\n"
+        "- `/config` · xem hoặc đổi cấu hình (`/config approval auto`)\n"
+        "- `/approve` · `/revise <góp ý>` · `/reject` · duyệt, nhờ sửa hoặc hủy plan đang chờ\n"
         "- `/clear` · dọn board và trạng thái cũ (lưu bản sao board)\n"
         "- `/clearlog` · dọn log chạy (giữ vài trăm dòng cuối)\n"
         "- `/stop` · dừng lại\n"
@@ -48,7 +53,9 @@ HELP = ("Mình chỉ hiểu mấy lệnh này thôi nha 😅\n"
         "- `/ship` · đưa lên main\n"
         "Gõ `/` để xem menu. Tin thường mình không đọc để tiết kiệm quota nhé 🌱")
 
-STATE_VI = {"pending": "chờ lên plan", "planning": "đang lên plan", "plan_ready": "plan xong, chờ duyệt",
+STATE_VI = {"pending": "chờ lên plan", "planning": "đang lên plan", "plan_ready": "plan xong, đang kiểm tra",
+            "awaiting_plan": "chờ bạn duyệt plan", "needs_info": "thiếu ngữ cảnh, chờ bạn bổ sung", "approved": "bạn đã duyệt, chờ tới lượt",
+            "revise": "Tech Lead đang sửa plan", "cancelled": "đã hủy",
             "in_progress": "OpenCode đang code", "done": "xong, chờ ship", "shipped": "đã ship", "BLOCKED": "bị chặn"}
 
 
@@ -93,7 +100,55 @@ def read_board():
         return f.read().split("\n")
 
 
+BOOL_WORDS = {"true": "true", "on": "true", "bật": "true", "bat": "true", "yes": "true", "1": "true",
+              "false": "false", "off": "false", "tắt": "false", "tat": "false", "no": "false", "0": "false"}
+# name used in chat, env key, board label, kind, default, explanation. Only these can be changed from chat (never ports, branches, ids).
+CONFIG = [
+    ("approval", "PLAN_APPROVAL", "Plan Approval", ("ask", "auto"), "auto", "auto = tự duyệt, chỉ dừng khi rủi ro nghiêm trọng, thiếu ngữ cảnh hoặc bị chặn (rồi làm task kế tiếp) · ask = luôn chờ bạn duyệt bằng thẻ"),
+    ("links", "COMMIT_LINKS", "Commit Links", "bool", "true", "bật = daemon push nhánh task lên GitHub để báo cáo có link commit"),
+    ("split", "AUTO_SPLIT", "Auto Split", ("lines", "claude"), "lines", "lines = mỗi dòng của /auto là một task · claude = Manager tách"),
+    ("chat", "CHAT_WITH_CLAUDE", "Chat With Claude", "bool", "false", "bật = Claude trả lời tin thường (tốn quota)"),
+    ("model_manager", "MODEL_MANAGER", "Manager Model", "model", "", "haiku, sonnet, opus hoặc id đầy đủ; `default` = mặc định của claude"),
+    ("model_techlead", "MODEL_TECHLEAD", "Tech Lead Model", "model", "", "như trên"),
+    ("fix_cycles", "MAX_FIX_CYCLES", "Max Fix Cycles", (1, 5), "2", "số vòng sửa tối đa trước khi báo kẹt (1 đến 5)"),
+    ("keep_shipped", "KEEP_SHIPPED", "Keep Shipped", (0, 50), "5", "số task đã ship giữ lại trên board sau /ship (0 đến 50)"),
+]
+CONFIG_LABELS = [c[2] for c in CONFIG] + ["Dev Port"]
+
+
+def config_value(env, key, default):
+    return env.get(key, default)
+
+
+def display_value(kind, value):
+    if kind == "bool":
+        return "ON" if value == "true" else "OFF"
+    if kind == "model":
+        return value or "default"
+    return value
+
+
+def config_pairs(env=None):
+    """(label, value shown on the board) for every setting that changes how the room behaves."""
+    env = read_env() if env is None else env
+    rows = [(label, display_value(kind, config_value(env, key, default))) for _, key, label, kind, default, _ in CONFIG]
+    if env.get("APP_PORT"):
+        rows.append(("Dev Port", env["APP_PORT"]))
+    return rows
+
+
+def sync_config(lines):
+    """Keep the settings block in the board header equal to room.env, so `/status` and the dashboard always show the truth."""
+    rx = re.compile(r"^- \*\*(" + "|".join(re.escape(l) for l in CONFIG_LABELS) + r"):\*\*")
+    lines[:] = [l for l in lines if not rx.match(l)]
+    at = next((i for i, l in enumerate(lines) if l.startswith("- **Staging Branch:**")), None)
+    if at is None:
+        at = next((i for i, l in enumerate(lines) if l.startswith("- **Current Phase:**")), min(2, len(lines) - 1))
+    lines[at + 1:at + 1] = [f"- **{label}:** {value}" for label, value in config_pairs()]
+
+
 def write_board(lines):
+    sync_config(lines)
     with open(BOARD, "w", encoding="utf8") as f:
         f.write("\n".join(lines))
 
@@ -135,7 +190,7 @@ def log_line(lines, msg):
 def set_state(lines, task_id, state):
     for t in tasks(lines):
         if t["id"] == task_id:
-            mark = "x" if state in ("done", "shipped") else " "
+            mark = "x" if state in ("done", "shipped", "cancelled") else " "
             lines[t["i"]] = f"- [{mark}] `{t['id']}` [{state}] {t['title']} (slug: `{t['slug']}`)"
             return True
     return False
@@ -171,13 +226,13 @@ def slugify(s):
 
 
 ICON = {"pending": "⏳", "planning": "📝", "plan_ready": "📋", "in_progress": "🔧", "done": "✅",
-        "shipped": "🚀", "BLOCKED": "🚧"}
+        "shipped": "🚀", "BLOCKED": "🚧", "awaiting_plan": "🕒", "needs_info": "❓", "approved": "👍", "revise": "✏️", "cancelled": "🚫"}
 
 
 def one_line_status():
     lines = read_board()
     ts = tasks(lines)
-    finished = [t for t in ts if t["state"] in ("done", "shipped")]
+    finished = [t for t in ts if t["state"] in ("done", "shipped", "cancelled")]
     return f"Hiện tại: **{get_phase(lines)}** · {len(finished)}/{len(ts)} việc xong"
 
 
@@ -185,7 +240,7 @@ def status_text():
     lines = read_board()
     ts = tasks(lines)
     e = read_env()
-    finished = [t for t in ts if t["state"] in ("done", "shipped")]
+    finished = [t for t in ts if t["state"] in ("done", "shipped", "cancelled")]
     out = ["📋 **Tình hình dự án**",
            f"- Giai đoạn: **{get_phase(lines)}** · chế độ tự động: **{'BẬT' if e.get('AUTO_MODE') == 'true' else 'TẮT'}**",
            f"- Tiến độ: **{len(finished)}/{len(ts)}** việc xong"]
@@ -194,8 +249,92 @@ def status_text():
         for t in ts:
             out.append(f"{ICON.get(t['state'], '•')} **{t['id']}** · {short(t['title'], 80)} ({STATE_VI.get(t['state'], t['state'])})")
     else:
-        out += ["", "Board đang trống nè 🍃 Gõ `/auto <việc cần làm>` để mình bắt đầu nhé."]
+        out += ["", "Board đang trống nè 🍃 Gõ `/task <việc cần làm>` để mình bắt đầu nhé."]
+    out += ["", "**Cấu hình** (đổi bằng `/config`)"]
+    pretty = {"Plan Approval": lambda v: "bạn duyệt plan" if v == "ask" else "tự duyệt", "Commit Links": lambda v: "bật" if v == "ON" else "tắt",
+              "Auto Split": lambda v: "mỗi dòng một task" if v == "lines" else "Claude tách", "Chat With Claude": lambda v: "bật" if v == "ON" else "tắt"}
+    names = {"Plan Approval": "Duyệt plan", "Commit Links": "Link commit", "Auto Split": "Tách /auto", "Chat With Claude": "Claude trả lời tin thường",
+             "Manager Model": "Model Manager", "Tech Lead Model": "Model Tech Lead", "Max Fix Cycles": "Vòng sửa tối đa", "Keep Shipped": "Giữ task đã ship",
+             "Dev Port": "Cổng dev"}
+    for label, value in config_pairs(e):
+        shown = pretty.get(label, lambda v: v)(value)
+        out.append(f"- {names.get(label, label)}: **{shown}**" + (f" (`{value}`)" if label in pretty and shown != value else ""))
     return "\n".join(out)
+
+
+def cmd_automode(args):
+    arg = (args.split() or ["status"])[0].lower()
+    if arg in BOOL_WORDS and BOOL_WORDS[arg] == "false":
+        return cmd_stop()
+    lines = read_board()
+    e = read_env()
+    on = e.get("AUTO_MODE") == "true"
+    if arg not in BOOL_WORDS:
+        unfinished = [t for t in tasks(lines) if not t["done"]]
+        return (f"Chế độ tự động đang **{'BẬT' if on else 'TẮT'}** {'▶️' if on else '⏹'}\n"
+                f"- Còn {len(unfinished)} việc chưa xong · duyệt plan: **{e.get('PLAN_APPROVAL', 'auto')}**\n"
+                "Gõ `/automode on` để bật, `/automode off` để tắt, `/config` để xem cấu hình.")
+    if on:
+        return "Chế độ tự động đang bật rồi mà 😄 Bạn gõ `/status` để xem tiến độ nhé."
+    unfinished = [t for t in tasks(lines) if not t["done"]]
+    blocked = [t for t in unfinished if t["state"] == "BLOCKED"]
+    set_auto(lines, True, "RUNNING" if unfinished else "IDLE")
+    log_line(lines, "/automode on: chế độ tự động bật.")
+    write_board(lines)
+    out = ["Đã **bật chế độ tự động** ▶️", ""]
+    out.append(f"- Có **{len(unfinished)} việc** đang chờ, mình xử lý lần lượt nè" if unfinished else
+               "- Board đang trống: gõ `/task <việc cần làm>` để giao việc")
+    out.append(f"- Duyệt plan: **{'bạn duyệt bằng thẻ' if e.get('PLAN_APPROVAL', 'auto') == 'ask' else 'tự duyệt'}**")
+    if blocked:
+        out.append(f"- ⚠️ {len(blocked)} task đang BLOCKED, gõ `/resume` để thử lại")
+    try:
+        with open(f"{AG}/watcher.pid", encoding="utf8") as f:
+            os.kill(int(f.read().strip()), 0)
+    except (OSError, ValueError):
+        out.append("- ⚠️ Senior Dev watcher (OpenCode) chưa chạy nên chưa giao việc được, dùng `/health` để kiểm tra")
+    return "\n".join(out)
+
+
+def cmd_config(args):
+    parts = args.split(None, 1)
+    e = read_env()
+    if not parts:
+        out = ["⚙️ **Cấu hình phòng**", ""]
+        for name, key, label, kind, default, why in CONFIG:
+            out.append(f"- `{name}` = **{display_value(kind, config_value(e, key, default))}** · {why}")
+        out += ["", "Đổi bằng `/config <khóa> <giá trị>`, ví dụ `/config approval auto`. Các cấu hình này cũng hiện trong `/status` và trên board."]
+        return "\n".join(out)
+    name = parts[0].lower().replace("-", "_")
+    entry = next((c for c in CONFIG if name in (c[0], c[1].lower())), None)
+    if not entry:
+        return "Mình không đổi được `" + parts[0] + "` từ chat 🙅 Khóa hợp lệ: " + ", ".join(f"`{c[0]}`" for c in CONFIG)
+    _, key, label, kind, default, why = entry
+    if len(parts) < 2:
+        return f"`{entry[0]}` hiện là **{display_value(kind, config_value(e, key, default))}**. {why}\nĐổi bằng `/config {entry[0]} <giá trị>`."
+    raw = parts[1].strip()
+    if kind == "bool":
+        val = BOOL_WORDS.get(raw.lower())
+        hint = "`on` hoặc `off`"
+    elif kind == "model":
+        val = "" if raw.lower() in ("default", "mặc định", "none", "-") else raw if re.fullmatch(r"[A-Za-z0-9._:/-]{1,80}", raw) else None
+        hint = "`haiku`, `sonnet`, `opus`, một id model hoặc `default`"
+    elif isinstance(kind, tuple) and isinstance(kind[0], int):
+        val = raw if raw.isdigit() and kind[0] <= int(raw) <= kind[1] else None
+        hint = f"một số từ {kind[0]} đến {kind[1]}"
+    else:
+        val = raw.lower() if raw.lower() in kind else None
+        hint = " hoặc ".join(f"`{k}`" for k in kind)
+    if val is None:
+        return f"Giá trị `{raw}` không hợp lệ cho `{entry[0]}` 🙅 Dùng {hint}."
+    before = config_value(e, key, default)
+    set_env(key, val)
+    lines = read_board()
+    log_line(lines, f"/config {entry[0]}: {display_value(kind, before)} → {display_value(kind, val)}.")
+    write_board(lines)
+    note = ""
+    if key == "PLAN_APPROVAL" and val == "auto" and any(t["state"] == "awaiting_plan" for t in tasks(lines)):
+        note = "\nPlan đang chờ vẫn cần bạn duyệt (`/approve`), chế độ mới áp dụng cho các plan sau."
+    return f"Đã đổi **{label}**: {display_value(kind, before)} → **{display_value(kind, val)}** ✅ Áp dụng từ lần kế tiếp, và đã cập nhật trên board.{note}"
 
 
 def cmd_stop():
@@ -217,6 +356,8 @@ def cmd_resume():
     for t in ts:
         if t["state"] == "BLOCKED":
             set_state(lines, t["id"], "pending")
+            for f in glob.glob(f"{AG}/notices/skip-{t['id']}-*"):
+                os.remove(f)
     set_auto(lines, True, "RUNNING")
     log_line(lines, "/resume: AUTO_MODE bật, task BLOCKED chuyển lại pending.")
     write_board(lines)
@@ -256,8 +397,8 @@ def busy_reason():
     if read_env().get("AUTO_MODE") == "true":
         return "chế độ tự động đang bật"
     for t in tasks(read_board()):
-        if t["state"] in ("planning", "plan_ready", "in_progress"):
-            return f"{t['id']} đang dở ({t['state']})"
+        if t["state"] in ("planning", "plan_ready", "in_progress", "revise", "approved"):
+            return f"{t['id']} đang dở ({STATE_VI.get(t['state'], t['state'])})"
     for f in glob.glob(f"{AG}/status/*.status"):
         try:
             with open(f, encoding="utf8") as fh:
@@ -307,7 +448,7 @@ def cmd_clear():
     set_env("AUTO_MODE", "false")
     n_state = remove_files([f"{AG}/status/*", f"{AG}/progress/*", f"{AG}/queue/*"])
     n_msg = remove_files([f"{AG}/inbox/processed/*", f"{AG}/inbox/failed/*", f"{AG}/outbox/sent/*", f"{AG}/outbox/failed/*"])
-    n_plan = remove_files([f"{AG}/plan/*"])
+    n_plan = remove_files([f"{AG}/plan/*", f"{AG}/plan-feedback/*"])
     remove_files([f"{AG}/manager.sig"])
     return ("Dọn dẹp xong nè 🧹\n\n"
             f"- **Board:** đã reset ({len(ts)} task), bản sao ở `.agents/board-archive/{os.path.basename(archive)}`. Task mới sẽ tiếp tục từ **T{next_task_number(fresh):02d}**\n"
@@ -349,7 +490,7 @@ def cmd_auto(args):
     items = [clean_item(l) for l in args.splitlines()]
     items = [i for i in items if i]
     if not items:
-        return "Bạn cho mình biết việc cần làm nhé 📝\nCách dùng: `/auto <việc cần làm>`, mỗi dòng một việc."
+        return "Bạn cho mình biết việc cần làm nhé 📝\nCách dùng: `/task <việc cần làm>`, mỗi dòng một việc."
     e = read_env()
     main, stg = e.get("MAIN_BRANCH", "main"), e.get("STAGING_BRANCH", "staging")
     rc, _ = git("show-ref", "--verify", "--quiet", f"refs/heads/{stg}")
@@ -370,7 +511,7 @@ def cmd_auto(args):
                [next((i for i, l in enumerate(lines) if l.startswith("## Checklist")), marker - 1)])
     lines[last + 1:last + 1] = new
     set_auto(lines, True, "RUNNING")
-    log_line(lines, f"/auto: thêm {len(new)} task, AUTO_MODE bật.")
+    log_line(lines, f"/task: thêm {len(new)} task, AUTO_MODE bật.")
     write_board(lines)
     return ("Nhận rồi nha! 🚀 Mình ghi **" + str(len(new)) + " việc** vào board:\n\n"
             + "\n".join(f"{i + 1}. {short(t, 110)}" for i, t in enumerate(items))
@@ -387,8 +528,7 @@ def cleanup_after_ship(lines, keep):
         for t in shipped:
             for f in glob.glob(f"{AG}/status/*{t['slug']}*.status"):
                 os.remove(f); n_status += 1
-            pf = f"{PROGRESS_DIR}/{t['slug']}.json"
-            if os.path.exists(pf):
+            for pf in glob.glob(f"{PROGRESS_DIR}/{t['slug']}.*"):
                 os.remove(pf); n_prog += 1
         if n_status or n_prog:
             out.append(f"{n_status} status, {n_prog} progress")
@@ -506,28 +646,30 @@ def cmd_check_plan(slug):
         return "BLOCK: plan đụng tới file .env"
     if re.search(r"DROP\s+(TABLE|DATABASE|SCHEMA)|TRUNCATE\s|DELETE\s+FROM", text, re.I):
         return "BLOCK: plan có thao tác xoá dữ liệu (DROP/TRUNCATE/DELETE FROM)"
-    review = []
+    review, critical = [], []
     if len(steps) > 8:
         review.append(f"plan có {len(steps)} bước (>8)")
     if any(not re.match(r"^- \[[ x]\] \d+\. \[(dễ|vừa|khó)\]", s) for s in steps):
         review.append("có bước thiếu nhãn độ khó")
     if re.search(r"secret|credential|private[_ ]key|api[_ -]?key|\.pem\b", text, re.I):
-        review.append("nhắc tới secret/credential/key")
+        critical.append("nhắc tới secret/credential/key")
     if re.search(r"migrat", text, re.I):
-        review.append("có migration")
+        critical.append("có migration")
     if re.search(r"\.github/workflows|Dockerfile|docker-compose|\bdeploy", text, re.I):
-        review.append("đụng cấu hình CI/deploy")
+        critical.append("đụng cấu hình CI/deploy")
     if re.search(r"package-lock\.json|pnpm-lock\.yaml|yarn\.lock", text):
         review.append("đụng lockfile")
     if re.search(r"rm\s+-rf", text):
-        review.append("có rm -rf")
+        critical.append("có rm -rf")
     none_mode = re.search(r"^Verify mode:\s*none", text, re.M | re.I)
     if not none_mode and not re.search(r"\b(npm|npx|pnpm|yarn|pytest|vitest|jest|playwright|go test|cargo test|make test)\b", text):
         review.append("không thấy lệnh test cụ thể")
+    if critical:   # serious: with PLAN_APPROVAL=auto the plan is held for the user instead of being approved
+        return "CRITICAL: " + "; ".join(critical + review)
     return "REVIEW: " + "; ".join(review) if review else "OK"
 
 
-def cmd_approve(slug):
+def cmd_approve(slug, by_user=False):
     lines = read_board()
     t = next((t for t in tasks(lines) if t["slug"] == slug), None)
     if not t:
@@ -538,9 +680,9 @@ def cmd_approve(slug):
         rc, out = git("checkout", branch)
         if rc != 0:
             return cmd_block(t["id"], f"không checkout được {branch}: {out[:200]}")
-    if p and "APPROVED_BY_MANAGER" not in open(p, encoding="utf8").read():
+    if p and "APPROVED_BY_" not in open(p, encoding="utf8").read():
         body = open(p, encoding="utf8").read().split("\n")
-        body[1:1] = ["", "APPROVED_BY_MANAGER"]
+        body[1:1] = ["", "APPROVED_BY_USER" if by_user else "APPROVED_BY_MANAGER"]
         open(p, "w", encoding="utf8").write("\n".join(body))
         git("add", p)
         rc, out = git("commit", "-m", f"plan: approved {slug}")
@@ -548,38 +690,162 @@ def cmd_approve(slug):
             return cmd_block(t["id"], f"commit duyệt plan lỗi: {out[:200]}")
     # Báo user TRƯỚC khi hand-off: ngay khi job vào queue, watcher có thể gửi "Bắt đầu code" trong vòng vài giây,
     # nên tin này phải nằm trong outbox trước đó để thứ tự hiển thị đúng.
-    emit("manager", f"Plan **{t['id']}** ổn áp rồi, mình duyệt và giao cho OpenCode nhé ✅")
+    emit("manager", f"Bạn đã duyệt plan **{t['id']}** ✅ Mình giao cho OpenCode ngay nè 🚀" if by_user else
+         f"Plan **{t['id']}** ổn áp rồi, mình duyệt và giao cho OpenCode nhé ✅")
     pr = subprocess.run(["scripts/handoff.sh", p], capture_output=True, text=True)
     if pr.returncode != 0:
         return cmd_block(t["id"], "hand-off lỗi: " + (pr.stdout + pr.stderr).strip()[-300:])
     lines = read_board()
     set_state(lines, t["id"], "in_progress")
-    log_line(lines, f"{t['id']}: plan duyệt tự động (APPROVED_BY_MANAGER), đã giao OpenCode.")
+    log_line(lines, f"{t['id']}: plan được {'bạn duyệt' if by_user else 'duyệt tự động'}, đã giao OpenCode.")
     write_board(lines)
     return f"✅ {t['id']}: plan đã duyệt, giao cho OpenCode."
+
+
+NO_PLAN_WAITING = "Không có plan nào đang chờ bạn duyệt 🤷\nKhi Tech Lead lên plan xong, mình sẽ gửi thẻ để bạn duyệt nhé."
+
+
+def awaiting_task(key="", states=("awaiting_plan",)):
+    ts = [t for t in tasks(read_board()) if t["state"] in states]
+    if key:
+        ts = [t for t in ts if t["id"] == key.upper()]
+    return ts[0] if ts else None
+
+
+def cmd_plan_approve(arg):
+    t = awaiting_task((arg.split() or [""])[0])
+    if not t:
+        return NO_PLAN_WAITING
+    lines = read_board()
+    busy = [x for x in tasks(lines) if x["state"] in ("planning", "plan_ready", "in_progress", "revise")]
+    if busy:   # one task at a time in the working tree: queue it, the daemon hands it off when its turn comes
+        set_state(lines, t["id"], "approved")
+        log_line(lines, f"{t['id']}: bạn duyệt plan, chờ {busy[0]['id']} xong.")
+        write_board(lines)
+        return f"Đã duyệt plan **{t['id']}** ✅ Mình đang làm **{busy[0]['id']}**, xong sẽ làm tới task này ngay."
+    r = cmd_approve(t["slug"], by_user=True)
+    if r.startswith("✅"):
+        lines = read_board()
+        set_header(lines, "Current Phase", "RUNNING")
+        write_board(lines)
+        return ""   # cmd_approve already told the user
+    return r
+
+
+def cmd_plan_reject(arg):
+    t = awaiting_task((arg.split() or [""])[0], ("awaiting_plan", "needs_info"))
+    if not t:
+        return NO_PLAN_WAITING
+    lines = read_board()
+    set_state(lines, t["id"], "cancelled")
+    others = [x for x in tasks(lines) if not x["done"]]
+    set_header(lines, "Current Phase", "RUNNING" if others else "IDLE")
+    log_line(lines, f"{t['id']}: bạn hủy plan.")
+    write_board(lines)
+    return (f"Đã hủy **{t['id']}** 🚫 Nhánh `task/{t['slug']}` vẫn còn nếu bạn muốn xem lại plan." +
+            (f"\nMình tiếp tục với {others[0]['id']} nhé." if others else ""))
+
+
+def cmd_plan_revise(arg):
+    parts = arg.split(None, 1)
+    key = parts[0] if parts and re.match(r"^T\d+$", parts[0], re.I) else ""
+    feedback = (parts[1] if key and len(parts) > 1 else "" if key else arg).strip()
+    t = awaiting_task(key, ("awaiting_plan", "needs_info"))
+    if not t:
+        return NO_PLAN_WAITING
+    if not feedback:
+        return f"Bạn muốn sửa gì ở plan **{t['id']}**? Gõ `/revise <góp ý>` nhé ✏️"
+    d = f"{AG}/plan-feedback"
+    os.makedirs(d, exist_ok=True)
+    with open(f"{d}/{t['slug']}.md", "a", encoding="utf8") as f:
+        f.write(f"## Góp ý lúc {datetime.now():%Y-%m-%d %H:%M}\n{feedback}\n\n")
+    lines = read_board()
+    needs_info = t["state"] == "needs_info"
+    set_state(lines, t["id"], "pending" if needs_info else "revise")   # no plan exists yet when context was missing
+    set_header(lines, "Current Phase", "RUNNING")
+    log_line(lines, f"{t['id']}: bạn " + ("bổ sung thông tin." if needs_info else "yêu cầu sửa plan."))
+    write_board(lines)
+    if needs_info:
+        for f in glob.glob(f"{AG}/notices/skip-{t['id']}-*"):
+            os.remove(f)
+        return f"Cảm ơn bạn, mình nhờ Tech Lead lên plan **{t['id']}** lại với thông tin này nha 🙏"
+    try:   # the card must be sent again for the revised plan
+        pf = f"{PROGRESS_DIR}/{t['slug']}.json"
+        with open(pf, encoding="utf8") as f:
+            st = json.load(f)
+        st["plan"] = False
+        with open(pf, "w", encoding="utf8") as f:
+            json.dump(st, f, ensure_ascii=False)
+    except (OSError, ValueError):
+        pass
+    return f"Mình nhờ Tech Lead sửa plan **{t['id']}** theo góp ý của bạn nha ✏️\nXong mình sẽ gửi lại thẻ để bạn duyệt."
+
+
+def cmd_review_note(task_id, reasons):
+    """After the Manager (Claude) looked at a plan the automatic check doubted: if it was approved, tell the user what the doubt was."""
+    t = next((t for t in tasks(read_board()) if t["id"] == task_id), None)
+    if not t or t["state"] not in ("in_progress", "done"):
+        return ""   # blocked or still waiting: the block message (or nothing yet) says enough
+    items = [r.strip() for r in re.split(r";\s*", reasons) if r.strip()]
+    emit("manager", f"Plan **{task_id}** có vài điểm mình xem kỹ trước khi duyệt 👀\n\n**Lý do kiểm tra kỹ**\n" + "\n".join(f"- {i}" for i in items)
+         + "\n\nMình thấy ổn nên đã duyệt và giao OpenCode. Bạn cứ đọc lại plan nếu muốn nhé.")
+    return "ok"
+
+
+def mark_notice(kind):
+    os.makedirs(f"{AG}/notices", exist_ok=True)
+    open(f"{AG}/notices/{kind}", "w").close()
+
+
+def cmd_skipped_notice():
+    """Tell the user, once, about each task the queue is passing over (blocked, or missing context). Needs PLAN_APPROVAL=auto."""
+    n = 0
+    for t in tasks(read_board()):
+        if t["done"] or t["state"] not in ("BLOCKED", "needs_info"):
+            continue
+        kind = f"skip-{t['id']}-{t['state']}"
+        if os.path.exists(f"{AG}/notices/{kind}"):
+            continue
+        mark_notice(kind)
+        if t["state"] == "needs_info":
+            qf = f"{AG}/plan-feedback/{t['slug']}.question.md"
+            q = open(qf, encoding="utf8").read().strip() if os.path.exists(qf) else "Tech Lead chưa ghi rõ câu hỏi, bạn hỏi lại bằng `/plan`."
+            emit("techlead", f"Mình thiếu ngữ cảnh để lên plan **{t['id']}** ❓\n\n{q}\n\nBạn trả lời bằng `/revise {t['id']} <thông tin>` để mình lập plan lại, hoặc `/reject {t['id']}` để bỏ. Trong lúc đó mình làm task kế tiếp nhé.")
+        else:
+            emit("manager", f"**{t['id']}** đang bị chặn 🚧 nên mình bỏ qua và làm task kế tiếp. Xem `board.md` và log, khi muốn thử lại bạn gõ `/resume`.")
+        n += 1
+    return n
 
 
 def cmd_block(task_id, reason):
     lines = read_board()
     set_state(lines, task_id, "BLOCKED")
-    set_auto(lines, False, "BLOCKED")
+    others = [t for t in tasks(lines) if t["id"] != task_id and t["state"] in ("pending", "approved", "planning", "plan_ready", "in_progress", "revise")]
+    carry_on = read_env().get("PLAN_APPROVAL", "auto") != "ask" and bool(others)
+    if not carry_on:
+        set_auto(lines, False, "BLOCKED")
     log_line(lines, f"{task_id}: BLOCKED — {reason}")
     write_board(lines)
-    msg = (f"Ối, **{task_id}** bị chặn rồi 🚧\n\n**Lý do:** {reason}\n\n"
-           "Mình tắt chế độ tự động rồi. Bạn xem plan và log, sau đó gõ `/resume` để chạy lại hoặc `/stop` để dừng nhé.")
+    mark_notice(f"skip-{task_id}-BLOCKED")
+    msg = (f"Ối, **{task_id}** bị chặn rồi 🚧\n\n**Lý do:** {reason}\n\n" +
+           (f"Mình bỏ qua task này và chuyển sang **{others[0]['id']}** nhé. Khi muốn thử lại bạn gõ `/resume`." if carry_on else
+            "Mình tắt chế độ tự động rồi. Bạn xem plan và log, sau đó gõ `/resume` để chạy lại hoặc `/stop` để dừng nhé."))
     emit("manager", msg)
     return msg
 
 
-def task_screenshots(t, limit=4):
+def task_screenshots(t, limit=4, recorded=None):
     """Screenshots made while verifying this task: those recorded when its Verify result was reported
     (time window), plus files named task-NN-* / containing its slug. Never anything else in the folder."""
     found = set()
-    try:
-        with open(f"{PROGRESS_DIR}/{t['slug']}.json", encoding="utf8") as f:
-            found |= {x for x in json.load(f).get("task_shots", []) if os.path.exists(x)}
-    except (OSError, ValueError):
-        pass
+    if recorded is not None:
+        found |= {x for x in recorded if os.path.exists(x)}
+    else:
+        try:
+            with open(f"{PROGRESS_DIR}/{t['slug']}.json", encoding="utf8") as f:
+                found |= {x for x in json.load(f).get("task_shots", []) if os.path.exists(x)}
+        except (OSError, ValueError):
+            pass
     prefix = f"task-{int(t['id'][1:]):02d}-"
     for f in screenshots():
         base = os.path.basename(f)
@@ -598,6 +864,52 @@ def verify_info(t):
     return mode, result
 
 
+def merge_check(main, stg):
+    """What /ship will run into: conflicts (dry-run merge) and commits that exist on main but not on staging."""
+    out = []
+    rc, res = git("merge-tree", "--write-tree", "--name-only", main, stg)
+    if rc == 0:
+        out.append(f"✅ `{main}` và `{stg}` merge sạch, `/ship` sẽ không xung đột")
+    elif rc == 1:
+        files = []
+        for line in res.splitlines()[1:]:
+            if not line.strip():
+                break
+            files.append(line.strip())
+        out.append("⚠️ `/ship` sẽ **xung đột** ở: " + ", ".join(f"`{f}`" for f in files[:6]) + ". Bạn nên xử lý trước khi ship")
+    # any other exit code: git too old for merge-tree --write-tree, say nothing rather than guess
+    rc, n = git("rev-list", "--count", f"{stg}..{main}")
+    if rc == 0 and n.strip().isdigit() and int(n) > 0:
+        out.append(f"ℹ️ `{main}` có {n.strip()} commit mà `{stg}` chưa có")
+    return out
+
+
+def task_quality(t):
+    """(fix cycles, model escalations) recorded while the task ran."""
+    fixes = esc = 0
+    try:
+        with open(f"{PROGRESS_DIR}/{t['slug']}.json", encoding="utf8") as f:
+            fixes = len(json.load(f).get("fix", []))
+    except (OSError, ValueError):
+        pass
+    try:
+        with open(f"{PROGRESS_DIR}/{t['slug']}.esc", encoding="utf8") as f:
+            esc = len([l for l in f if l.strip()])
+    except OSError:
+        pass
+    return fixes, esc
+
+
+def batch_cost(done):
+    """Claude cost (API list price) of the calls labelled with the batch's task ids (plan, verify, review, merge)."""
+    ids = [t["id"] for t in done]
+    total = 0.0
+    for r in usage_rows():
+        if any(str(r.get("label", "")).startswith(i + " ") for i in ids):
+            total += r.get("cost_usd", 0) or 0
+    return total
+
+
 def cmd_finalize():
     lines = read_board()
     e = read_env()
@@ -605,17 +917,37 @@ def cmd_finalize():
     done = [t for t in tasks(lines) if t["state"] == "done"]
     out = ["Xong hết rồi nè! 🎉 Giờ chỉ còn chờ bạn duyệt ship thôi.", "", "**Việc đã hoàn thành**"]
     evidence = []   # (task, images) in task order; sent first so the Ship button ends up at the bottom
+    task_notes_out = []
     for t in done:
         mode, result = verify_info(t)
         imgs = task_screenshots(t)
-        if imgs:
+        if imgs and progress_flag(t["slug"], "reported_images"):
+            note = f"Verify {result or mode} · 📸 {len(imgs)} ảnh trong báo cáo {t['id']} ở trên"   # already sent with the task report
+        elif imgs:
             note = f"Verify {result or mode} · 📸 {len(imgs)} ảnh ở trên"
             evidence.append((t, imgs, result or mode))
         elif mode == "none":
             note = "Verify bỏ qua (task không ảnh hưởng giao diện), không có ảnh"
         else:
             note = f"Verify {result or mode}, không có ảnh chụp"
-        out.append(f"- **{t['id']}** · {short(t['title'], 90)} · {note}")
+        notes = task_notes(plan_text(t["slug"]))
+        fixes, esc = task_quality(t)
+        extra = ([f"⚠️ {len(notes)} lưu ý"] if notes else []) + ([f"{fixes} vòng sửa"] if fixes else []) + ([f"{esc} lần leo thang model"] if esc else [])
+        out.append(f"- **{t['id']}** · {short(t['title'], 90)} · {note}" + (" · " + " · ".join(extra) if extra else ""))
+        if notes:
+            task_notes_out.append((t, notes))
+    if task_notes_out:
+        out += ["", "**Lưu ý cần xem trước khi duyệt**"]
+        for t, notes in task_notes_out:
+            out += [f"- **{t['id']}**: {short(n, 170)}" for n in notes[:3]]
+            if len(notes) > 3:
+                out.append(f"  … và {len(notes) - 3} lưu ý nữa trong báo cáo của {t['id']}")
+    checks = merge_check(main, stg)
+    if checks:
+        out += ["", "**Trước khi ship**"] + [f"- {c}" for c in checks]
+    cost = batch_cost(done)
+    if cost > 0:
+        out += ["", f"**Chi phí Claude của batch này:** ~${cost:.2f} (giá list API, chưa gồm OpenCode)"]
     rc, log = git("log", "--oneline", f"{main}..{stg}")
     if rc == 0 and log:
         out += ["", f"**Commit mới trên nhánh {stg}** (chưa có trong {main})"] + [f"- `{l.split(' ', 1)[0]}` {short(l.split(' ', 1)[1] if ' ' in l else '', 90)}" for l in log.splitlines()[:15]]
@@ -709,30 +1041,82 @@ def git_remote_cmd(*args, timeout=40):
         return False
 
 
-def push_task_branch(slug, st):
-    """Push task/<slug> so the commit links in the report open on GitHub. Returns True when the links will work."""
+def notify_once(kind, text, every_s=1800):
+    """Tell the user about a problem that would otherwise only be logged, at most once per `every_s` seconds per kind."""
+    d = f"{AG}/notices"
+    os.makedirs(d, exist_ok=True)
+    f = f"{d}/{kind}"
+    if os.path.exists(f) and time.time() - os.path.getmtime(f) < every_s:
+        return False
+    open(f, "w").close()
+    emit("manager", text)
+    return True
+
+
+NOTE_RE = re.compile(r"^\s*(?:[-*•]\s*)?\**\s*(?:lưu ý|cảnh báo|warning|note)\b[^:\n]{0,24}:\s*\**\s*(.+)$", re.I)
+
+
+def task_notes(text):
+    """Warnings and notes the agents wrote for the person who approves: lines starting with 'Lưu ý:' / 'Cảnh báo:' / 'Warning:' /
+    'Note:' in 'Trạng thái hiện tại' or 'Verify', everything in an optional '## Lưu ý' section, and what is in 'Đã thử mà không được'.
+    Only explicit markers count: nothing is guessed."""
+    notes = []
+    for name in ("Trạng thái hiện tại", "Verify"):
+        for line in section_lines(text, name):
+            m = NOTE_RE.match(line)
+            if m:
+                notes.append(m.group(1).strip())
+    for line in section_lines(text, "Lưu ý"):
+        body = line.lstrip("-*• ").strip()
+        if body:
+            notes.append(body)
+    for line in section_lines(text, "Đã thử mà không được"):
+        body = line.lstrip("-*• ").strip()
+        if body:
+            notes.append("Đã thử không được: " + body)
+    seen, out = set(), []
+    for n in notes:
+        if n and n not in seen:
+            seen.add(n)
+            out.append(short(n, 220))
+    return out
+
+
+def push_branch(branch, st, key="push_retry_at"):
+    """Push a branch so the commit links in a report open on GitHub. Returns True when the links will work."""
     if read_env().get("COMMIT_LINKS", "true") != "true" or not repo_web_url():
         return False
-    if time.time() < st.get("push_retry_at", 0):
+    if time.time() < st.get(key, 0):
         return False
-    if git_remote_cmd("push", "-q", "origin", f"task/{slug}"):
+    if git_remote_cmd("push", "-q", "origin", branch):
         return True
-    st["push_retry_at"] = time.time() + 600   # offline or no rights: do not retry on every tick
+    st[key] = time.time() + 600   # offline or no rights: do not retry on every tick
+    notify_once("push-failed", "Mình chưa push được nhánh lên GitHub nên các báo cáo tạm thời **không có link commit** 🔗\nBạn kiểm tra giúp mình đăng nhập git và quyền ghi của repo nhé. "
+                "Muốn tắt hẳn việc push này thì đặt `COMMIT_LINKS=\"false\"` trong `.agents/room.env`.", 6 * 3600)
     return False
 
 
-def step_models(slug):
-    """step number -> model last used for it (run-task.sh appends '<step> <model>' lines)."""
-    out = {}
+def push_task_branch(slug, st):
+    return push_branch(f"task/{slug}", st)
+
+
+def progress_flag(slug, key):
     try:
-        with open(f"{PROGRESS_DIR}/{slug}.models", encoding="utf8") as f:
-            for line in f:
-                n, _, m = line.strip().partition(" ")
-                if n.isdigit() and m:
-                    out[int(n)] = m
-    except OSError:
-        pass
-    return out
+        with open(f"{PROGRESS_DIR}/{slug}.json", encoding="utf8") as f:
+            return bool(json.load(f).get(key))
+    except (OSError, ValueError):
+        return False
+
+
+def step_start_text(total, model, lines):
+    """The message when OpenCode STARTS steps: which steps, difficulty, model and what each is about. The 'done' report repeats none of it."""
+    rows = [(int(m.group(2)), m.group(3) or "vừa", m.group(4)) for m in (STEP_RE.match(l) for l in lines) if m]
+    nums = ", ".join(str(n) for n, _, _ in rows)
+    out = [f"🔧 **Bắt đầu bước {nums}/{total}** nè!", "", "**Mô tả**"]
+    for n, label, txt in rows:
+        out.append(f"- **Bước {n}** · mức **{label}**" + (f" · model `{model.split('/')[-1]}`" if model else ""))
+        out.append(f"  {short(txt, 200)}")
+    return "\n".join(out)
 
 
 def plan_mtime(slug):
@@ -740,18 +1124,12 @@ def plan_mtime(slug):
     return os.path.getmtime(p) if p and os.path.exists(p) else 0
 
 
-def step_report(slug, total, done_steps, commits, changed, linked):
+def step_report(slug, total, done_steps, commits, changed, linked, notes=None):
     """ONE message for finished step(s): description with difficulty and model, commits (linked), test results."""
-    models, base = step_models(slug), repo_web_url()
+    base = repo_web_url()
     nums = ", ".join(str(x[0]) for x in done_steps)
     out = [f"✅ **Bước {nums}/{total}** xong rồi nè!" if len(done_steps) == 1 else
            f"✅ **Bước {nums}/{total}** xong hết rồi nè!" if done_steps else "📝 **Phần còn lại** của task"]
-    if done_steps:
-        out += ["", "**Mô tả**"]
-        for n, _, label, txt in done_steps:
-            model = models.get(n, "").split("/")[-1]
-            out.append(f"- **Bước {n}** · mức **{label or 'vừa'}**" + (f" · model `{model}`" if model else ""))
-            out.append(f"  {short(txt, 200)}")
     out += ["", "**Commit**"]
     if commits:
         for h, sub in commits[:8]:
@@ -765,6 +1143,63 @@ def step_report(slug, total, done_steps, commits, changed, linked):
         out += [f"- {k} {'✅ PASS' if v == 'PASS' else '❌ FAIL'}" for k, v in changed]
     else:
         out.append("- Bước này chưa có test nào đổi kết quả")
+    if notes:
+        out += ["", "**Lưu ý**"] + [f"- ⚠️ {short(n, 200)}" for n in notes[:5]]
+    return "\n".join(out)
+
+
+VERIFY_MEANING = {"none": "bỏ qua (task không ảnh hưởng giao diện)", "light": "nhẹ (chạy test, chụp ảnh phần test không kiểm được)",
+                  "full": "đầy đủ (thêm kịch bản biên, tối đa 3 test mới)"}
+
+
+def bullet_lines(text, section, limit):
+    out = []
+    for l in section_lines(text, section):
+        b = l.lstrip("-*• ").strip()
+        if b and not l.startswith("  "):
+            out.append(short(b, 200))
+    return out[:limit]
+
+
+def plan_card_text(t, text, steps, verdict, ask, held=False):
+    """The full picture of a plan for the person who approves it, built only from the task file (no AI)."""
+    mode = (re.findall(r"^Verify mode:\s*(\w+)", text, re.M) or ["light"])[0]
+    out = [f"📋 **Plan {t['id']}** · {short(t['title'], 90)}", "",
+           ("⚠️ Plan này có rủi ro nghiêm trọng nên mình **giữ lại chờ bạn duyệt**. Mình làm task kế tiếp trước, bạn duyệt lúc nào thì task này chạy lúc đó." if held else
+            "Tech Lead đã lên plan xong, mời bạn xem và duyệt 👀") if ask else
+           "Tech Lead đã lên plan xong. Phòng đang ở chế độ tự duyệt nên mình kiểm tra rồi giao OpenCode luôn."]
+    for title, sec, n in (("Mục tiêu", "Mục tiêu", 6), ("Quyết định đã chốt", "Quyết định đã chốt", 5)):
+        rows = bullet_lines(text, sec, n)
+        if rows:
+            out += ["", f"**{title}**"] + [f"- {r}" for r in rows]
+    counts = {k: sum(1 for x in steps if (x[2] or "vừa") == k) for k in ("khó", "vừa", "dễ")}
+    out += ["", f"**Các bước** ({len(steps)} · {counts['khó']} khó · {counts['vừa']} vừa · {counts['dễ']} dễ)"]
+    for n, _, label, txt in steps[:12]:
+        out.append(f"{n}. **{label or 'vừa'}** · {short(txt, 220)}")
+    if len(steps) > 12:
+        out.append(f"… và {len(steps) - 12} bước nữa")
+    cases = [m.groups() for m in (re.match(r"^- \[[ x]\] (T\d+)\.\s*(.*)$", l) for l in section_lines(text, "Test cases")) if m]
+    if cases:
+        out += ["", f"**Test case** ({len(cases)})"] + [f"- {k} · {short(v, 170)}" for k, v in cases[:6]]
+    files = []
+    for _, _, _, txt in steps:
+        for f in re.findall(r"`([^`\s]+)`", txt):
+            if ("/" in f or re.search(r"\.[A-Za-z0-9]{1,5}$", f)) and not f.startswith(("-", "http")) and f not in files:
+                files.append(f)
+    if files:
+        out += ["", "**File sẽ động tới**", "- " + ", ".join(f"`{f}`" for f in files[:12]) + (f" … và {len(files) - 12} file nữa" if len(files) > 12 else "")]
+    out += ["", f"**Verify:** {mode} · {VERIFY_MEANING.get(mode, mode)}"]
+    if verdict == "OK":
+        out.append("**Kiểm tra tự động:** ✅ không thấy dấu hiệu rủi ro")
+    elif verdict.startswith("REVIEW"):
+        out.append("**Kiểm tra tự động:** ⚠️ cần xem kỹ: " + verdict.split(": ", 1)[-1])
+    elif verdict.startswith("CRITICAL"):
+        out.append("**Kiểm tra tự động:** 🚨 rủi ro nghiêm trọng: " + verdict.split(": ", 1)[-1])
+    elif verdict.startswith("BLOCK"):
+        out.append("**Kiểm tra tự động:** ⛔ chặn plan này: " + verdict.split(": ", 1)[-1])
+    if ask:
+        out += ["", "Bấm **Duyệt** để giao OpenCode, **Sửa plan** để nhờ Tech Lead chỉnh, hoặc **Hủy**.",
+                "Cũng có thể gõ `/approve`, `/revise <góp ý>` hoặc `/reject`."]
     return "\n".join(out)
 
 
@@ -807,18 +1242,23 @@ def cmd_progress(slug, flush=False):
     sent = 0
     total = len([1 for _ in steps])
 
-    # A. plan summary (Tech Lead)
+    # A. The plan card. With PLAN_APPROVAL=ask (default) it carries buttons and the task waits for the user (state awaiting_plan);
+    # a blocked plan, or PLAN_APPROVAL=auto, gets the same content without buttons and the daemon carries on by itself.
     if not st["plan"] and steps and t["state"] in ("plan_ready", "in_progress", "done", "shipped"):
-        mode = (re.findall(r"^Verify mode:\s*(\w+)", text, re.M) or ["light"])[0]
-        n_tests = len(re.findall(r"^- \[[ x]\] T\d+\.", text, re.M))
-        body = [f"Plan **{t['id']}** xong rồi nè 📋", "",
-                "**Tổng quan**", f"- {total} bước · {n_tests} test · Verify: **{mode}**", "", "**Các bước**"]
-        for n, _, label, txt in steps[:6]:
-            body.append(f"{n}. {('**' + label + '** · ') if label else ''}{short(txt, 100)}")
-        if total > 6:
-            body.append(f"… và {total - 6} bước nữa")
-        body += ["", "Mình kiểm tra nhanh rồi giao OpenCode nhé 🛠"]
-        emit("techlead", "\n".join(body))
+        verdict = cmd_check_plan(slug) if t["state"] == "plan_ready" else "OK"
+        approval = read_env().get("PLAN_APPROVAL", "auto")
+        held = approval != "ask" and verdict.startswith("CRITICAL")
+        gate = t["state"] == "plan_ready" and not verdict.startswith("BLOCK") and (approval == "ask" or held)
+        card = plan_card_text(t, text, steps, verdict, gate, held)
+        if gate:
+            fresh = read_board()
+            set_state(fresh, t["id"], "awaiting_plan")
+            set_header(fresh, "Current Phase", "AWAITING_PLAN_APPROVAL")
+            log_line(fresh, f"{t['id']}: plan " + ("có rủi ro nghiêm trọng, giữ lại chờ bạn duyệt." if held else "xong, chờ bạn duyệt."))
+            write_board(fresh)
+            emit("manager", card, requires="APPROVE_PLAN", task=t["id"])
+        else:
+            emit("techlead", card)
         st["plan"] = True
         sent += 1
 
@@ -827,30 +1267,33 @@ def cmd_progress(slug, flush=False):
     done_steps = [x for x in steps if x[1] and x[0] not in st["steps"]]
     new_commits = [c for c in dev_commits if c[0] not in st["commits"]]
     changed = [(k, v) for k, v in tests.items() if v in ("PASS", "FAIL") and st["tests"].get(k) != v]
+    new_notes = [n for n in task_notes(text) if n not in st.get("notes", [])]   # notes ride along like commits and tests
     settled = flush or (time.time() - plan_mtime(slug) >= SETTLE_S)
-    if (done_steps and settled) or (flush and (new_commits or changed)):
+    if (done_steps and settled) or (flush and (new_commits or changed or new_notes)):
         linked = push_task_branch(slug, st) if new_commits else False
-        emit("dev", step_report(slug, total, done_steps, new_commits, changed, linked))
+        emit("dev", step_report(slug, total, done_steps, new_commits, changed, linked, new_notes))
         st["steps"] += [x[0] for x in done_steps]
         st["commits"] += [c[0] for c in new_commits]
         st["tests"].update(dict(changed))
+        st["notes"] = st.get("notes", []) + new_notes
         sent += 1
 
-    # D. Tech Lead: Verify result + new screenshots
+    # D. Tech Lead: Verify. A PASS is kept for the single end-of-task report (F); a FAIL is told right away because a fix cycle follows.
     if verify and verify != st["verify"]:
         new_shots = [f for f in shots if f not in st["shots"] and os.path.getmtime(f) >= st["t0"] - 5]
-        notes = [short(l.lstrip("-* ").strip(), 110) for l in section_lines(text, "Verify")[:6] if not l.startswith("VERIFY:")]
-        body = ["🔎 **Verify PASS** ✅ Mọi thứ chạy đúng như mong đợi!" if verify == "PASS"
-                else "🔎 **Verify chưa qua** ❌ Mình thấy có chỗ chưa đúng, đang xem lại nha."]
-        if notes:
-            body += ["", "**Ghi chú**"] + [f"- {n}" for n in notes]
-        if new_shots:
-            body += ["", "Ảnh chụp màn hình ở dưới nè 📸"]
-        emit("techlead", "\n".join(body), images=new_shots[-3:])
+        st["verify_notes"] = [short(l.lstrip("-* ").strip(), 110) for l in section_lines(text, "Verify")[:6] if not l.startswith("VERIFY:")]
         st["verify"] = verify
         st["shots"] = sorted(set(st["shots"]) | set(new_shots))
-        st["task_shots"] = sorted(set(st.get("task_shots", [])) | set(new_shots))   # evidence of THIS task, used by the ship report
-        sent += 1
+        st["task_shots"] = sorted(set(st.get("task_shots", [])) | set(new_shots))   # evidence of THIS task, used by the reports
+        if verify == "FAIL":
+            body = ["🔎 **Verify chưa qua** ❌ Mình thấy có chỗ chưa đúng, đang xem lại nha."]
+            if st["verify_notes"]:
+                body += ["", "**Ghi chú**"] + [f"- {n}" for n in st["verify_notes"]]
+            if new_shots:
+                body += ["", "Ảnh chụp màn hình ở dưới nè 📸"]
+            emit("techlead", "\n".join(body), images=new_shots[-3:])
+            st["shots_sent"] = sorted(set(st.get("shots_sent", [])) | set(new_shots[-3:]))
+            sent += 1
 
     # E. Tech Lead: fix cycles
     for h, sub in fix_commits:
@@ -866,10 +1309,29 @@ def cmd_progress(slug, flush=False):
             st["fix"].append(h)
             sent += 1
 
-    # F. Tech Lead: merged into staging
+    # F. Tech Lead: ONE report when the task is merged: Verify result and notes, the merge commit (linked) and the pictures, sent once.
     if t["state"] in ("done", "shipped") and not st["done"]:
+        mode = (re.findall(r"^Verify mode:\s*(\w+)", text, re.M) or ["light"])[0]
+        notes = st.get("verify_notes") or [short(l.lstrip("-* ").strip(), 110) for l in section_lines(text, "Verify")[:6] if not l.startswith("VERIFY:")]
+        notes = [n for n in notes if n and not n.lower().startswith("bỏ qua")]
+        res = st["verify"] or verify
+        head = {"PASS": "✅ **PASS**", "FAIL": "❌ **FAIL**"}.get(res, f"bỏ qua (Verify mode: {mode})")
         rc, last = git("log", "-1", "--format=%h %s", stg)
-        emit("techlead", f"🎉 **{t['id']}** đã merge vào nhánh `{stg}` rồi nè!" + (f"\n- `{last.split(' ', 1)[0]}` {short(last.split(' ', 1)[1] if ' ' in last else '', 100)}" if rc == 0 else ""))
+        linked = push_branch(stg, st, "push_retry_stg") if rc == 0 else False
+        base = repo_web_url()
+        out = [f"🎉 **{t['id']}** xong rồi, đã merge vào nhánh `{stg}` nè!", "", "**Verify**", f"- Kết quả: {head}"] + [f"- {n}" for n in notes]
+        if rc == 0:
+            sha, _, sub = last.partition(" ")
+            out += ["", "**Merge**", f"- [{sha}]({base}/commit/{sha}) {short(sub, 100)}" if linked and base else f"- `{sha}` {short(sub, 100)}"]
+        all_notes = task_notes(text)
+        if all_notes:
+            out += ["", "**Lưu ý**"] + [f"- ⚠️ {short(n, 200)}" for n in all_notes[:6]]
+        imgs = [f for f in task_screenshots(t, 4, recorded=st.get("task_shots", [])) if f not in st.get("shots_sent", [])]
+        if imgs:
+            out += ["", "📸 Ảnh mình chụp lúc verify ở dưới nè"]
+        emit("techlead", "\n".join(out), images=imgs)
+        st["shots_sent"] = sorted(set(st.get("shots_sent", [])) | set(imgs))
+        st["reported_images"] = bool(imgs) or bool(st.get("shots_sent"))
         st["done"] = True
         sent += 1
 
@@ -998,6 +1460,7 @@ def cmd_inbox(path):
     args = (d.get("args") or "").strip()
     e = read_env()
     if cmd == "/status":
+        write_board(read_board())   # refresh the settings block in case room.env was edited by hand
         reply = status_text()
     elif cmd == "/stop":
         reply = cmd_stop()
@@ -1013,11 +1476,21 @@ def cmd_inbox(path):
                      "không sửa gì và không tạo task nào hết.")
         else:
             return 5  # the daemon starts a read-only Q&A job (Tech Lead reads, Manager summarizes)
+    elif cmd == "/automode":
+        reply = cmd_automode(args)
+    elif cmd == "/config":
+        reply = cmd_config(args)
+    elif cmd == "/approve":
+        reply = cmd_plan_approve(args)
+    elif cmd == "/reject":
+        reply = cmd_plan_reject(args)
+    elif cmd == "/revise":
+        reply = cmd_plan_revise(args)
     elif cmd == "/clear":
         reply = cmd_clear()
     elif cmd == "/clearlog":
         reply = cmd_clearlog(args)
-    elif cmd == "/auto":
+    elif cmd in ("/auto", "/task"):
         if e.get("AUTO_SPLIT") == "claude":
             return 3
         reply = cmd_auto(args)
@@ -1027,7 +1500,8 @@ def cmd_inbox(path):
         reply = HELP + "\n\n" + one_line_status()
     else:
         reply = HELP
-    emit("manager", reply)
+    if reply:
+        emit("manager", reply)
     print(cmd or "text")
     return 0
 
@@ -1050,6 +1524,9 @@ def main(argv):
         with open(a[1], encoding="utf8") as f:
             emit(a[0], f.read().strip())
         return 0
+    if c == "step-start":  # step-start <total> <model> <plan step line>...
+        emit("dev", step_start_text(a[0], a[1], a[2:]))
+        return 0
     if c == "say-steps":  # say-steps <role> <head> <plan step line>...
         a[1] = a[1].replace("\\n", "\n")
         rows = []
@@ -1068,7 +1545,15 @@ def main(argv):
         print(simple[c]())
         return 0
     if c == "progress":
-        print(cmd_progress(a[0], "--flush" in a[1:]))
+        try:
+            print(cmd_progress(a[0], "--flush" in a[1:]))
+        except Exception as e:   # the reports must not stop silently: tell the user once, then fail loudly into ops.log
+            notify_once("progress-error", "Mình đang gặp lỗi khi tạo báo cáo tiến độ nên có thể sẽ **thiếu vài tin báo** ⚠️\n"
+                        f"Task vẫn chạy bình thường. Lỗi: `{type(e).__name__}`, chi tiết trong `.agents/logs/ops.log`.")
+            raise
+        return 0
+    if c == "review-note":
+        print(cmd_review_note(a[0], " ".join(a[1:])))
         return 0
     if c == "plan-path":
         print(plan_path(a[0]))
@@ -1076,8 +1561,11 @@ def main(argv):
     if c == "check-plan":
         print(cmd_check_plan(a[0]))
         return 0
+    if c == "skipped-notice":
+        cmd_skipped_notice()
+        return 0
     if c == "approve":
-        r = cmd_approve(a[0])
+        r = cmd_approve(a[0], by_user=len(a) > 1 and a[1] == "user")
         print(r)
         return 0 if r.startswith("✅") else 1
     if c == "block":
