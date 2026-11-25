@@ -340,11 +340,11 @@ const LEFT_OUTER: [ProcessId, number][] = [
   ["fry", 1],
   ["boil", 1],
 ];
-/** Left galley, inner column (top to bottom): the chop board, the fryer and the grill. */
+/** Left galley, inner column (top to bottom): the chop board, the grill and the fryer. */
 const LEFT_INNER: [ProcessId, number][] = [
   ["chop", 1],
-  ["deepfry", 1],
   ["grill", 1],
+  ["deepfry", 1],
 ];
 /** Right column (top to bottom): the second chop board, the blender, the coffee machine. */
 const RIGHT_MACHINES: [ProcessId, number][] = [
