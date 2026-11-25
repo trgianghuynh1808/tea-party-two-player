@@ -314,3 +314,21 @@ test("T7: portal tiles — the users list shows the tile count, the detail card 
   await expect(page.locator("#tilesBody")).toContainText("Chưa có ô xây nào");
   await expect(page.locator("#detailMoney")).toHaveText(`$${100 + 2 * FLOOR_TILE.price + PROP_TILE.price}`);
 });
+
+test("T8: portal favicon — the icon link points at a loadable svg", async ({ page }) => {
+  await page.goto(`${SERVER}/portal`);
+
+  const icon = page.locator('link[rel="icon"]');
+  await expect(icon).toHaveCount(1);
+  await expect(icon).toHaveAttribute("type", "image/svg+xml");
+
+  const href = await icon.getAttribute("href");
+  expect(href).toBeTruthy();
+
+  const url = new URL(href!, page.url()).toString();
+  const response = await page.request.get(url);
+
+  expect(response.ok()).toBeTruthy();
+  expect(response.headers()["content-type"]).toContain("svg");
+  expect(await response.text()).toContain("<svg");
+});
