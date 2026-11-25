@@ -40,7 +40,13 @@ fi
 echo $$ > "$LOCK"
 trap 'rm -f "$LOCK"; exit 0' INT TERM EXIT
 
-log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*" | tee -a "$LOGDIR/manager.log"; }
+ACTIVITY="$LOGDIR/activity.log"   # log gộp, có màu và giờ — cửa sổ dashboard của agent-room đọc file này
+c_role() { case "$1" in manager) printf '\033[36m' ;; techlead) printf '\033[33m' ;; *) printf '\033[90m' ;; esac; }
+log() {
+  local line; line="$(printf '[%s] %s' "$(date '+%F %T')" "$*")"
+  printf '%s\n' "$line" >> "$LOGDIR/manager.log"
+  printf '\033[90m%s\033[0m %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$ACTIVITY"
+}
 
 say_user() {   # gửi một tin ra outbox (ghi tạm rồi đổi tên để bridge không đọc file dở)
   local f="$OUTBOX/$(date +%s)-$$-$RANDOM.json"
@@ -67,12 +73,19 @@ line_state() { sed -nE 's/^- \[ \] `T[0-9]+` \[([A-Za-z_]+)\].*/\1/p' <<<"$1"; }
 line_slug()  { sed -nE 's/.*\(slug: `([^`]+)`\).*/\1/p' <<<"$1"; }
 has_done()   { grep -qE '^- \[x\] `T[0-9]+`' "$BOARD" 2>/dev/null; }
 
-run_claude() { # tên-log prompt
-  log "▶ claude ($1)"
+run_claude() { # tên-log prompt [nhãn]
+  local role="$1" label="${3:-$1}" col rc
+  col="$(c_role "$role")"
+  log "▶ ${role}: ${label}"
+  printf '\n━━ %s ━━ %s\n' "$(date '+%F %T')" "$label" >> "$LOGDIR/$role.log"
   # shellcheck disable=SC2086
-  claude -p "$2" $CLAUDE_FLAGS >> "$LOGDIR/$1.log" 2>&1
-  local rc=$?
-  (( rc == 0 )) || log "⚠ claude ($1) thoát với mã $rc"
+  claude -p "$2" $CLAUDE_FLAGS 2>&1 | while IFS= read -r l; do
+    printf '%s\n' "$l" >> "$LOGDIR/$role.log"
+    [[ -z "${l//[[:space:]]/}" ]] && continue
+    printf '%s %s%-9s\033[0m %s\n' "$(date +%H:%M:%S)" "$col" "$role" "$l" >> "$ACTIVITY"
+  done
+  rc=${PIPESTATUS[0]}
+  if (( rc == 0 )); then log "✔ ${role}: ${label}"; else log "⚠ ${role}: ${label} thoát với mã $rc"; fi
   return $rc
 }
 
@@ -112,7 +125,7 @@ handle_inbox() {
   (( ${#files[@]} )) || return 1
   local listing=""
   for f in "${files[@]}"; do listing+="- $f"$'\n'; done
-  if run_claude manager "$(manager_prompt INBOX "Tin nhắn cần xử lý (đọc từng file):"$'\n'"$listing")"; then
+  if run_claude manager "$(manager_prompt INBOX "Tin nhắn cần xử lý (đọc từng file):"$'\n'"$listing")" "xử lý tin nhắn (${#files[@]})"; then
     mv "${files[@]}" "$INBOX/processed/"
   else
     mv "${files[@]}" "$INBOX/failed/"
@@ -129,16 +142,16 @@ tick_auto() {
   if [[ -z "$line" ]]; then
     # Không còn task chưa xong: có task done → chốt batch, không thì chẳng có gì làm
     if has_done; then
-      guard "finalize" && run_claude manager "$(manager_prompt FINALIZE)"
+      guard "finalize" && run_claude manager "$(manager_prompt FINALIZE)" "chốt batch, xin duyệt ship"
       return 0
     fi
     return 1
   fi
   id="$(line_id "$line")"; state="$(line_state "$line")"; slug="$(line_slug "$line")"
   case "$state" in
-    pending)     guard "$id:$state" && run_claude techlead "$(techlead_prompt plan "$id" "$slug")" ;;
-    plan_ready)  guard "$id:$state" && run_claude manager "$(manager_prompt APPROVE_PLAN "Task: $id (slug: $slug)")" ;;
-    in_progress) guard "$id:$state" && run_claude techlead "$(techlead_prompt finish "$id" "$slug")" ;;
+    pending)     guard "$id:$state" && run_claude techlead "$(techlead_prompt plan "$id" "$slug")" "$id lên plan" ;;
+    plan_ready)  guard "$id:$state" && run_claude manager "$(manager_prompt APPROVE_PLAN "Task: $id (slug: $slug)")" "$id duyệt plan" ;;
+    in_progress) guard "$id:$state" && run_claude techlead "$(techlead_prompt finish "$id" "$slug")" "$id verify, review, merge" ;;
     BLOCKED)
       set_env_key AUTO_MODE false
       say_user "⛔ Task $id ($slug) đang BLOCKED. Đã tắt AUTO_MODE. Xem board và .agents/logs/, rồi /resume hoặc /stop."
