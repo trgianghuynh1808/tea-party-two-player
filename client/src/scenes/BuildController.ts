@@ -226,7 +226,7 @@ export class BuildController {
     const tex = def?.shape === "prop" ? propTexture(this.scene, def, this.ghostRotation) : undefined;
     if (tex) {
       const at = propAnchor(to.cx, to.cy);
-      this.ghost.setTexture(tex.key).setScale(tex.scale).setFlipX(tex.flipX).setPosition(at.x, at.y + 2).setVisible(true);
+      this.ghost.setTexture(tex.key).setScale(tex.scale).setPosition(at.x, at.y + 2).setVisible(true);
     }
     const r = cellRect(to.cx, to.cy);
     const text = cost >= 0 ? `${count} ô · $${cost}` : `${count} ô · hoàn $${-cost}`;
@@ -258,7 +258,7 @@ export class BuildController {
       const tex = propTexture(this.scene, def, selected.rotation);
       if (tex) {
         const at = propAnchor(cell.cx, cell.cy);
-        this.ghost.setTexture(tex.key).setScale(tex.scale).setFlipX(tex.flipX).setPosition(at.x, at.y + 2).setVisible(true);
+        this.ghost.setTexture(tex.key).setScale(tex.scale).setPosition(at.x, at.y + 2).setVisible(true);
       }
     }
     this.sellZoneBg.setFillStyle(ERASE_COLOR, overSell ? 0.4 : 0.18);

@@ -47,25 +47,29 @@ export interface DecorationDef {
   role?: "seat" | "table" | "bed";
   /** Height of the piece's top surface above the floor (display px): tabletop gadgets can be placed on it. */
   surface?: { height: number };
-  /** Beds: where the sleeper's head goes, as a fraction of the artwork (0..1 from its top-left, as drawn unflipped). */
+  /** Beds: where the sleeper's head goes, as a fraction of the artwork (0..1 from its top-left, as drawn). */
   pillow?: { x: number; y: number };
-  /** Beds with per-facing artwork: the pillow point of each view instead of the single `pillow` (never flipped). */
+  /** Beds with per-facing artwork: the pillow point of each view instead of the single `pillow`. */
   pillows?: Record<DecorationView, { x: number; y: number }>;
 }
 
 /**
  * How a piece turns (rotation index 0..3, one press of R = next index):
- * - none:   looks the same from every side (plants, lanterns) — always 0.
- * - flip:   0 = as drawn, 1 = mirrored left/right.
- * - rotate: top-down art (rugs) turned by quarter turns; the footprint swaps width/height on 1 and 3.
- * - views:  separate artwork per facing: 0 front, 1 left, 2 back, 3 right (see VIEW_ORDER); the footprint swaps width/height on 1 and 3.
+ * - none:  one front-facing artwork (or flat top-down art) — can't turn, always 0.
+ * - views: separate artwork per facing: 0 front, 1 left, 2 back, 3 right (see VIEW_ORDER); the footprint swaps width/height on 1 and 3.
+ * A "views" piece only turns when every facing of VIEW_ORDER has artwork (see hasFullViews).
  */
-export type DecorationRotation = "none" | "flip" | "rotate" | "views";
+export type DecorationRotation = "none" | "views";
 export type DecorationView = "front" | "left" | "back" | "right";
 export const VIEW_ORDER: readonly DecorationView[] = ["front", "left", "back", "right"];
 
+/** A "views" piece only turns when every facing of VIEW_ORDER has artwork. */
+export function hasFullViews(def: DecorationDef): boolean {
+  return VIEW_ORDER.every((view) => def.views?.[view] !== undefined);
+}
+
 export function rotationCount(def: DecorationDef): number {
-  return def.rotation === "flip" ? 2 : def.rotation === "rotate" || def.rotation === "views" ? 4 : 1;
+  return def.rotation === "views" && hasFullViews(def) ? 4 : 1;
 }
 
 /** Clamp untrusted input (client messages, old saves) to a rotation this piece supports. */
@@ -74,9 +78,9 @@ export function normalizeRotation(def: DecorationDef, rotation: unknown): number
   return Number.isInteger(r) && r >= 0 && r < rotationCount(def) ? r : 0;
 }
 
-/** Floor footprint for a rotation: rugs and 4-view furniture turned a quarter (1, 3) swap width and height. */
+/** Floor footprint for a rotation: 4-view furniture turned a quarter (1, 3) swaps width and height. */
 export function footprintOf(def: DecorationDef, rotation = 0): { width: number; height: number } {
-  return (def.rotation === "rotate" || def.rotation === "views") && rotation % 2 === 1
+  return def.rotation === "views" && hasFullViews(def) && rotation % 2 === 1
     ? { width: def.height, height: def.width }
     : { width: def.width, height: def.height };
 }
@@ -116,7 +120,6 @@ const rug = (kind: string, label: string, price: number, image: string, color: n
   height,
   layer: "floor",
   image: `assets/decor/${image}.png`,
-  rotation: "rotate",
 });
 
 /** A bed players can lie in (Space next to it): head at (x, y), fractions of the artwork. */
@@ -223,7 +226,7 @@ export const DECORATION_CATALOG: DecorationDef[] = [
       },
       role: "seat",
     },
-    { ...decor("stool", "Đôn gỗ", 35, "stool", 28, 24, 40, 0xa1887f, "flip"), role: "seat" },
+    { ...decor("stool", "Đôn gỗ", 35, "stool", 28, 24, 40, 0xa1887f), role: "seat" },
     // Built by client/assets-src/tools/build_table_view.py (front view only: the table is round, so it doesn't turn).
     table(decor("table", "Bàn khách", 90, "wicker_table", 44, 26, 48, 0x8d6e63)),
     // Cut from client/assets-src/sheets/furniture/ by client/assets-src/tools/cut_furniture.py (front-facing pieces only).
@@ -235,8 +238,8 @@ export const DECORATION_CATALOG: DecorationDef[] = [
   ]),
   ...inCategory("bedroom", [
     // Cut from client/assets-src/sheets/bedroom-original.png by client/assets-src/tools/cut_bedroom.py.
-    bed(decor("bed_red", "Giường chăn đỏ", 150, "bedroom/bed", 44, 56, 91, 0xb4202a, "flip"), 0.5, 0.3),
-    decor("nightstand_lamp", "Tủ đầu giường có đèn", 90, "bedroom/nightstand_lamp", 50, 26, 84, 0xb07a66, "flip"),
+    bed(decor("bed_red", "Giường chăn đỏ", 150, "bedroom/bed", 44, 56, 91, 0xb4202a), 0.5, 0.3),
+    decor("nightstand_lamp", "Tủ đầu giường có đèn", 90, "bedroom/nightstand_lamp", 50, 26, 84, 0xb07a66),
     decor("desk_book", "Bàn học có sách", 100, "bedroom/desk_book", 60, 26, 65, 0xb07a66),
     decor("dresser", "Tủ ngăn kéo", 120, "bedroom/dresser", 54, 26, 83, 0x8a4b3d),
     decor("wardrobe", "Tủ quần áo", 140, "bedroom/wardrobe", 54, 26, 86, 0x8a4b3d),
@@ -247,13 +250,13 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     // bedroom-3-original.png
     decor("wardrobe_arch", "Tủ áo vòm", 140, "bedroom/wardrobe_arch", 46, 24, 92, 0x8a3e1c),
     decor("desk_typewriter", "Bàn máy đánh chữ", 120, "bedroom/desk_typewriter", 104, 26, 64, 0x8a3e1c),
-    decor("nightstand_teal_lamp", "Tủ đầu giường đèn xanh", 90, "bedroom/nightstand_teal_lamp", 58, 24, 64, 0x8a3e1c, "flip"),
-    bed(decor("bed_red_2", "Giường chăn đỏ thẫm", 150, "bedroom/bed_red_2", 50, 70, 100, 0xa82410, "flip"), 0.5, 0.22),
+    decor("nightstand_teal_lamp", "Tủ đầu giường đèn xanh", 90, "bedroom/nightstand_teal_lamp", 58, 24, 64, 0x8a3e1c),
+    bed(decor("bed_red_2", "Giường chăn đỏ thẫm", 150, "bedroom/bed_red_2", 50, 70, 100, 0xa82410), 0.5, 0.22),
     decor("chest_small", "Rương nhỏ", 35, "bedroom/chest_small", 30, 20, 32, 0x7a3a1e),
     decor("music_stand", "Giá nhạc", 45, "bedroom/music_stand", 24, 14, 52, 0x10241e),
     // bedroom-4-original.png
-    bed(decor("bed_blue_lamp", "Giường chăn xanh có đèn", 160, "bedroom/bed_blue_lamp", 60, 50, 80, 0x3d7bd0, "flip"), 0.56, 0.2),
-    decor("nightstand_green_lamp", "Tủ đầu giường đèn lá", 80, "bedroom/nightstand_green_lamp", 42, 22, 54, 0x7a3f3a, "flip"),
+    bed(decor("bed_blue_lamp", "Giường chăn xanh có đèn", 160, "bedroom/bed_blue_lamp", 60, 50, 80, 0x3d7bd0), 0.56, 0.2),
+    decor("nightstand_green_lamp", "Tủ đầu giường đèn lá", 80, "bedroom/nightstand_green_lamp", 42, 22, 54, 0x7a3f3a),
     // Cut from client/assets-src/sheets/furniture/ by client/assets-src/tools/cut_furniture.py (front-facing pieces only).
     decor("globe", "Quả địa cầu", 80, "furniture/globe", 26, 22, 60),
     decor("fireplace_white", "Lò sưởi trắng", 180, "furniture/fireplace_white", 50, 24, 80),

@@ -113,15 +113,17 @@ WebSocket from the same origin. Then either:
 - Drag furniture from the side panel into the shop to buy it; drag placed furniture to move it, or drop it on
   **🗑** to sell it back for 50%. Red outline = can't place there (machines, counters, other furniture).
   Rugs lie on the floor, so furniture can go on top of them.
-- The **⟳** badge on a catalog card means the piece can be turned: press **R** (or the **⟳ Xoay** button) to
-  rotate the piece you're placing or have selected.
+- The **⟳** badge on a catalog card means the piece has artwork for all four sides and can be turned: press **R**
+  (or the **⟳ Xoay** button) to rotate the piece you're placing or have selected. Pieces with a single image (rugs,
+  most beds/chairs/cabinets, outdoor props, custom furniture from the portal) can't be turned and carry no badge.
 - Phones and iPads go on a table top: drop them fully onto a table, the TV stand or the piano vanity and they
   sit raised on it. A table takes its tabletop items along when moved, and selling it sells them too (50% back
   each). A table that still has items on it can't be turned — clear the top first.
 - **🔨 Xây** (build mode, in the yard) uses the same gestures as decorating for the one-cell pieces (trees,
   outdoor props, furniture): with no material picked, click a placed piece to select it, drag it to move it
   (green cell = fits, red = can't), drop it on **🗑** or press **Delete** to sell it back for 50%, **R** /
-  **⟳ Xoay** to turn it, and **Esc** or a click on an empty cell to deselect. Only the host can select / move /
+  **⟳ Xoay** to turn it (only pieces with all four side artworks can turn), and **Esc** or a click on an empty cell
+  to deselect. Only the host can select / move /
   turn / sell; guests still build new pieces on empty cells only. The panel starts with no material picked
   (press the selected tool again to unpick it), and floors / walls / fences / doors keep the drag-to-draw tools.
   Placed pieces keep their rotation when the shop is saved and for the other player.
@@ -168,6 +170,6 @@ pieces and can delete them, unless a shop still owns one.
 
 - WASD / arrow keys: move
 - Space: interact with the nearest station (highlighted). The hint at the bottom right shows what Space will do.
-- Decorate / build modes: **R** (or **⟳ Xoay**) turns the piece being placed or selected, **Delete** sells the
-  selected yard piece, **Esc** (or a click on an empty cell) deselects.
+- Decorate / build modes: **R** (or **⟳ Xoay**) turns the piece being placed or selected (only pieces with all four
+  side artworks can turn), **Delete** sells the selected yard piece, **Esc** (or a click on an empty cell) deselects.
 - Touch devices: touch anywhere on the left half for a floating joystick (8 directions); the round button on the right is the action button and shows what it will do. Add `?touch=1` to the URL to force touch controls on desktop.

@@ -400,13 +400,13 @@ export function planCellChange(
 
 /**
  * How many ways a built tile can face: furniture props follow their decorate-catalog def (see rotationCount),
- * outdoor props (trees, benches...) have 2 facings (mirrored left/right), anything else can't turn.
- * The facing index lives in a separate tileRotations map keyed by the cell's structure key.
+ * anything else — outdoor props, walls, floors — can't turn. The facing index lives in a separate
+ * tileRotations map keyed by the cell's structure key.
  */
 export function buildRotationCount(def: BuildTileDef): number {
   if (def.shape !== "prop") return 1;
   const decor = def.decor ? getDecorationDef(def.decor) : undefined;
-  return decor ? rotationCount(decor) : 2;
+  return decor ? rotationCount(decor) : 1;
 }
 
 /** Clamp untrusted input (client messages, old saves) to a facing this tile supports. */

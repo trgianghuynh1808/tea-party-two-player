@@ -71,19 +71,21 @@ test("T1: facing counts/clamping are right, and SharedShop saves + reloads tileR
   browser,
   page,
 }) => {
-  // Facing counts: furniture props follow their decorate-catalog def, outdoor props flip, shapes can't turn.
+  // Facing counts: only furniture props with all 4 view artwork turn; one-image props and shapes can't.
   expect(buildRotationCount(getBuildTile("decor_sofa_lilac")!)).toBe(4); // views furniture
-  expect(buildRotationCount(getBuildTile("decor_bed_red")!)).toBe(2); // flip furniture
+  expect(buildRotationCount(getBuildTile("decor_bed_red")!)).toBe(1); // one-image furniture
   expect(buildRotationCount(getBuildTile("decor_plant")!)).toBe(1); // rotation "none"
-  expect(buildRotationCount(getBuildTile("pine_s")!)).toBe(2); // outdoor prop
+  expect(buildRotationCount(getBuildTile("pine_s")!)).toBe(1); // one-image outdoor prop
   expect(buildRotationCount(getBuildTile("floor_wood")!)).toBe(1);
   expect(buildRotationCount(getBuildTile("wall_wood")!)).toBe(1);
   expect(buildRotationCount(getBuildTile("door")!)).toBe(1);
   // normalizeTileRotation clamps untrusted input into the supported range.
   expect(normalizeTileRotation(getBuildTile("pine_s")!, 0)).toBe(0);
-  expect(normalizeTileRotation(getBuildTile("pine_s")!, 1)).toBe(1);
+  expect(normalizeTileRotation(getBuildTile("pine_s")!, 1)).toBe(0);
   expect(normalizeTileRotation(getBuildTile("pine_s")!, 2)).toBe(0);
   expect(normalizeTileRotation(getBuildTile("pine_s")!, -1)).toBe(0);
+  expect(normalizeTileRotation(getBuildTile("decor_sofa_lilac")!, 0)).toBe(0);
+  expect(normalizeTileRotation(getBuildTile("decor_sofa_lilac")!, 1)).toBe(1);
   expect(normalizeTileRotation(getBuildTile("decor_sofa_lilac")!, 3)).toBe(3);
   expect(normalizeTileRotation(getBuildTile("decor_sofa_lilac")!, 4)).toBe(0);
 
@@ -97,11 +99,11 @@ test("T1: facing counts/clamping are right, and SharedShop saves + reloads tileR
     version: 1,
     money: 300,
     decorations: [],
-    tiles: { [keyA]: "pine_s", [keyB]: "bench" },
+    tiles: { [keyA]: "decor_sofa_lilac", [keyB]: "bench" },
     tileRotations: { [keyA]: 1 },
   });
   await joinAsHost(page, facingUser);
-  await expect.poll(async () => (await tilesOf(page))[keyA]).toBe("pine_s");
+  await expect.poll(async () => (await tilesOf(page))[keyA]).toBe("decor_sofa_lilac");
   const facings = await tileRotationsOf(page);
   expect(facings[keyA]).toBe(1); // restored from the save
   expect(facings[keyB]).toBeUndefined(); // a prop without a facing entry keeps the default
@@ -160,27 +162,27 @@ test("T2: host move_tile moves a prop with its facing, sell_tile removes it with
     });
     expect(patch.status()).toBe(200);
 
-    // Two pine props: A facing sideways (rotation 1), B facing front on another cell.
+    // Two sofa props: A facing sideways (rotation 1), B facing front on another cell.
     const [a, b, c] = buildableCells(3);
     const keyA = tileKey(a.cx, a.cy, "structure");
     const keyB = tileKey(b.cx, b.cy, "structure");
     const keyC = tileKey(c.cx, c.cy, "structure");
-    await sendTile(host, "build_tiles", { tool: "pine_s", x0: a.cx, y0: a.cy, x1: a.cx, y1: a.cy, rotation: 1 });
-    await sendTile(host, "build_tiles", { tool: "pine_s", x0: b.cx, y0: b.cy, x1: b.cx, y1: b.cy, rotation: 0 });
-    await expect.poll(async () => (await tilesOf(host))[keyA]).toBe("pine_s");
+    await sendTile(host, "build_tiles", { tool: "decor_sofa_lilac", x0: a.cx, y0: a.cy, x1: a.cx, y1: a.cy, rotation: 1 });
+    await sendTile(host, "build_tiles", { tool: "decor_sofa_lilac", x0: b.cx, y0: b.cy, x1: b.cx, y1: b.cy, rotation: 0 });
+    await expect.poll(async () => (await tilesOf(host))[keyA]).toBe("decor_sofa_lilac");
     await expect.poll(async () => (await tileRotationsOf(host))[keyA]).toBe(1);
-    await expect.poll(async () => (await tilesOf(host))[keyB]).toBe("pine_s");
+    await expect.poll(async () => (await tilesOf(host))[keyB]).toBe("decor_sofa_lilac");
     await expect.poll(async () => (await tileRotationsOf(host))[keyB]).toBe(0);
     const moneyOf = (page: Page) =>
       page.evaluate(() => {
         const g = (window as { __GAME__?: { room: { sessionId: string }; state: { players: Map<string, { money: number }> } } }).__GAME__;
         return g?.state.players.get(g.room.sessionId)?.money ?? -1;
       });
-    await expect.poll(() => moneyOf(host)).toBe(460); // 500 - 2 x $20
+    await expect.poll(() => moneyOf(host)).toBe(180); // 500 - 2 x $160
 
     // The host moves A to the empty cell C: the facing follows the prop, the old cell is empty.
     await sendTile(host, "move_tile", { cx: a.cx, cy: a.cy, toCx: c.cx, toCy: c.cy });
-    await expect.poll(async () => (await tilesOf(host))[keyC]).toBe("pine_s");
+    await expect.poll(async () => (await tilesOf(host))[keyC]).toBe("decor_sofa_lilac");
     await expect.poll(async () => (await tileRotationsOf(host))[keyC]).toBe(1);
     const tiles = await tilesOf(host);
     expect(tiles[keyA]).toBeUndefined();
@@ -190,21 +192,21 @@ test("T2: host move_tile moves a prop with its facing, sell_tile removes it with
     await sendTile(guest, "move_tile", { cx: c.cx, cy: c.cy, toCx: a.cx, toCy: a.cy });
     await host.waitForTimeout(700);
     expect((await tilesOf(guest))[keyA]).toBeUndefined();
-    expect((await tilesOf(guest))[keyC]).toBe("pine_s");
-    expect((await tilesOf(host))[keyC]).toBe("pine_s");
+    expect((await tilesOf(guest))[keyC]).toBe("decor_sofa_lilac");
+    expect((await tilesOf(host))[keyC]).toBe("decor_sofa_lilac");
 
     // Moving onto an occupied cell is refused: B stays where it is, the prop stays on C.
     await sendTile(host, "move_tile", { cx: c.cx, cy: c.cy, toCx: b.cx, toCy: b.cy });
     await host.waitForTimeout(700);
     const refused = await tilesOf(host);
-    expect(refused[keyB]).toBe("pine_s");
-    expect(refused[keyC]).toBe("pine_s");
+    expect(refused[keyB]).toBe("decor_sofa_lilac");
+    expect(refused[keyC]).toBe("decor_sofa_lilac");
     expect((await tileRotationsOf(host))[keyB]).toBe(0);
 
-    // The host sells the moved prop: it disappears and 50% ($10) is refunded.
+    // The host sells the moved prop: it disappears and 50% ($80) is refunded.
     await sendTile(host, "sell_tile", { cx: c.cx, cy: c.cy });
     await expect.poll(async () => (await tilesOf(host))[keyC]).toBeUndefined();
-    await expect.poll(() => moneyOf(host)).toBe(470); // 460 + $20 x 50%
+    await expect.poll(() => moneyOf(host)).toBe(260); // 180 + $160 x 50%
   } finally {
     await hostCtx.close();
     await guestCtx.close();

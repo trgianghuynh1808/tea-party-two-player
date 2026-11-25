@@ -1,7 +1,7 @@
 // Custom furniture added through the admin portal: validation rules + catalog mutation,
 // shared by the server (loading saves, admin API) and the client (fetching the catalog on page load).
-// Custom pieces have no per-facing artwork (rotation "none" | "flip", plus "rotate" for rugs) and
-// their PNG is served by the game server at GET /custom-decor/<kind>.png.
+// Custom pieces have one front-facing artwork (rotation is always "none"; old "flip"/"rotate"
+// records load as "none") and their PNG is served by the game server at GET /custom-decor/<kind>.png.
 
 import {
   DECORATION_CATEGORIES,
@@ -43,9 +43,9 @@ export function parseCustomDecoration(raw: unknown): DecorationDef | undefined {
   const layer = r.layer as DecorationLayer;
   if (!isIntegerBetween(r.width, 4, 400) || !isIntegerBetween(r.height, 4, 400)) return undefined;
   if (!isIntegerBetween(r.imageHeight, 4, 400)) return undefined;
-  // Rotation: front-facing pieces may mirror (flip), rugs may also quarter-turn; no 4-view support.
-  const rotation: DecorationRotation = r.rotation === undefined ? "none" : (r.rotation as DecorationRotation);
-  if (rotation !== "none" && rotation !== "flip" && !(rotation === "rotate" && layer === "floor")) return undefined;
+  // Rotation: always "none" — custom pieces have one front-facing artwork, so anything the
+  // client/portal sends (old "flip"/"rotate" included) loads as a fixed facing, not a rejection.
+  const rotation: DecorationRotation = "none";
   // Roles only make sense for standing furniture (customers can't sit on a rug or a painting).
   if (r.role !== undefined && r.role !== "seat" && r.role !== "table" && r.role !== "bed") return undefined;
   if (r.role !== undefined && layer !== "object") return undefined;
