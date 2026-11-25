@@ -71,6 +71,8 @@ MAX_TURNS_MANAGER="20"
 MAX_TURNS_TECHLEAD="150"
 # /auto tách task: "lines" (mỗi dòng một task, không tốn Claude) hoặc "claude" (Manager tách)
 AUTO_SPLIT="lines"
+# Sau /ship, giữ lại bao nhiêu task đã ship gần nhất trên board (phần cũ hơn được gỡ và ghi vào Activity Log)
+KEEP_SHIPPED="5"
 # Tin thường (không có lệnh): "false" = trả lời mẫu, "true" = để Claude Manager trả lời (tốn quota)
 CHAT_WITH_CLAUDE="false"
 ENV

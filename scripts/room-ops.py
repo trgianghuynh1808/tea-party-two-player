@@ -18,6 +18,7 @@ import glob
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -239,6 +240,53 @@ def cmd_auto(args):
         "\nAUTO_MODE bật, Tech Lead sẽ lên plan."
 
 
+def cleanup_after_ship(lines, keep):
+    """Tidy up after a successful /ship. Returns a short summary. Never raises."""
+    out = []
+    try:
+        shipped = sorted([t for t in tasks(lines) if t["state"] == "shipped"], key=lambda t: int(t["id"][1:]))
+        # 1. per-task runtime state of everything already shipped
+        n_status = n_prog = 0
+        for t in shipped:
+            for f in glob.glob(f"{AG}/status/*{t['slug']}*.status"):
+                os.remove(f); n_status += 1
+            pf = f"{PROGRESS_DIR}/{t['slug']}.json"
+            if os.path.exists(pf):
+                os.remove(pf); n_prog += 1
+        if n_status or n_prog:
+            out.append(f"{n_status} status, {n_prog} progress")
+        # 2. verification screenshots -> archive/<stamp>/, keep the last 3 batches
+        shots = screenshots()
+        if shots:
+            dest = f"{AG}/screenshots/archive/{datetime.now():%Y%m%d-%H%M}"
+            for f in shots:
+                rel = os.path.relpath(f, f"{AG}/screenshots")
+                os.makedirs(os.path.dirname(os.path.join(dest, rel)), exist_ok=True)
+                shutil.move(f, os.path.join(dest, rel))
+            out.append(f"{len(shots)} ảnh → archive")
+        arch = sorted(glob.glob(f"{AG}/screenshots/archive/*/"))
+        for d in arch[:-3]:
+            shutil.rmtree(d, ignore_errors=True)
+        # 3. board: keep the newest `keep` shipped tasks, summarize the rest in the Activity Log
+        old = shipped[:-keep] if keep > 0 and len(shipped) > keep else []
+        if old:
+            for t in sorted(old, key=lambda t: t["i"], reverse=True):
+                del lines[t["i"]]
+            log_line(lines, f"Dọn board: gỡ {', '.join(t['id'] for t in old)} (đã ship).")
+            out.append(f"board gỡ {len(old)} task cũ")
+        # 4. message files older than 7 days
+        cutoff, n_old = time.time() - 7 * 86400, 0
+        for d in ("inbox/processed", "inbox/failed", "outbox/sent", "outbox/failed"):
+            for f in glob.glob(f"{AG}/{d}/*.json"):
+                if os.path.getmtime(f) < cutoff:
+                    os.remove(f); n_old += 1
+        if n_old:
+            out.append(f"{n_old} tin cũ")
+    except Exception as e:  # cleanup must never break a ship
+        out.append(f"lỗi khi dọn ({e})")
+    return ", ".join(out)
+
+
 def cmd_ship():
     lines = read_board()
     phase = get_phase(lines)
@@ -274,8 +322,13 @@ def cmd_ship():
                 set_state(lines, t["id"], "shipped")
         set_header(lines, "Current Phase", "SHIPPED")
         log_line(lines, f"/ship: merge {stg} vào {main} ({sha}).")
+        try:
+            keep = int(read_env().get("KEEP_SHIPPED", "5"))
+        except ValueError:
+            keep = 5
+        cleaned = cleanup_after_ship(lines, keep)
         write_board(lines)
-        return msg
+        return msg + (f"\n🧹 Đã dọn: {cleaned}." if cleaned else "")
     finally:
         git("checkout", stg)
 
@@ -384,7 +437,7 @@ def cmd_finalize():
     rc, log = git("log", "--oneline", f"{main}..{stg}")
     if rc == 0 and log:
         out += ["", f"Commit trên {stg} chưa có trong {main}:"] + [f"- {l}" for l in log.splitlines()[:15]]
-    shots = sorted(glob.glob(f"{AG}/screenshots/**/*.png", recursive=True), key=os.path.getmtime)[-6:]
+    shots = screenshots()[-6:]
     out += ["", "Bấm Ship hoặc gõ /ship để duyệt, /stop để giữ lại."]
     set_auto(lines, False, "AWAITING_SHIP_APPROVAL")
     log_line(lines, "FINALIZE: tất cả task done, chờ /ship.")
@@ -439,7 +492,7 @@ def screenshots():
     files = []
     for ext in IMG_EXT:
         files += glob.glob(f"{AG}/screenshots/**/{ext}", recursive=True)
-    return sorted(set(files), key=os.path.getmtime)
+    return sorted({f for f in files if "/archive/" not in f}, key=os.path.getmtime)
 
 
 def cmd_progress(slug):
