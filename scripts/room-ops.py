@@ -594,8 +594,11 @@ def cmd_ship():
             rc, out = git("pull", "--ff-only")
             if rc != 0:
                 return f"Mình chưa ship được: `git pull --ff-only` báo lỗi 😢\n{out[:400]}\nBạn xem giúp mình nhé, mình không tự ép đâu."
-        n = len([t for t in tasks(lines) if t["state"] == "done"])
-        rc, out = git("merge", "--no-ff", stg, "-m", f"Merge {stg} into {main} ({n} task)")
+        shipping = [t for t in tasks(lines) if t["state"] == "done"]
+        subject = (f"Ship {shipping[0]['id']}: {short(shipping[0]['title'], 60)}" if len(shipping) == 1 else
+                   f"Ship {len(shipping)} task: " + ", ".join(t["id"] for t in shipping[:6]) + (" …" if len(shipping) > 6 else ""))
+        body = "\n".join(f"- {t['id']}: {short(t['title'], 120)}" for t in shipping)
+        rc, out = git("merge", "--no-ff", stg, "-m", subject, "-m", f"Merge {stg} into {main}.\n\n{body}")
         if rc != 0:
             git("merge", "--abort")
             return f"Merge bị lỗi nên mình đã huỷ luôn, chưa đổi gì hết nha 🙏\n{out[:400]}"
