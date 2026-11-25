@@ -72,3 +72,15 @@ When shipping (from Autopilot, or when the user says "ship"):
    - If the branch also touches files outside the task plan (e.g. `scripts/`, tooling, `CLAUDE.md`), unstage them (`git reset -q <paths>`) before this commit and commit them separately afterwards (`chore: ...`), so the feature commit stays clean.
 4. `git push origin main`, then delete the task branch: `git branch -D task/<slug>`.
 5. Report the final commit hash. If the pull or push fails (e.g. remote has new commits, conflicts), stop and tell the user instead of forcing.
+
+## AUTO_MODE (multi-room, driven by the Manager)
+
+Applies only when `.agents/room.env` has `AUTO_MODE="true"` (the Manager daemon `scripts/manager-loop.sh` sets it). Otherwise ignore this section.
+
+- The base branch is `STAGING_BRANCH` (default `staging`), not `main`. Everywhere above, read "main" as the base branch: create `task/<slug>` from `staging`, review with `git diff staging...HEAD`, count fix cycles with `staging..HEAD`.
+- Never wait for the user. The Manager invokes you in phases and tells you which one:
+  - **Plan phase:** write the plan, commit it on `task/<slug>`, set the task to `[plan_ready]` on `.agents/board.md`. Do NOT run `scripts/handoff.sh`: the Manager reviews the plan (Proxy Approval) and hands it off.
+  - **Finish phase:** run Autopilot from the Wait step. Save verification screenshots to `.agents/screenshots/`.
+- **Ship in AUTO_MODE:** `git checkout staging && git merge --squash task/<slug>`, one Conventional Commit, delete the task branch. Do not push and do not touch `main`; only the Manager ships `staging` to `main`, after the user sends `/ship`.
+- On success set the task to `[done]` (and `[x]`) on `board.md` and add a line to the Activity Log. When blocked, or after `MAX_FIX_CYCLES` fix cycles fail, set it to `[BLOCKED]` with the reason in the Activity Log and stop.
+- The dev server port and URL come from `.agents/room.env` (`APP_PORT`, `PLAYWRIGHT_BASE_URL`); use them for Verify instead of hard-coded ports.

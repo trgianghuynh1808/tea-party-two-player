@@ -19,3 +19,10 @@ server/data
 .agents/run.log
 .agents/status/
 .venv-art
+.agents/kit-dir
+.agents/inbox/
+.agents/outbox/
+.agents/screenshots/
+.agents/logs/
+.agents/manager.lock
+.agents/manager.sig

@@ -46,6 +46,14 @@ CONFIG=".agents/config.sh"
 # shellcheck source=/dev/null
 if [[ -f "$CONFIG" ]]; then source "$CONFIG"; fi
 
+# Cấu hình phòng (.agents/room.env): port/URL riêng từng project, nhánh staging. Không có file thì bỏ qua.
+# shellcheck source=/dev/null
+[[ -f scripts/room-env.sh ]] && source scripts/room-env.sh
+# Giữ nguyên path/query của DEFAULT_VERIFY_URL (vd ?test=1), chỉ thay port theo phòng
+if [[ -n "${APP_PORT:-}" ]]; then
+  DEFAULT_VERIFY_URL="$(sed -E "s#(://[^/:]+)(:[0-9]+)?#\1:$APP_PORT#" <<<"$DEFAULT_VERIFY_URL")"
+fi
+
 TASK="${1:?Usage: scripts/run-task.sh .agents/tasks/<file>.md}"
 MAX_RUNS="${MAX_RUNS:-20}"
 VERBOSE="${VERBOSE:-0}"
@@ -245,7 +253,7 @@ fi
 
 # Luôn làm trên nhánh task riêng, không commit từng bước lên main
 branch=$(git rev-parse --abbrev-ref HEAD)
-if [[ "$branch" == "main" || "$branch" == "master" ]]; then
+if [[ "$branch" == "main" || "$branch" == "master" || "$branch" == "${MAIN_BRANCH:-main}" || "$branch" == "${STAGING_BRANCH:-staging}" ]]; then
   slug=$(basename "$TASK" .md | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}-//')
   branch="task/$slug"
   if git show-ref --quiet "refs/heads/$branch"; then
@@ -253,7 +261,7 @@ if [[ "$branch" == "main" || "$branch" == "master" ]]; then
   else
     git checkout -q -b "$branch"
   fi
-  warn "↪  Đang ở main, chuyển sang nhánh $branch"
+  warn "↪  Đang ở nhánh chính/staging, chuyển sang nhánh $branch"
 fi
 
 total=$(grep -cE '^- \[[ x]\] [0-9]+\.' "$TASK" || true)
