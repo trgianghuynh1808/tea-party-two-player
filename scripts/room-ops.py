@@ -5,6 +5,8 @@ Used by scripts/manager-loop.sh so the Manager only needs Claude for judgement c
 
   room-ops.py inbox <file>          handle one inbox message (exit 0 handled, 3 = needs Claude, other = error)
   room-ops.py say <role> <text>     write a message to .agents/outbox
+  room-ops.py say-file <role> <file>   same, text taken verbatim from a file
+  room-ops.py inbox-args <file>     print the arguments of an inbox message (the /plan question)
   room-ops.py say-steps <role> <head> <step line>...   same, with the plan steps listed under <head>
   room-ops.py status | stop | resume | usage [days]
   room-ops.py plan-path <slug>      path of the newest plan file for a task slug
@@ -38,6 +40,7 @@ HELP = ("Mình chỉ hiểu mấy lệnh này thôi nha 😅\n"
         "- `/status` · xem tiến độ\n"
         "- `/health` · kiểm tra các agent\n"
         "- `/usage` · xem mức dùng token\n"
+        "- `/plan <câu hỏi>` · hỏi đáp, phân tích project (chỉ đọc, không sửa gì)\n"
         "- `/stop` · dừng lại\n"
         "- `/resume` · chạy tiếp\n"
         "- `/ship` · đưa lên main\n"
@@ -786,6 +789,12 @@ def cmd_inbox(path):
         reply = cmd_ship()
     elif cmd == "/usage":
         reply = cmd_usage(int(args.split()[0]) if args.split() and args.split()[0].isdigit() else 1)
+    elif cmd == "/plan":
+        if not args:
+            reply = ("Bạn muốn hỏi gì về project nè? 🔍\nCách dùng: `/plan <câu hỏi>`. Mình và Tech Lead sẽ đọc code rồi tổng hợp gửi bạn, "
+                     "không sửa gì và không tạo task nào hết.")
+        else:
+            return 5  # the daemon starts a read-only Q&A job (Tech Lead reads, Manager summarizes)
     elif cmd == "/auto":
         if e.get("AUTO_SPLIT") == "claude":
             return 3
@@ -810,6 +819,14 @@ def main(argv):
         return cmd_inbox(a[0])
     if c == "say":
         emit(a[0], a[1].replace("\\n", "\n"))  # shell callers write \n inside "..." strings
+        return 0
+    if c == "inbox-args":  # print the arguments of an inbox message (the question of /plan)
+        with open(a[0], encoding="utf8") as f:
+            print((json.load(f).get("args") or "").strip())
+        return 0
+    if c == "say-file":  # say-file <role> <file>: like say, but the text is taken verbatim from a file
+        with open(a[1], encoding="utf8") as f:
+            emit(a[0], f.read().strip())
         return 0
     if c == "say-steps":  # say-steps <role> <head> <plan step line>...
         a[1] = a[1].replace("\\n", "\n")

@@ -32,3 +32,5 @@ server/data
 .agents/progress/
 .agents/bin/
 .agents/kit-version
+.agents/plan.pid
+.agents/plan/
