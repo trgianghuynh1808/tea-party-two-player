@@ -258,6 +258,58 @@ test("bathroom-2 T1: the 16 new items are in the bathroom category, with art on 
   expect(DECORATION_CATALOG.filter((d) => d.category === "bathroom")).toHaveLength(25);
 });
 
+// ---------------------------------------------------------------- 🍳 kitchen set
+
+const KITCHEN_KINDS = ["fridge_kitchen", "washer_kitchen", "chair_kitchen"];
+
+test("kitchen T1: the kitchen category has its 3 four-view items with alpha art on disk", () => {
+  expect(DECORATION_CATEGORIES.some((c) => c.id === "kitchen" && c.title.includes("Nhà bếp"))).toBe(true);
+  expect(DECORATION_CATALOG.filter((d) => d.category === "kitchen")).toHaveLength(3);
+  for (const kind of KITCHEN_KINDS) {
+    const def = getDecorationDef(kind);
+    expect(def, kind).toBeDefined();
+    expect(def!.category, kind).toBe("kitchen");
+    expect(def!.rotation, kind).toBe("views");
+    expect(rotationCount(def!), kind).toBe(4);
+    expect(def!.layer, kind).toBe("object");
+    expect(def!.price, kind).toBeGreaterThan(0);
+    for (const view of ["front", "left", "back", "right"] as const) {
+      const path = def!.views?.[view];
+      expect(path, `${kind}/${view}`).toBeDefined();
+      const file = `client/public/${path}`;
+      expect(existsSync(file), `${kind}/${view}`).toBe(true);
+      const { width, height, alphaAt } = decodePng(file);
+      expect(
+        [alphaAt(0, 0), alphaAt(width - 1, 0), alphaAt(0, height - 1), alphaAt(width - 1, height - 1)].some((a) => a === 0),
+        `${kind}/${view} transparent corner`,
+      ).toBe(true);
+      let solid = false;
+      for (let y = (height / 3) | 0; !solid && y <= (2 * height) / 3; y++)
+        for (let x = (width / 3) | 0; x <= (2 * width) / 3; x++)
+          if (alphaAt(x, y) === 255) {
+            solid = true;
+            break;
+          }
+      expect(solid, `${kind}/${view} solid middle`).toBe(true);
+    }
+  }
+  expect(getDecorationDef("chair_kitchen")!.role).toBe("seat");
+});
+
+test("kitchen T2: turning a kitchen piece swaps its footprint and normalizeRotation clamps to 0..3", () => {
+  const fridge = getDecorationDef("fridge_kitchen")!;
+  expect([footprintOf(fridge, 0), footprintOf(fridge, 2)]).toStrictEqual([
+    { width: fridge.width, height: fridge.height },
+    { width: fridge.width, height: fridge.height },
+  ]);
+  expect([footprintOf(fridge, 1), footprintOf(fridge, 3)]).toStrictEqual([
+    { width: fridge.height, height: fridge.width },
+    { width: fridge.height, height: fridge.width },
+  ]);
+  expect(normalizeRotation(fridge, 3)).toBe(3);
+  expect(normalizeRotation(fridge, 4)).toBe(0);
+});
+
 // ---------------------------------------------------------------- ⟳ badge on rotatable items
 
 /** Unique per test run; shops persist per username in server/data/. */

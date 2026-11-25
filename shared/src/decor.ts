@@ -132,12 +132,13 @@ const table = (def: DecorationDef): DecorationDef => ({
   surface: { height: Math.round((def.imageHeight ?? 0) * 0.6) },
 });
 
-/** Artwork per facing of furniture cut into client/public/assets/decor/views/ by build_furniture_views.py. */
-const viewsOf = (kind: string): Record<DecorationView, string> => ({
-  front: `assets/decor/views/${kind}_front.png`,
-  left: `assets/decor/views/${kind}_left.png`,
-  back: `assets/decor/views/${kind}_back.png`,
-  right: `assets/decor/views/${kind}_right.png`,
+/** Artwork per facing of 4-view furniture, cut into a decor subfolder by an art tool
+ * (views/ by build_furniture_views.py, kitchen/ by cut_kitchen.py). */
+const viewsOf = (kind: string, dir = "views"): Record<DecorationView, string> => ({
+  front: `assets/decor/${dir}/${kind}_front.png`,
+  left: `assets/decor/${dir}/${kind}_left.png`,
+  back: `assets/decor/${dir}/${kind}_back.png`,
+  right: `assets/decor/${dir}/${kind}_right.png`,
 });
 
 /** 4-view furniture: the front artwork doubles as the catalog thumbnail (`image`). */
@@ -149,7 +150,8 @@ const viewsDecor = (
   height: number,
   imageHeight: number,
   color = 0x8d6e63,
-): DecorationDef => ({ ...decor(kind, label, price, `views/${kind}_front`, width, height, imageHeight, color, "views"), views: viewsOf(kind) });
+  dir = "views",
+): DecorationDef => ({ ...decor(kind, label, price, `${dir}/${kind}_front`, width, height, imageHeight, color, "views"), views: viewsOf(kind, dir) });
 
 /** A 4-view bed: the pillow follows the current facing; `pillow` keeps the front view for readers of `def.pillow`. */
 const viewsBed = (def: DecorationDef, pillows: Record<DecorationView, { x: number; y: number }>): DecorationDef => ({
@@ -169,6 +171,7 @@ export const DECORATION_CATEGORIES = [
   { id: "art", title: "🖼️ Tranh & khung ảnh" },
   { id: "appliances", title: "❄️ Thiết bị" },
   { id: "bathroom", title: "🛁 Phòng tắm" },
+  { id: "kitchen", title: "🍳 Nhà bếp" },
   { id: "gadgets", title: "📱 Đồ công nghệ" },
 ] as const;
 export type DecorationCategory = (typeof DECORATION_CATEGORIES)[number]["id"];
@@ -362,6 +365,14 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     wallArt("bath_towel_hook", "Khăn treo móc", 35, "towel_hook", 38, 34, 0xb7543f),
     wallArt("bath_towel_shelf_wood", "Kệ khăn & chai", 65, "towel_shelf_wood", 64, 50, 0xcb6e28),
     wallArt("bath_water_heater", "Bình nước nóng", 110, "water_heater", 38, 68, 0xe5e2dd),
+  ]),
+  ...inCategory("kitchen", [
+    // Kitchen set: the sheet's only pieces drawn with a front, a back and a side view, cut into
+    // client/public/assets/decor/kitchen/ by cut_kitchen.py (the right view mirrors the left view).
+    // The one-view pieces (counter, stove, microwave, stools, open fridges) can't turn, so they stay out.
+    viewsDecor("fridge_kitchen", "Tủ lạnh", 180, 30, 24, 66, 0xe5e2dd, "kitchen"),
+    viewsDecor("washer_kitchen", "Máy giặt cửa tròn", 150, 28, 24, 46, 0xe5e2dd, "kitchen"),
+    { ...viewsDecor("chair_kitchen", "Ghế gỗ bếp", 45, 22, 20, 42, 0xa9744f, "kitchen"), role: "seat" },
   ]),
   ...inCategory("gadgets", [
     // Drawn head-on by client/assets-src/tools/draw_gadget_props.py from the gadgets-ref references.
