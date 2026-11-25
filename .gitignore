@@ -34,3 +34,4 @@ server/data
 .agents/kit-version
 .agents/plan.pid
 .agents/plan/
+.agents/board-archive/

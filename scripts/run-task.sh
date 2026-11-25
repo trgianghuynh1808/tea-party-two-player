@@ -200,7 +200,9 @@ verify() {
   local prompt common
   common="Đọc AGENTS.md và $TASK. Toàn bộ các bước code đã xong. KHÔNG sửa code của app.
 Dev server: xem AGENTS.md. App tại $VERIFY_URL. Nếu AGENTS.md mô tả test hook để set state, dùng nó.
-$VERIFY_HINT"
+$VERIFY_HINT
+$SAFETY_RULES
+Nếu 'Trạng thái hiện tại' có dòng 'Selectors:', dùng nó thay vì grep code."
 
   if [[ "$mode" == "full" ]]; then
     prompt="$common
@@ -294,6 +296,13 @@ level_of() {
     *)         echo 1 ;;
   esac
 }
+
+# Quy tắc gửi kèm MỌI prompt của OpenCode (bước code và Verify)
+# Lần T05 (tea-party): OpenCode thấy dev server của người dùng thiếu ADMIN_TOKEN và tự kill nó, khiến server dev bật tắt liên tục.
+SAFETY_RULES="AN TOÀN VỚI TIẾN TRÌNH: KHÔNG kill, restart hay dừng bất kỳ tiến trình nào bạn không tự khởi động, nhất là dev server đang nghe cổng của người dùng (lsof và ps chỉ để xem, không để kill).
+Nếu cổng bị chiếm bởi server không phù hợp (thiếu biến môi trường như ADMIN_TOKEN, sai cấu hình), KHÔNG kill: ghi vào 'Đã thử mà không được' cổng, PID và lý do không phù hợp, không tick bước, commit file task rồi DỪNG để Tech Lead xử lý."
+SELECTOR_RULES="SELECTOR CHO BƯỚC TEST: nếu bước này tạo hoặc đổi giao diện (id, class, data-*, nút, input, route mới), cuối bước hãy ghi vào 'Trạng thái hiện tại' MỘT dòng 'Selectors: ...' liệt kê các selector chính kèm file chứa chúng (ví dụ 'Selectors: #customFile, #analyzeBtn, .cd-candidate (server/portal/index.html)').
+Nếu bước này là bước viết test cho giao diện đã có: ĐỌC dòng 'Selectors:' trong 'Trạng thái hiện tại' TRƯỚC, chỉ grep code khi còn thiếu selector."
 
 # Đường dẫn file đầu tiên nhắc tới trong dòng bước (vd client/src/ui/OrdersPanel.ts)
 first_path_of() {
@@ -421,8 +430,11 @@ while (( runs < MAX_RUNS )); do
 
   if [[ "$first_step" == "$failed_step" ]]; then
     say_dev_steps "Bước **$range/$total** hơi khó nhằn, mình gọi model mạnh hơn hỗ trợ nha 💪 mức **${LABELS[$level]}** · model \`${model#opencode-go/}\`" "${batch_lines[@]}"
-  else
-    say_dev_steps "Đang cày **bước $range/$total** nè 🔧 mức **${LABELS[$level]}** · model \`${model#opencode-go/}\`" "${batch_lines[@]}"
+  fi
+  # Không gửi tin "bắt đầu bước": mỗi bước chỉ báo MỘT lần lúc xong (room-ops.py progress). Ghi lại model để tin đó nêu được.
+  if [[ -f .agents/room.env ]]; then
+    mkdir -p .agents/progress
+    for s in "${batch_steps[@]}"; do echo "$s $model" >> ".agents/progress/$(basename "$TASK" .md | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}-//').models"; done
   fi
 
   prompt="Đọc AGENTS.md và $TASK. Làm LẦN LƯỢT các bước $steps_csv, không làm bước nào khác.
@@ -431,7 +443,9 @@ Về test: nếu bước có ghi lệnh test cụ thể thì CHỈ chạy đúng
 KHÔNG tự nghĩ thêm hay viết thêm test ngoài những gì plan yêu cầu. Sau đó
 commit với message rõ ràng; tick checkbox của bước đó; cập nhật 'Trạng thái hiện tại' và 'Test status'.
 Nếu một bước sau 2 lần sửa vẫn fail: KHÔNG tick checkbox của bước đó, ghi nguyên nhân và cách đã thử vào
-'Đã thử mà không được', commit file task, rồi DỪNG (không làm các bước sau)."
+'Đã thử mà không được', commit file task, rồi DỪNG (không làm các bước sau).
+$SAFETY_RULES
+$SELECTOR_RULES"
 
   continue_flag=0
   if [[ "$REUSE_SESSION" == "1" ]] && (( runs > 1 )) && [[ "$(fresh_session_for "$first_line")" == "0" ]]; then

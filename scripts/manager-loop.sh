@@ -85,8 +85,8 @@ line_slug()  { sed -nE 's/.*\(slug: `([^`]+)`\).*/\1/p' <<<"$1"; }
 has_done()   { grep -qE '^- \[x\] `T[0-9]+` \[done\]' "$BOARD" 2>/dev/null; }
 watcher_alive() { [[ -f "$AG/watcher.pid" ]] && kill -0 "$(cat "$AG/watcher.pid" 2>/dev/null)" 2>/dev/null; }
 
-report_progress() {   # slug — báo tiến độ (bước, test, verify, vòng sửa, merge) đọc từ file task và git, không tốn Claude
-  python3 "$OPS" progress "$1" >/dev/null 2>>"$LOGDIR/ops.log" || true
+report_progress() {   # slug [--flush] — báo tiến độ (bước, test, verify, vòng sửa, merge) đọc từ file task và git, không tốn Claude
+  python3 "$OPS" progress "$@" >/dev/null 2>>"$LOGDIR/ops.log" || true
 }
 
 # Biến tạm cho một lần gọi:  CUR_SLUG=<slug> báo tiến độ trong lúc Tech Lead làm việc · RC_TOOLS="Read,Grep,Glob" chỉ cho các công cụ này
@@ -125,7 +125,7 @@ run_claude() { # vai(manager|techlead) prompt [nhãn]
   if [[ -n "$PROGRESS_PID" ]]; then
     pkill -P "$PROGRESS_PID" 2>/dev/null; kill "$PROGRESS_PID" 2>/dev/null; wait "$PROGRESS_PID" 2>/dev/null
     PROGRESS_PID=""
-    report_progress "$CUR_SLUG"   # lần cuối: bắt những gì xảy ra sau lượt kiểm tra cuối cùng
+    report_progress "$CUR_SLUG" --flush   # lần cuối: bắt những gì xảy ra sau lượt kiểm tra cuối cùng
   fi
   text="$(printf '%s' "$raw" | python3 "$OPS" claude-result "$role" "$label" "$model")"; prc=$?
   LAST_TEXT="$text"
@@ -153,9 +153,10 @@ techlead_prompt() { # phase id slug [opencode-status plan-file]
   local common="Bạn là Tech Lead (Claude Code) trong phòng tự động (AUTO_MODE=true). Làm theo CLAUDE.md, mục Autopilot/AUTO_MODE.
 Nhánh nền là '$STAGING_BRANCH' (không phải $MAIN_BRANCH). Task: $2, slug: $3 (xem tiêu đề trên .agents/board.md).
 Không hỏi người dùng, không dừng chờ input. Gặp việc không làm được: đặt task thành [BLOCKED] trên board.md, ghi lý do vào Activity Log, rồi dừng.
+KHÔNG kill hay dừng tiến trình bạn không tự khởi động (kể cả dev server của người dùng). Nếu server đang chạy không phù hợp (thiếu biến môi trường như ADMIN_TOKEN), hãy dùng cổng khác cho server của bạn hoặc ghi rõ vào mục Verify; đừng kill server của người dùng.
 Daemon tự báo tiến độ cho user từ file task và git (plan, bước xong, test, Verify, vòng sửa, merge), nên bạn KHÔNG cần viết tin: chỉ cần giữ file task đúng mẫu (tick checkbox từng bước ngay khi xong, cập nhật mục Test status dạng T1: PASS|FAIL, viết mục ## Verify và dòng cuối VERIFY: PASS|FAIL) và lưu ảnh vào .agents/screenshots/. Chỉ ghi file JSON vào .agents/outbox/ (ghi ra .tmp rồi đổi tên thành <unix-ts>-techlead-<n>.json) khi cần user quyết định điều gì: {\"from\": \"techlead\", \"text\": \"...\"}. Giọng văn: tiếng Việt thân thiện, thoải mái, xưng mình và gọi bạn, có thể dùng emoji vừa phải. Trình bày dễ đọc: tách mục bằng dòng trống, dùng **chữ đậm** cho tiêu đề, gạch đầu dòng - cho danh sách, dấu ngược cho tên file hoặc lệnh. Ngắn gọn, tối đa khoảng 8 dòng. Không đưa secret vào tin."
   case "$1" in
-    plan) printf '%s\n\nVIỆC CỦA BẠN: chỉ LÊN PLAN. Checkout %s, tạo nhánh task/%s, viết plan vào .agents/tasks/<ngày>-%s.md theo CLAUDE.md, commit file plan. KHÔNG chạy scripts/handoff.sh (daemon kiểm tra plan rồi mới giao). Cuối cùng đổi task %s trên board.md từ [pending] sang [plan_ready].\n' "$common" "$STAGING_BRANCH" "$3" "$3" "$2" ;;
+    plan) printf '%s\n\nVIỆC CỦA BẠN: chỉ LÊN PLAN. Checkout %s, tạo nhánh task/%s, viết plan vào .agents/tasks/<ngày>-%s.md theo CLAUDE.md, commit file plan. KHÔNG chạy scripts/handoff.sh (daemon kiểm tra plan rồi mới giao). Cuối cùng đổi task %s trên board.md từ [pending] sang [plan_ready].\nKhi lập plan: nếu một bước test phụ thuộc giao diện do bước trước trong plan tạo ra thì selector chưa tồn tại, đừng bịa. Ghi selector là ví dụ và yêu cầu bước test ĐỌC dòng Selectors trong Trạng thái hiện tại (bước giao diện sẽ ghi lại dòng này khi làm xong).\n' "$common" "$STAGING_BRANCH" "$3" "$3" "$2" ;;
     finish) printf '%s\n\nVIỆC CỦA BẠN: plan đã được duyệt và đã giao cho OpenCode. Daemon đã chờ giúp bạn: OpenCode báo trạng thái "%s" cho file plan %s. TUYỆT ĐỐI không chạy scripts/wait-task.sh. Làm tiếp từ bước Verify của Autopilot (nếu trạng thái done) hoặc Fix cycle (nếu stuck), tối đa %s vòng sửa.\nNếu cần Fix cycle: ghi bước Fix vào file plan, commit plan(fix-n), chạy scripts/handoff.sh <file plan> rồi KẾT THÚC phiên ngay: daemon sẽ chờ OpenCode và gọi lại bạn với ngữ cảnh mới (mọi thông tin phải nằm trong file plan).\nLưu ảnh verify vào .agents/screenshots/ với tên bắt đầu bằng task-NN- (NN là số của task, ví dụ task-05-portal-upload.png) và chỉ chụp ảnh của kịch bản vừa verify, vì báo cáo duyệt ship chỉ gửi ảnh gắn với từng task. Task không cần ảnh (Verify none) thì không chụp. Khi PASS: merge --squash nhánh task/%s vào %s (KHÔNG push, KHÔNG merge vào %s), xóa nhánh task, đổi task %s thành [done] và [x] trên board.md, ghi Activity Log. Nếu hết vòng sửa mà chưa đạt: [BLOCKED] + lý do.\n' "$common" "${4:-done}" "${5:-?}" "${MAX_FIX_CYCLES:-2}" "$3" "$STAGING_BRANCH" "$MAIN_BRANCH" "$2" ;;
   esac
 }
@@ -337,6 +338,7 @@ tick_auto() {
       st=""; [[ -n "$plan" ]] && st="$AG/status/$(basename "$plan" .md).status"
       st_state="none"; st_ts=0
       [[ -n "$st" && -f "$st" ]] && read -r st_state st_ts < "$st"
+      case "$st_state" in done|stuck) report_progress "$slug" --flush ;; esac   # OpenCode xong: gửi nốt phần còn lại
       case "$st_state" in
         queued|running)
           # Daemon tự chờ OpenCode; chỉ báo động nếu job nằm 'queued' lâu mà watcher đã chết
