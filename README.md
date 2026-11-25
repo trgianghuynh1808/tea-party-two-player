@@ -106,6 +106,9 @@ WebSocket from the same origin. Then either:
 - `SHIFT_SECONDS=20 npm run dev` — shorter shifts for testing (server only).
 - `VITE_SERVER_URL=http://host:2567` — point the client at another game server.
 - `npx playwright test` — e2e tests run on their own ports (server 2568, client 5174) and never reuse your dev server on 2567/5173.
+- Each build writes a `version.json` (a fresh `BUILD_ID`, or your `BUILD_ID` env). Open pages fetch it at load,
+  every 60s and when the tab is focused again; after a deploy they show an unavoidable **Có phiên bản mới** popup
+  whose only button reloads the page (`client/src/updateChecker.ts`). Dev mode reports `"dev"`, so no popup locally.
 
 ## Decorating & saving
 
