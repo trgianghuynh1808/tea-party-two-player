@@ -69,6 +69,8 @@ MODEL_TECHLEAD=""
 # Giới hạn số lượt mỗi lần gọi (chặn một lần chạy lạc đốt quota)
 MAX_TURNS_MANAGER="20"
 MAX_TURNS_TECHLEAD="150"
+# Chế độ /plan (Tech Lead đọc repo để trả lời câu hỏi): giới hạn số lượt
+MAX_TURNS_PLAN="40"
 # /auto tách task: "lines" (mỗi dòng một task, không tốn Claude) hoặc "claude" (Manager tách)
 AUTO_SPLIT="lines"
 # Sau /ship, giữ lại bao nhiêu task đã ship gần nhất trên board (phần cũ hơn được gỡ và ghi vào Activity Log)
@@ -98,7 +100,7 @@ BOARD
   fi
 
   touch .gitignore
-  for e in ".agents/board.md" ".agents/room.env" ".agents/inbox/" ".agents/outbox/" ".agents/screenshots/" ".agents/logs/" ".agents/manager.lock" ".agents/manager.sig" ".agents/kit-dir" ".agents/kit-version" ".agents/watcher.pid" ".agents/progress/" ".agents/bin/"; do
+  for e in ".agents/board.md" ".agents/room.env" ".agents/inbox/" ".agents/outbox/" ".agents/screenshots/" ".agents/logs/" ".agents/manager.lock" ".agents/manager.sig" ".agents/kit-dir" ".agents/kit-version" ".agents/watcher.pid" ".agents/plan.pid" ".agents/plan/" ".agents/progress/" ".agents/bin/"; do
     grep -qxF "$e" .gitignore || { echo "$e" >> .gitignore; echo "  ✓ .gitignore: $e"; }
   done
 
@@ -125,6 +127,7 @@ PY
 }
 
 ensure_bridge() {   # bật bridge bot nếu chưa chạy (cần .agents/kit-dir do install.sh ghi)
+  [[ -z "${AGENT_BRIDGE_UP:-}" ]] || return 0   # đang được chính bridge gọi (/newroom): bridge chắc chắn đang chạy
   local kit; kit="$(cat "$AG/kit-dir" 2>/dev/null || true)"
   if [[ -x "$kit/bridge-bot/bridge.sh" ]]; then
     "$kit/bridge-bot/bridge.sh" start || echo "⚠️  Không bật được bridge — phòng vẫn chạy, nhưng Telegram chưa nối."

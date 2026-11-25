@@ -1,5 +1,6 @@
 import { devices, expect, test } from "@playwright/test";
 import { joinAsHost, startRestaurantShift } from "./helpers";
+import { TEST_CLIENT_URL } from "./ports";
 
 /** Unique per test run; shops persist per username in server/data/. */
 let userSeq = 0;
@@ -9,11 +10,11 @@ test("T1: the recipe guide modal does not overflow on a portrait phone", async (
   // A phone held upright (touch, portrait viewport): forceLandscape.ts turns the whole page
   // with CSS (body.force-landscape), the layout the horizontal overflow bug showed in.
   // Manually created contexts don't inherit the config's use options, so pass baseURL along
-  // (same as playwright.config.ts: the Vite dev server on 5173).
+  // (same as playwright.config.ts: the Vite dev server on 5174).
   const context = await browser.newContext({
     ...devices["iPhone 13"],
     deviceScaleFactor: 1,
-    baseURL: "http://localhost:5173",
+    baseURL: TEST_CLIENT_URL,
   });
   const page = await context.newPage();
   try {

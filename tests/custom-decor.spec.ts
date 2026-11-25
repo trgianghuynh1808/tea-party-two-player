@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
-import { SERVER_PORT } from "@boba/shared";
 import { joinAsHost } from "./helpers";
+import { TEST_SERVER_URL } from "./ports";
 
 /**
  * Custom furniture e2e (task .agents/tasks/2026-11-25-task-05-hien-tai-moi-lan-them-noi-that-deu-phai.md):
@@ -10,7 +10,7 @@ import { joinAsHost } from "./helpers";
  * playwright.config.ts starts the server with ADMIN_TOKEN=test-admin-token; a dev server without
  * the token would answer 404 instead of 401 on the admin routes.
  */
-const SERVER = `http://localhost:${SERVER_PORT}`;
+const SERVER = TEST_SERVER_URL;
 const ADMIN_TOKEN = "test-admin-token";
 const AUTH = { Authorization: `Bearer ${ADMIN_TOKEN}` };
 

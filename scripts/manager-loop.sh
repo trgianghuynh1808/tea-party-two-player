@@ -10,12 +10,13 @@
 #     [in_progress]         → daemon TỰ CHỜ OpenCode (đọc .agents/status); khi done/stuck mới gọi Tech Lead (verify, review, merge / fix)
 #     tất cả [done]         → room-ops.py finalize (báo cáo, xin /ship), không gọi Claude
 #   [BLOCKED]               → tắt AUTO_MODE, báo user
+#   /plan <câu hỏi>         → chế độ PLAN: Tech Lead đọc repo (chỉ Read/Grep/Glob), Manager tổng hợp gửi bạn; chạy nền, không tạo task, không sửa gì
 #
 # Chặn vòng lặp vô hạn: cùng một (task, trạng thái) mà sau 2 lần gọi vẫn không đổi → tắt AUTO_MODE và báo user.
 # Biến (đặt trong .agents/room.env hoặc môi trường):
 #   POLL (giây, mặc định 3) · CLAUDE_FLAGS (mặc định --dangerously-skip-permissions)
 #   MODEL_MANAGER, MODEL_TECHLEAD (alias haiku|sonnet|opus hoặc id; trống = mặc định của claude)
-#   MAX_TURNS_MANAGER (20), MAX_TURNS_TECHLEAD (150)
+#   MAX_TURNS_MANAGER (20), MAX_TURNS_TECHLEAD (150), MAX_TURNS_PLAN (40)
 
 set -uo pipefail
 
@@ -47,8 +48,8 @@ if [[ -f "$LOCK" ]] && kill -0 "$(cat "$LOCK" 2>/dev/null)" 2>/dev/null; then
   echo "⛔ Manager của phòng này đã chạy (pid $(cat "$LOCK"))."; exit 1
 fi
 echo $$ > "$LOCK"
-PROGRESS_PID=""
-trap '[[ -n "$PROGRESS_PID" ]] && { pkill -P "$PROGRESS_PID" 2>/dev/null; kill "$PROGRESS_PID" 2>/dev/null; }; rm -f "$LOCK"; exit 0' INT TERM EXIT
+PROGRESS_PID=""; PLAN_PID=""; LAST_TEXT=""
+trap '[[ -n "$PROGRESS_PID" ]] && { pkill -P "$PROGRESS_PID" 2>/dev/null; kill "$PROGRESS_PID" 2>/dev/null; }; [[ -n "$PLAN_PID" ]] && { pkill -P "$PLAN_PID" 2>/dev/null; kill "$PLAN_PID" 2>/dev/null; rm -f "$AG/plan.pid"; }; rm -f "$LOCK"; exit 0' INT TERM EXIT
 
 c_role() { case "$1" in manager) printf '\033[36m' ;; techlead) printf '\033[33m' ;; *) printf '\033[90m' ;; esac; }
 log() {
@@ -66,7 +67,7 @@ room_env() {   # nạp lại mỗi vòng để thấy thay đổi mới
   AUTO_MODE="${AUTO_MODE:-false}"; STAGING_BRANCH="${STAGING_BRANCH:-staging}"; MAIN_BRANCH="${MAIN_BRANCH:-main}"
   MAX_FIX_CYCLES="${MAX_FIX_CYCLES:-2}"
   MODEL_MANAGER="${MODEL_MANAGER:-}"; MODEL_TECHLEAD="${MODEL_TECHLEAD:-}"
-  MAX_TURNS_MANAGER="${MAX_TURNS_MANAGER:-20}"; MAX_TURNS_TECHLEAD="${MAX_TURNS_TECHLEAD:-150}"
+  MAX_TURNS_MANAGER="${MAX_TURNS_MANAGER:-20}"; MAX_TURNS_TECHLEAD="${MAX_TURNS_TECHLEAD:-150}"; MAX_TURNS_PLAN="${MAX_TURNS_PLAN:-40}"
 }
 
 set_env_key() { # key value
@@ -88,10 +89,13 @@ report_progress() {   # slug — báo tiến độ (bước, test, verify, vòng
   python3 "$OPS" progress "$1" >/dev/null 2>>"$LOGDIR/ops.log" || true
 }
 
-run_claude() { # vai(manager|techlead) prompt [nhãn]   (CUR_SLUG=<slug> để báo tiến độ trong lúc Tech Lead làm việc)
+# Biến tạm cho một lần gọi:  CUR_SLUG=<slug> báo tiến độ trong lúc Tech Lead làm việc · RC_TOOLS="Read,Grep,Glob" chỉ cho các công cụ này
+# (RC_TOOLS="" = không công cụ nào; khi đặt thì KHÔNG dùng CLAUDE_FLAGS) · RC_TURNS=<n> đổi giới hạn lượt · RC_QUIET=1 không gửi tin ▶/⚠ · kết quả để ở LAST_TEXT
+run_claude() { # vai(manager|techlead) prompt [nhãn]
   local role="$1" label="${3:-$1}" col model turns raw text crc prc rc
   col="$(c_role "$role")"
   if [[ "$role" == techlead ]]; then model="$MODEL_TECHLEAD"; turns="$MAX_TURNS_TECHLEAD"; else model="$MODEL_MANAGER"; turns="$MAX_TURNS_MANAGER"; fi
+  turns="${RC_TURNS:-$turns}"
   if [[ -z "${2//[[:space:]]/}" ]]; then
     log "⛔ ${role}: prompt rỗng (lỗi trong manager-loop.sh), không gọi claude: ${label}"
     say_user "Ối, mình gặp lỗi nội bộ 😵 prompt của **${role}** bị rỗng (${label}). Bạn báo người bảo trì kit giúp mình nhé." manager
@@ -99,9 +103,11 @@ run_claude() { # vai(manager|techlead) prompt [nhãn]   (CUR_SLUG=<slug> để b
   fi
   local args=(-p "$2" --output-format json --max-turns "$turns")
   [[ -n "$model" ]] && args+=(--model "$model")
+  local flags="$CLAUDE_FLAGS"
+  if [[ -n "${RC_TOOLS+x}" ]]; then args+=(--tools "$RC_TOOLS"); flags=""; fi   # chế độ chỉ đọc: giới hạn công cụ, không bỏ qua quyền
 
   log "▶ ${role}: ${label}${model:+ [$model]}"
-  if [[ "$role" == techlead ]]; then
+  if [[ "$role" == techlead && -z "${RC_QUIET:-}" ]]; then
     case "$label" in
       *"lên plan"*) say_user "Mình bắt đầu **lên plan** cho **${label%% *}** nha 📝" techlead ;;
       *verify*)     say_user "Dev báo xong rồi, mình qua **verify + review** **${label%% *}** đây 🔎" techlead ;;
@@ -115,13 +121,14 @@ run_claude() { # vai(manager|techlead) prompt [nhãn]   (CUR_SLUG=<slug> để b
     PROGRESS_PID=$!
   fi
   # shellcheck disable=SC2086
-  raw="$(claude "${args[@]}" $CLAUDE_FLAGS 2>>"$LOGDIR/$role.err")"; crc=$?
+  raw="$(claude "${args[@]}" $flags 2>>"$LOGDIR/$role.err")"; crc=$?
   if [[ -n "$PROGRESS_PID" ]]; then
     pkill -P "$PROGRESS_PID" 2>/dev/null; kill "$PROGRESS_PID" 2>/dev/null; wait "$PROGRESS_PID" 2>/dev/null
     PROGRESS_PID=""
     report_progress "$CUR_SLUG"   # lần cuối: bắt những gì xảy ra sau lượt kiểm tra cuối cùng
   fi
   text="$(printf '%s' "$raw" | python3 "$OPS" claude-result "$role" "$label" "$model")"; prc=$?
+  LAST_TEXT="$text"
   while IFS= read -r l; do
     printf '%s\n' "$l" >> "$LOGDIR/$role.log"
     [[ -z "${l//[[:space:]]/}" ]] && continue
@@ -133,7 +140,7 @@ run_claude() { # vai(manager|techlead) prompt [nhãn]   (CUR_SLUG=<slug> để b
     log "✔ ${role}: ${label}"
   else
     log "⚠ ${role}: ${label} thoát với mã $rc"
-    [[ "$role" == techlead ]] && say_user "Ối, lần chạy **$label** bị lỗi (mã $rc) 😢 Bạn xem \`.agents/logs/techlead.log\` giúp mình nha." techlead
+    [[ "$role" == techlead && -z "${RC_QUIET:-}" ]] && say_user "Ối, lần chạy **$label** bị lỗi (mã $rc) 😢 Bạn xem \`.agents/logs/techlead.log\` giúp mình nha." techlead
   fi
   return $rc
 }
@@ -149,7 +156,7 @@ Không hỏi người dùng, không dừng chờ input. Gặp việc không làm
 Daemon tự báo tiến độ cho user từ file task và git (plan, bước xong, test, Verify, vòng sửa, merge), nên bạn KHÔNG cần viết tin: chỉ cần giữ file task đúng mẫu (tick checkbox từng bước ngay khi xong, cập nhật mục Test status dạng T1: PASS|FAIL, viết mục ## Verify và dòng cuối VERIFY: PASS|FAIL) và lưu ảnh vào .agents/screenshots/. Chỉ ghi file JSON vào .agents/outbox/ (ghi ra .tmp rồi đổi tên thành <unix-ts>-techlead-<n>.json) khi cần user quyết định điều gì: {\"from\": \"techlead\", \"text\": \"...\"}. Giọng văn: tiếng Việt thân thiện, thoải mái, xưng mình và gọi bạn, có thể dùng emoji vừa phải. Trình bày dễ đọc: tách mục bằng dòng trống, dùng **chữ đậm** cho tiêu đề, gạch đầu dòng - cho danh sách, dấu ngược cho tên file hoặc lệnh. Ngắn gọn, tối đa khoảng 8 dòng. Không đưa secret vào tin."
   case "$1" in
     plan) printf '%s\n\nVIỆC CỦA BẠN: chỉ LÊN PLAN. Checkout %s, tạo nhánh task/%s, viết plan vào .agents/tasks/<ngày>-%s.md theo CLAUDE.md, commit file plan. KHÔNG chạy scripts/handoff.sh (daemon kiểm tra plan rồi mới giao). Cuối cùng đổi task %s trên board.md từ [pending] sang [plan_ready].\n' "$common" "$STAGING_BRANCH" "$3" "$3" "$2" ;;
-    finish) printf '%s\n\nVIỆC CỦA BẠN: plan đã được duyệt và đã giao cho OpenCode. Daemon đã chờ giúp bạn: OpenCode báo trạng thái "%s" cho file plan %s. TUYỆT ĐỐI không chạy scripts/wait-task.sh. Làm tiếp từ bước Verify của Autopilot (nếu trạng thái done) hoặc Fix cycle (nếu stuck), tối đa %s vòng sửa.\nNếu cần Fix cycle: ghi bước Fix vào file plan, commit plan(fix-n), chạy scripts/handoff.sh <file plan> rồi KẾT THÚC phiên ngay: daemon sẽ chờ OpenCode và gọi lại bạn với ngữ cảnh mới (mọi thông tin phải nằm trong file plan).\nLưu ảnh verify vào .agents/screenshots/. Khi PASS: merge --squash nhánh task/%s vào %s (KHÔNG push, KHÔNG merge vào %s), xóa nhánh task, đổi task %s thành [done] và [x] trên board.md, ghi Activity Log. Nếu hết vòng sửa mà chưa đạt: [BLOCKED] + lý do.\n' "$common" "${4:-done}" "${5:-?}" "${MAX_FIX_CYCLES:-2}" "$3" "$STAGING_BRANCH" "$MAIN_BRANCH" "$2" ;;
+    finish) printf '%s\n\nVIỆC CỦA BẠN: plan đã được duyệt và đã giao cho OpenCode. Daemon đã chờ giúp bạn: OpenCode báo trạng thái "%s" cho file plan %s. TUYỆT ĐỐI không chạy scripts/wait-task.sh. Làm tiếp từ bước Verify của Autopilot (nếu trạng thái done) hoặc Fix cycle (nếu stuck), tối đa %s vòng sửa.\nNếu cần Fix cycle: ghi bước Fix vào file plan, commit plan(fix-n), chạy scripts/handoff.sh <file plan> rồi KẾT THÚC phiên ngay: daemon sẽ chờ OpenCode và gọi lại bạn với ngữ cảnh mới (mọi thông tin phải nằm trong file plan).\nLưu ảnh verify vào .agents/screenshots/ với tên bắt đầu bằng task-NN- (NN là số của task, ví dụ task-05-portal-upload.png) và chỉ chụp ảnh của kịch bản vừa verify, vì báo cáo duyệt ship chỉ gửi ảnh gắn với từng task. Task không cần ảnh (Verify none) thì không chụp. Khi PASS: merge --squash nhánh task/%s vào %s (KHÔNG push, KHÔNG merge vào %s), xóa nhánh task, đổi task %s thành [done] và [x] trên board.md, ghi Activity Log. Nếu hết vòng sửa mà chưa đạt: [BLOCKED] + lý do.\n' "$common" "${4:-done}" "${5:-?}" "${MAX_FIX_CYCLES:-2}" "$3" "$STAGING_BRANCH" "$MAIN_BRANCH" "$2" ;;
   esac
 }
 
@@ -169,6 +176,98 @@ guard() { # key
   return 0
 }
 
+# ---------- chế độ PLAN: Manager và Tech Lead cùng trả lời một câu hỏi, chỉ đọc, không sửa gì ----------
+# Tech Lead chỉ có công cụ Read/Grep/Glob (không thể ghi file hay chạy lệnh), Manager tổng hợp không dùng công cụ nào.
+# Chạy nền để daemon vẫn xử lý lệnh khác và theo dõi task trong lúc chờ.
+
+plan_tech_prompt() { # câu hỏi
+  cat <<EOF
+Bạn là Tech Lead (Claude Code) ở CHẾ ĐỘ PLAN: chỉ đọc và phân tích, tuyệt đối KHÔNG sửa gì. Bạn chỉ có công cụ Read, Grep, Glob nên không thể ghi file hay chạy lệnh, và đừng cố làm vậy.
+Manager chuyển cho bạn câu hỏi của người dùng (Product Owner):
+---
+$1
+---
+Cách làm:
+1. Đọc AGENTS.md, CLAUDE.md và .agents/board.md để nắm bối cảnh. Sau đó chỉ đọc những file hoặc thư mục cần để trả lời, đừng quét cả repo.
+2. Trả lời dựa trên code thật, dẫn chứng bằng đường dẫn file (và tên hàm nếu có). Chỗ nào không chắc hoặc không thấy trong repo thì nói rõ là chưa chắc, đừng đoán.
+3. Nếu câu hỏi là yêu cầu làm tính năng hay sửa lỗi thì đừng làm. Hãy phân tích hướng làm, các file sẽ động tới, rủi ro, và đề xuất cách chia thành các task nhỏ (mỗi task một dòng).
+Trả về văn bản markdown tiếng Việt gồm các mục: Kết luận ngắn (2-3 câu), Chi tiết kỹ thuật (gạch đầu dòng), File liên quan, Rủi ro hoặc điều chưa chắc, Gợi ý việc nên làm (nếu có). Đây là báo cáo gửi cho Manager nên không cần giọng thân mật.
+EOF
+}
+
+plan_mgr_prompt() { # câu hỏi, tình hình board, phân tích của Tech Lead
+  cat <<EOF
+Bạn là Manager (PM) của dự án. Người dùng đang hỏi bạn ở CHẾ ĐỘ PLAN. Tech Lead đã đọc repo và gửi phân tích. Nhiệm vụ của bạn là tổng hợp thành MỘT tin nhắn trả lời người dùng.
+
+Câu hỏi của người dùng:
+---
+$1
+---
+
+Tình hình board hiện tại:
+---
+$2
+---
+
+Phân tích của Tech Lead:
+---
+$3
+---
+
+Yêu cầu cho tin nhắn:
+- Tiếng Việt, thân thiện và thoải mái (xưng mình, gọi bạn, emoji vừa phải), dễ đọc: tách mục bằng dòng trống, tiêu đề in đậm bằng **, danh sách dùng gạch đầu dòng với một ý mỗi dòng, tên file và lệnh đặt trong dấu backtick.
+- Mở đầu bằng câu trả lời ngắn gọn cho câu hỏi. Có mục **Góc nhìn Tech Lead** nêu ý chính về kỹ thuật.
+- Chỉ dùng thông tin trong phân tích của Tech Lead và board, không bịa thêm. Nếu Tech Lead nói chưa chắc thì giữ nguyên sự chưa chắc đó.
+- Nếu có hướng làm cụ thể, thêm mục **Nếu bạn muốn mình làm** với các dòng lệnh /auto gợi ý (mỗi dòng một việc nhỏ) để bạn copy. Nhắc đây mới là gợi ý, chưa có gì được làm.
+- Tối đa khoảng 25 dòng. Chỉ trả về nội dung tin nhắn, không thêm lời dẫn và không bọc trong khối code.
+EOF
+}
+
+start_plan_job() { # file inbox của lệnh /plan
+  if [[ -f "$AG/plan.pid" ]] && kill -0 "$(cat "$AG/plan.pid" 2>/dev/null)" 2>/dev/null; then
+    say_user "Mình đang xử lý một câu hỏi khác rồi 🙇 Bạn chờ mình trả lời xong rồi hỏi tiếp nha ⏳" manager
+    log "⚙ /plan bị từ chối: đang có một câu hỏi chạy"
+    return 0
+  fi
+  mkdir -p "$AG/plan"
+  local qf; qf="$AG/plan/$(date +%Y%m%d-%H%M%S).question.md"
+  python3 "$OPS" inbox-args "$1" > "$qf" 2>>"$LOGDIR/ops.log"
+  ( plan_run "$qf" ) >>"$LOGDIR/plan.log" 2>&1 &
+  PLAN_PID=$!
+  echo "$PLAN_PID" > "$AG/plan.pid"
+  log "⚙ /plan: bắt đầu trả lời câu hỏi (chạy nền, chỉ đọc)"
+}
+
+plan_run() { # file câu hỏi (chạy trong subshell nền)
+  local qf="$1" base q findings
+  base="${qf%.question.md}"
+  q="$(cat "$qf")"
+  trap 'rm -f "$AG/plan.pid"' EXIT
+
+  say_user "Mình nhận câu hỏi rồi nè 📝 Mình nhờ Tech Lead xem code giúp, xong mình tổng hợp gửi bạn nha.\n\nChế độ \`/plan\` chỉ đọc và phân tích, sẽ không sửa gì hay tạo task nào hết." manager
+  say_user "Mình bắt đầu đọc repo để trả lời đây 🔍 (chỉ đọc, không sửa gì)" techlead
+
+  if ! RC_QUIET=1 RC_TOOLS="Read,Grep,Glob" RC_TURNS="${MAX_TURNS_PLAN:-40}" run_claude techlead "$(plan_tech_prompt "$q")" "plan: tìm hiểu"; then
+    say_user "Ối, Tech Lead tìm hiểu bị lỗi 😢 Bạn xem \`.agents/logs/techlead.log\` giúp mình, hoặc hỏi lại nha." manager
+    return 1
+  fi
+  findings="$LAST_TEXT"
+  printf '%s\n' "$findings" > "$base.findings.md"
+  if [[ -z "${findings//[[:space:]]/}" ]]; then
+    say_user "Tech Lead không trả về nội dung nào 🤔 Bạn thử hỏi lại cụ thể hơn giúp mình nha." manager
+    return 1
+  fi
+
+  if RC_QUIET=1 RC_TOOLS="" RC_TURNS=3 run_claude manager "$(plan_mgr_prompt "$q" "$(python3 "$OPS" status 2>/dev/null)" "$findings")" "plan: tổng hợp"; then
+    printf '%s\n' "$LAST_TEXT" > "$base.answer.md"
+  else
+    # Manager lỗi: vẫn gửi phân tích của Tech Lead để bạn không mất công sức đã tốn
+    printf '%s\n\n_(Manager chưa tổng hợp được nên mình gửi nguyên phân tích của Tech Lead.)_\n' "$findings" > "$base.answer.md"
+  fi
+  python3 "$OPS" say-file manager "$base.answer.md" >/dev/null 2>>"$LOGDIR/ops.log" || true
+  log "✔ /plan: đã gửi câu trả lời ($(basename "$base").answer.md)"
+}
+
 handle_inbox() {
   local files=() claude_files=() f rc summary listing=""
   while IFS= read -r f; do files+=("$f"); done < <(ls -1 "$INBOX"/*.json 2>/dev/null | sort)
@@ -178,6 +277,7 @@ handle_inbox() {
     case $rc in
       0) mv "$f" "$INBOX/processed/"; log "⚙ ${summary:-lệnh} (không dùng Claude)" ;;
       3) claude_files+=("$f") ;;
+      5) start_plan_job "$f"; mv "$f" "$INBOX/processed/" ;;
       *) mv "$f" "$INBOX/failed/"; log "⚠ lỗi khi xử lý $(basename "$f") (xem ops.log)"
          say_user "Ối, mình xử lý tin nhắn của bạn bị lỗi 😢 Xem \`.agents/logs/ops.log\` giúp mình nha (tin đã chuyển sang \`inbox/failed/\`)." ;;
     esac

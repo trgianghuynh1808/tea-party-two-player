@@ -5,6 +5,8 @@ Used by scripts/manager-loop.sh so the Manager only needs Claude for judgement c
 
   room-ops.py inbox <file>          handle one inbox message (exit 0 handled, 3 = needs Claude, other = error)
   room-ops.py say <role> <text>     write a message to .agents/outbox
+  room-ops.py say-file <role> <file>   same, text taken verbatim from a file
+  room-ops.py inbox-args <file>     print the arguments of an inbox message (the /plan question)
   room-ops.py say-steps <role> <head> <step line>...   same, with the plan steps listed under <head>
   room-ops.py status | stop | resume | usage [days]
   room-ops.py plan-path <slug>      path of the newest plan file for a task slug
@@ -38,6 +40,7 @@ HELP = ("Mình chỉ hiểu mấy lệnh này thôi nha 😅\n"
         "- `/status` · xem tiến độ\n"
         "- `/health` · kiểm tra các agent\n"
         "- `/usage` · xem mức dùng token\n"
+        "- `/plan <câu hỏi>` · hỏi đáp, phân tích project (chỉ đọc, không sửa gì)\n"
         "- `/stop` · dừng lại\n"
         "- `/resume` · chạy tiếp\n"
         "- `/ship` · đưa lên main\n"
@@ -451,28 +454,62 @@ def cmd_block(task_id, reason):
     return msg
 
 
+def task_screenshots(t, limit=4):
+    """Screenshots made while verifying this task: those recorded when its Verify result was reported
+    (time window), plus files named task-NN-* / containing its slug. Never anything else in the folder."""
+    found = set()
+    try:
+        with open(f"{PROGRESS_DIR}/{t['slug']}.json", encoding="utf8") as f:
+            found |= {x for x in json.load(f).get("task_shots", []) if os.path.exists(x)}
+    except (OSError, ValueError):
+        pass
+    prefix = f"task-{int(t['id'][1:]):02d}-"
+    for f in screenshots():
+        base = os.path.basename(f)
+        if base.startswith(prefix) or t["slug"] in base:
+            found.add(f)
+    return sorted((x for x in found if "/archive/" not in x), key=os.path.getmtime)[-limit:]
+
+
+def verify_info(t):
+    """(verify mode, last VERIFY result) read from the task's plan file."""
+    mode, result = "light", ""
+    for f in glob.glob(f"{AG}/tasks/*{t['slug']}*.md"):
+        text = open(f, encoding="utf8").read()
+        mode = (re.findall(r"^Verify mode:\s*(\w+)", text, re.M) or [mode])[0]
+        result = (re.findall(r"^VERIFY:\s*(PASS|FAIL)", text, re.M) or [result])[-1]
+    return mode, result
+
+
 def cmd_finalize():
     lines = read_board()
     e = read_env()
     main, stg = e.get("MAIN_BRANCH", "main"), e.get("STAGING_BRANCH", "staging")
     done = [t for t in tasks(lines) if t["state"] == "done"]
     out = ["Xong hết rồi nè! 🎉 Giờ chỉ còn chờ bạn duyệt ship thôi.", "", "**Việc đã hoàn thành**"]
+    evidence = []   # (task, images) in task order; sent first so the Ship button ends up at the bottom
     for t in done:
-        v = ""
-        for f in glob.glob(f"{AG}/tasks/*{t['slug']}*.md"):
-            m = re.findall(r"^VERIFY:\s*(PASS|FAIL)", open(f, encoding="utf8").read(), re.M)
-            if m:
-                v = f" · Verify {m[-1]}"
-        out.append(f"- **{t['id']}** · {short(t['title'], 90)}{v}")
+        mode, result = verify_info(t)
+        imgs = task_screenshots(t)
+        if imgs:
+            note = f"Verify {result or mode} · 📸 {len(imgs)} ảnh ở trên"
+            evidence.append((t, imgs, result or mode))
+        elif mode == "none":
+            note = "Verify bỏ qua (task không ảnh hưởng giao diện), không có ảnh"
+        else:
+            note = f"Verify {result or mode}, không có ảnh chụp"
+        out.append(f"- **{t['id']}** · {short(t['title'], 90)} · {note}")
     rc, log = git("log", "--oneline", f"{main}..{stg}")
     if rc == 0 and log:
         out += ["", f"**Commit mới trên nhánh {stg}** (chưa có trong {main})"] + [f"- `{l.split(' ', 1)[0]}` {short(l.split(' ', 1)[1] if ' ' in l else '', 90)}" for l in log.splitlines()[:15]]
-    shots = screenshots()[-6:]
     out += ["", "Bấm **Ship** hoặc gõ `/ship` để mình đưa lên `main` nhé, còn muốn giữ lại thì gõ `/stop` 💌"]
+    # Pictures first, each batch introduced by the task it belongs to (they are what the Tech Lead captured while verifying it)
+    for t, imgs, res in evidence:
+        emit("techlead", f"📸 **{t['id']}** · {short(t['title'], 80)}\nẢnh mình chụp lúc verify task này (Verify {res})", images=imgs)
     set_auto(lines, False, "AWAITING_SHIP_APPROVAL")
     log_line(lines, "FINALIZE: tất cả task done, chờ /ship.")
     write_board(lines)
-    emit("manager", "\n".join(out), images=shots, requires="APPROVE_SHIP")
+    emit("manager", "\n".join(out), requires="APPROVE_SHIP")
     return "finalize"
 
 
@@ -629,6 +666,7 @@ def cmd_progress(slug):
         emit("techlead", "\n".join(body), images=new_shots[-3:])
         st["verify"] = verify
         st["shots"] = sorted(set(st["shots"]) | set(new_shots))
+        st["task_shots"] = sorted(set(st.get("task_shots", [])) | set(new_shots))   # evidence of THIS task, used by the ship report
         sent += 1
 
     # E. Tech Lead: fix cycles
@@ -786,6 +824,12 @@ def cmd_inbox(path):
         reply = cmd_ship()
     elif cmd == "/usage":
         reply = cmd_usage(int(args.split()[0]) if args.split() and args.split()[0].isdigit() else 1)
+    elif cmd == "/plan":
+        if not args:
+            reply = ("Bạn muốn hỏi gì về project nè? 🔍\nCách dùng: `/plan <câu hỏi>`. Mình và Tech Lead sẽ đọc code rồi tổng hợp gửi bạn, "
+                     "không sửa gì và không tạo task nào hết.")
+        else:
+            return 5  # the daemon starts a read-only Q&A job (Tech Lead reads, Manager summarizes)
     elif cmd == "/auto":
         if e.get("AUTO_SPLIT") == "claude":
             return 3
@@ -810,6 +854,14 @@ def main(argv):
         return cmd_inbox(a[0])
     if c == "say":
         emit(a[0], a[1].replace("\\n", "\n"))  # shell callers write \n inside "..." strings
+        return 0
+    if c == "inbox-args":  # print the arguments of an inbox message (the question of /plan)
+        with open(a[0], encoding="utf8") as f:
+            print((json.load(f).get("args") or "").strip())
+        return 0
+    if c == "say-file":  # say-file <role> <file>: like say, but the text is taken verbatim from a file
+        with open(a[1], encoding="utf8") as f:
+            emit(a[0], f.read().strip())
         return 0
     if c == "say-steps":  # say-steps <role> <head> <plan step line>...
         a[1] = a[1].replace("\\n", "\n")

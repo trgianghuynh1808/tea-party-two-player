@@ -105,6 +105,7 @@ WebSocket from the same origin. Then either:
 
 - `SHIFT_SECONDS=20 npm run dev` — shorter shifts for testing (server only).
 - `VITE_SERVER_URL=http://host:2567` — point the client at another game server.
+- `npx playwright test` — e2e tests run on their own ports (server 2568, client 5174) and never reuse your dev server on 2567/5173.
 
 ## Decorating & saving
 

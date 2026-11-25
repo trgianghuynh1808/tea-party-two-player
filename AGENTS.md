@@ -47,7 +47,7 @@ npm run dev:client   # client only
 npm run typecheck    # tsc --noEmit: server, then client (no separate script for shared; it is checked via those imports)
 npm run build        # build client (tsc --noEmit + vite build)
 npm start            # start the server only (serves client/dist if built)
-npx playwright test  # e2e tests; config starts dev:server (waits for /health) then dev:client, reusing running ones
+npx playwright test  # e2e tests on dedicated ports (server 2568, client 5174); never reuses dev servers
 ```
 
 `npm run serve` = build + start single-origin production server on 2567. Deployment: `render.yaml` (Render blueprint).
@@ -63,7 +63,7 @@ npx playwright test  # e2e tests; config starts dev:server (waits for /health) t
 
 ## Testing Rules
 
-- After each coding step, run `npm run typecheck` and `npx playwright test`. While `tests/` has no specs, Playwright exits non-zero with "No tests found"; that is expected, so rely on typecheck only and note it in the task file.
+- After each coding step, run `npm run typecheck` and `npx playwright test`. Playwright starts its own servers on dedicated ports (`tests/ports.ts`: server 2568, client 5174) with `reuseExistingServer: false`, so tests never touch a running dev server on 2567/5173.
 - When tests fail, read `test-results/results.json` first (the JSON reporter writes it).
 - In "Test status", report every test case from the task file (T1, T2...) as PASS / FAIL / not written yet, not just an overall result.
 - When a plan step writes a spec, tick the matching test case in "Test cases" once the spec exists.

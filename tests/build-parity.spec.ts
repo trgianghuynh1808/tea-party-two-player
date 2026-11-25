@@ -4,7 +4,6 @@ import path from "node:path";
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import {
   BUILD_TILES,
-  SERVER_PORT,
   YARD_COLS,
   YARD_ROWS,
   buildRotationCount,
@@ -15,6 +14,7 @@ import {
   usernameKey,
 } from "@boba/shared";
 import { joinAsHost } from "./helpers";
+import { TEST_SERVER_URL } from "./ports";
 
 /**
  * Build/decorate parity (task .agents/tasks/2026-11-24-build-parity.md):
@@ -25,7 +25,7 @@ import { joinAsHost } from "./helpers";
  * - T3: the build panel starts with no tool picked, ⟳ badges + the ⟳ Xoay (R) button, re-click unpicks.
  */
 
-const SERVER = `http://localhost:${SERVER_PORT}`;
+const SERVER = TEST_SERVER_URL;
 const ADMIN_TOKEN = "test-admin-token";
 const AUTH = { Authorization: `Bearer ${ADMIN_TOKEN}` };
 
