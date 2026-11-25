@@ -23,12 +23,11 @@ notify() {
   printf '\a'
 }
 
-say_user() {   # role text — báo ra Telegram qua .agents/outbox khi project là một phòng (có room.env)
-  [[ -f .agents/room.env ]] || return 0
-  mkdir -p .agents/outbox
-  local f=".agents/outbox/$(date +%s)-dev-$RANDOM.json"
-  python3 -c 'import json,sys; print(json.dumps({"from": sys.argv[1], "text": sys.argv[2]}, ensure_ascii=False))' "$1" "$2" > "$f.tmp" \
-    && mv "$f.tmp" "$f" || true
+# Báo ra Telegram qua .agents/outbox khi project là một phòng (có room.env); room-ops.py lo định dạng và thứ tự
+OPS=".agents/bin/room-ops.py"; [[ -f "$OPS" ]] || OPS="scripts/room-ops.py"
+say_user() {   # role text
+  [[ -f .agents/room.env && -f "$OPS" ]] || return 0
+  python3 "$OPS" say "$1" "$2" >/dev/null 2>&1 || true
 }
 
 set_status() {   # task state
@@ -73,17 +72,17 @@ while true; do
     # Báo cho bên chờ biết ngay, nếu không status kẹt ở 'queued' và wait-task.sh chỉ đoán "watcher không chạy"
     mkdir -p "$STATUS_DIR"
     printf 'stuck %s\n' "$(date +%s)" > "$STATUS_DIR/$(basename "$task" .md).status"
-    say_user dev "Không thấy file task $(basename "$task") (đang ở nhánh $(git rev-parse --abbrev-ref HEAD)). Task bị đánh dấu stuck."
+    say_user dev "Huhu, mình không tìm thấy file task \`$(basename "$task")\` 😭 (đang ở nhánh \`$(git rev-parse --abbrev-ref HEAD)\`). Mình đánh dấu task là kẹt, nhờ Tech Lead xem giúp nha."
   else
     set_status "$task" running
-    say_user dev "Bắt đầu code: $(basename "$task" .md)"
+    say_user dev "Nhận việc rồi! Bắt tay vào code thôi 💪⌨️\n- \`$(basename "$task" .md | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}-//')\`"
     if AUTOPILOT=1 scripts/run-task.sh "$task"; then
       set_status "$task" done
-      say_user dev "Xong các bước code: $(basename "$task" .md). Chuyển Tech Lead verify."
+      say_user dev "Code xong hết rồi nè! 🎉 Mình chuyển cho Tech Lead verify nhé."
       notify "OpenCode đã xong ✅" "$(basename "$task") — Claude tiếp tục"
     else
       set_status "$task" stuck
-      say_user dev "Bị kẹt: $(basename "$task" .md). Chuyển Tech Lead xử lý."
+      say_user dev "Mình bị kẹt rồi 😵 Nhờ Tech Lead xem giúp nha."
       notify "OpenCode bị kẹt ⛔" "$(basename "$task") — Claude xử lý"
     fi
   fi

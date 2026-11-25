@@ -125,6 +125,18 @@ action_feed() {
   done
 }
 
+# Báo ra Telegram (vai Senior Dev) qua .agents/outbox khi project là một phòng (có room.env); không thì bỏ qua.
+# room-ops.py lo định dạng, cắt chữ và đặt tên file (nano giây) để bridge gửi đúng thứ tự giữa các vai.
+OPS_PY=".agents/bin/room-ops.py"; [[ -f "$OPS_PY" ]] || OPS_PY="scripts/room-ops.py"
+say_dev() {
+  [[ -f .agents/room.env && -f "$OPS_PY" ]] || return 0
+  python3 "$OPS_PY" say dev "$1" >/dev/null 2>&1 || true
+}
+say_dev_steps() {   # tiêu đề, rồi các dòng bước trong plan
+  [[ -f .agents/room.env && -f "$OPS_PY" ]] || return 0
+  python3 "$OPS_PY" say-steps dev "$@" >/dev/null 2>&1 || true
+}
+
 # In các commit mới kèm danh sách file đã sửa (mỗi commit chỉ in một lần)
 print_new_commits() {
   local head c cols
@@ -366,6 +378,7 @@ while (( runs < MAX_RUNS )); do
     if (( level > 2 )); then
       echo ""
       fail "⛔ Bước $first_step chưa xong sau khi đã thử tới model mạnh nhất."
+      say_dev "Huhu, bước **$first_step** vẫn chưa xong dù mình đã gọi model mạnh nhất 😭 Nhờ Tech Lead xem giúp nha."
       echo "${BOLD}Đã thử mà không được${RESET}"
       section "Đã thử mà không được" 6 | sed 's/^/  /'
       echo ""
@@ -405,6 +418,12 @@ while (( runs < MAX_RUNS )); do
   for l in "${batch_lines[@]}"; do
     echo "  $(sed -E 's/^- \[ \] ([0-9]+)\. *(\[[^]]*\])? */\1. /' <<< "$l" | cut -c1-90)"
   done
+
+  if [[ "$first_step" == "$failed_step" ]]; then
+    say_dev_steps "Bước **$range/$total** hơi khó nhằn, mình gọi model mạnh hơn hỗ trợ nha 💪 mức **${LABELS[$level]}** · model \`${model#opencode-go/}\`" "${batch_lines[@]}"
+  else
+    say_dev_steps "Đang cày **bước $range/$total** nè 🔧 mức **${LABELS[$level]}** · model \`${model#opencode-go/}\`" "${batch_lines[@]}"
+  fi
 
   prompt="Đọc AGENTS.md và $TASK. Làm LẦN LƯỢT các bước $steps_csv, không làm bước nào khác.
 Sau MỖI bước: chạy $CHECK_HINT.
