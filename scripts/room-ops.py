@@ -840,9 +840,16 @@ def cmd_block(task_id, reason):
     return msg
 
 
+def is_task_shot(t, path):
+    """True when the file belongs to task t: named task-NN-* (NN = its number) or carrying its slug.
+    Nothing else counts, so shots of other tasks or of the tooling never reach this task's report."""
+    base = os.path.basename(path)
+    return base.startswith(f"task-{int(t['id'][1:]):02d}-") or t["slug"] in base
+
+
 def task_screenshots(t, limit=4, recorded=None):
-    """Screenshots made while verifying this task: those recorded when its Verify result was reported
-    (time window), plus files named task-NN-* / containing its slug. Never anything else in the folder."""
+    """Screenshots of this task only: those recorded when its Verify result was reported, plus files named
+    task-NN-* / containing its slug. Never anything else in the folder, whatever their mtime."""
     found = set()
     if recorded is not None:
         found |= {x for x in recorded if os.path.exists(x)}
@@ -852,10 +859,8 @@ def task_screenshots(t, limit=4, recorded=None):
                 found |= {x for x in json.load(f).get("task_shots", []) if os.path.exists(x)}
         except (OSError, ValueError):
             pass
-    prefix = f"task-{int(t['id'][1:]):02d}-"
     for f in screenshots():
-        base = os.path.basename(f)
-        if base.startswith(prefix) or t["slug"] in base:
+        if is_task_shot(t, f):
             found.add(f)
     return sorted((x for x in found if "/archive/" not in x), key=os.path.getmtime)[-limit:]
 
@@ -1296,7 +1301,7 @@ def _cmd_progress(slug, flush=False):
 
     # D. Tech Lead: Verify. A PASS is kept for the single end-of-task report (F); a FAIL is told right away because a fix cycle follows.
     if verify and verify != st["verify"]:
-        new_shots = [f for f in shots if f not in st["shots"] and os.path.getmtime(f) >= st["t0"] - 5]
+        new_shots = [f for f in shots if f not in st["shots"] and is_task_shot(t, f)]
         st["verify_notes"] = [short(l.lstrip("-* ").strip(), 110) for l in section_lines(text, "Verify")[:6] if not l.startswith("VERIFY:")]
         st["verify"] = verify
         st["shots"] = sorted(set(st["shots"]) | set(new_shots))
