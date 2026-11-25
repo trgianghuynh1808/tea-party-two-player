@@ -61,7 +61,7 @@ Add or change drinks, ingredients and machines in `shared/src/menu.ts`; shift le
 - The shift card offers two start buttons: **Tiệm trà** or **Nhà hàng** (the place you're standing in is first). The shift's
   customers come to that venue only; combo, special customers, tips and the split work the same.
 - Kitchen: crates hand out raw ingredients; cookers process one ingredient each (🔪 board, 🍳 pan, 🍲 pot, 🔥 grill,
-  ♨️ oven, 🍟 fryer, 🌀 blender, ☕ coffee machine). Hot cookers burn food left too long (it must go in the trash).
+  🍟 fryer, 🌀 blender, ☕ coffee machine). Hot cookers burn food left too long (it must go in the trash).
 - Shelves hand out plates, bowls and glasses. Plating goes one way only: take the container to the food (a cooker with
   finished food, a counter, or the crate of a part used raw) and press to scoop it in, in any order. Food can't be
   carried to a container. A container matching a dish exactly is served at the table or the take-away counter.

@@ -439,11 +439,6 @@ while (( runs < MAX_RUNS )); do
     fi
     say_dev_steps "Bước **$range/$total** hơi khó nhằn, mình gọi model mạnh hơn hỗ trợ nha 💪 mức **${LABELS[$level]}** · model \`${model#opencode-go/}\`" "${batch_lines[@]}"
   fi
-  # Tin lúc BẮT ĐẦU bước có mô tả (mức, model, nội dung); tin lúc XONG (room-ops.py progress) chỉ có commit và kết quả test.
-  if [[ "$first_step" != "$failed_step" && -f .agents/room.env && -f "$OPS_PY" ]]; then
-    python3 "$OPS_PY" step-start "$total" "$model" "${batch_lines[@]}" >/dev/null 2>&1 || true
-  fi
-
   prompt="Đọc AGENTS.md và $TASK. Làm LẦN LƯỢT các bước $steps_csv, không làm bước nào khác.
 Sau MỖI bước: chạy $CHECK_HINT.
 Về test: nếu bước có ghi lệnh test cụ thể thì CHỈ chạy đúng lệnh đó (không chạy cả bộ test);

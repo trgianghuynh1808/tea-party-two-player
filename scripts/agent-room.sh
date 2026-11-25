@@ -75,7 +75,7 @@ PLAN_APPROVAL="auto"
 COMMIT_LINKS="true"
 # Chế độ /plan (Tech Lead đọc repo để trả lời câu hỏi): giới hạn số lượt
 MAX_TURNS_PLAN="40"
-# /auto tách task: "lines" (mỗi dòng một task, không tốn Claude) hoặc "claude" (Manager tách)
+# /task tách task: "lines" (mỗi dòng một task, không tốn Claude) hoặc "claude" (Manager tách)
 AUTO_SPLIT="lines"
 # Sau /ship, giữ lại bao nhiêu task đã ship gần nhất trên board (phần cũ hơn được gỡ và ghi vào Activity Log)
 KEEP_SHIPPED="5"

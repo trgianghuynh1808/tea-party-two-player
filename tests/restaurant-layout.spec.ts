@@ -99,8 +99,9 @@ test("edge-layout T1: twelve crates form one spaced row on top, the cookers fill
   expect(local(station("r_fry_1"))).toMatchObject({ x: 60, y: 260 });
   expect(local(station("r_boil_1"))).toMatchObject({ x: 60, y: 360 });
   expect(local(station("r_chop_1"))).toMatchObject({ x: 214, y: 260 });
-  expect(local(station("r_deepfry_1"))).toMatchObject({ x: 214, y: 360 });
-  expect(local(station("r_grill_1"))).toMatchObject({ x: 214, y: 460 });
+  expect(local(station("r_grill_1"))).toMatchObject({ x: 214, y: 360 });
+  expect(local(station("r_deepfry_1"))).toMatchObject({ x: 214, y: 460 });
+  expect(local(station("r_grill_1")).y, "the grill sits on the same row as the pot").toBe(local(station("r_boil_1")).y);
   const rightColumn = cookers.filter((k) => local(k).x === 940).map((k) => k.id);
   expect(rightColumn, "the right column is drink-side only").toEqual(["r_chop_2", "r_blend_1", "r_brew_1"]);
 

@@ -8,7 +8,6 @@ Used by scripts/manager-loop.sh so the Manager only needs Claude for judgement c
   room-ops.py say-file <role> <file>   same, text taken verbatim from a file
   room-ops.py inbox-args <file>     print the arguments of an inbox message (the /plan question)
   room-ops.py say-steps <role> <head> <step line>...   same, with the plan steps listed under <head>
-  room-ops.py step-start <total> <model> <step line>...   the Dev message when steps START (difficulty, model, description)
   room-ops.py status | stop | resume | usage [days]
   room-ops.py plan-path <slug>      path of the newest plan file for a task slug
   room-ops.py check-plan <slug>     prints OK | BLOCK: <why> | REVIEW: <why>
@@ -38,12 +37,12 @@ USAGE_LOG = f"{AG}/logs/usage.log"
 TASK_RE = re.compile(r"^- \[( |x)\] `(T\d+)` \[(\w+)\] (.*?) \(slug: `([^`]+)`\)\s*$")
 
 HELP = ("Mình chỉ hiểu mấy lệnh này thôi nha 😅\n"
-        "- `/auto <việc cần làm>` · mỗi dòng một việc\n"
+        "- `/task <việc cần làm>` · giao việc, mỗi dòng một việc\n"
         "- `/status` · xem tiến độ\n"
         "- `/health` · kiểm tra các agent\n"
         "- `/usage` · xem mức dùng token\n"
         "- `/plan <câu hỏi>` · hỏi đáp, phân tích project (chỉ đọc, không sửa gì)\n"
-        "- `/automode on|off` · bật hoặc tắt chế độ tự động\n"
+        "- `/automode on|off` · bật: tự duyệt plan · tắt: bạn duyệt từng plan (ship luôn cần bạn)\n"
         "- `/config` · xem hoặc đổi cấu hình (`/config approval auto`)\n"
         "- `/approve` · `/revise <góp ý>` · `/reject` · duyệt, nhờ sửa hoặc hủy plan đang chờ\n"
         "- `/clear` · dọn board và trạng thái cũ (lưu bản sao board)\n"
@@ -104,9 +103,9 @@ BOOL_WORDS = {"true": "true", "on": "true", "bật": "true", "bat": "true", "yes
               "false": "false", "off": "false", "tắt": "false", "tat": "false", "no": "false", "0": "false"}
 # name used in chat, env key, board label, kind, default, explanation. Only these can be changed from chat (never ports, branches, ids).
 CONFIG = [
-    ("approval", "PLAN_APPROVAL", "Plan Approval", ("ask", "auto"), "auto", "auto = tự duyệt, chỉ dừng khi rủi ro nghiêm trọng, thiếu ngữ cảnh hoặc bị chặn (rồi làm task kế tiếp) · ask = luôn chờ bạn duyệt bằng thẻ"),
+    ("approval", "PLAN_APPROVAL", "Plan Approval", ("ask", "auto"), "auto", "auto = tự duyệt, chỉ dừng khi rủi ro nghiêm trọng, thiếu ngữ cảnh hoặc bị chặn (rồi làm task kế tiếp) · ask = luôn chờ bạn duyệt bằng thẻ. Giống `/automode on|off`"),
     ("links", "COMMIT_LINKS", "Commit Links", "bool", "true", "bật = daemon push nhánh task lên GitHub để báo cáo có link commit"),
-    ("split", "AUTO_SPLIT", "Auto Split", ("lines", "claude"), "lines", "lines = mỗi dòng của /auto là một task · claude = Manager tách"),
+    ("split", "AUTO_SPLIT", "Auto Split", ("lines", "claude"), "lines", "lines = mỗi dòng của /task là một task · claude = Manager tách"),
     ("chat", "CHAT_WITH_CLAUDE", "Chat With Claude", "bool", "false", "bật = Claude trả lời tin thường (tốn quota)"),
     ("model_manager", "MODEL_MANAGER", "Manager Model", "model", "", "haiku, sonnet, opus hoặc id đầy đủ; `default` = mặc định của claude"),
     ("model_techlead", "MODEL_TECHLEAD", "Tech Lead Model", "model", "", "như trên"),
@@ -242,7 +241,8 @@ def status_text():
     e = read_env()
     finished = [t for t in ts if t["state"] in ("done", "shipped", "cancelled")]
     out = ["📋 **Tình hình dự án**",
-           f"- Giai đoạn: **{get_phase(lines)}** · chế độ tự động: **{'BẬT' if e.get('AUTO_MODE') == 'true' else 'TẮT'}**",
+           f"- Giai đoạn: **{get_phase(lines)}** · {'đang chạy' if e.get('AUTO_MODE') == 'true' else 'tạm dừng'}",
+           f"- Chế độ tự động: **{'TẮT: bạn duyệt từng plan' if e.get('PLAN_APPROVAL', 'auto') == 'ask' else 'BẬT: tự duyệt plan'}** (ship luôn cần bạn)",
            f"- Tiến độ: **{len(finished)}/{len(ts)}** việc xong"]
     if ts:
         out += ["", "**Danh sách việc**"]
@@ -263,35 +263,36 @@ def status_text():
 
 
 def cmd_automode(args):
+    """Auto mode = who approves plans. It never stops the work: /stop pauses, /resume continues."""
     arg = (args.split() or ["status"])[0].lower()
-    if arg in BOOL_WORDS and BOOL_WORDS[arg] == "false":
-        return cmd_stop()
-    lines = read_board()
     e = read_env()
-    on = e.get("AUTO_MODE") == "true"
+    auto = e.get("PLAN_APPROVAL", "auto") != "ask"
+    running = e.get("AUTO_MODE") == "true"
     if arg not in BOOL_WORDS:
-        unfinished = [t for t in tasks(lines) if not t["done"]]
-        return (f"Chế độ tự động đang **{'BẬT' if on else 'TẮT'}** {'▶️' if on else '⏹'}\n"
-                f"- Còn {len(unfinished)} việc chưa xong · duyệt plan: **{e.get('PLAN_APPROVAL', 'auto')}**\n"
-                "Gõ `/automode on` để bật, `/automode off` để tắt, `/config` để xem cấu hình.")
-    if on:
-        return "Chế độ tự động đang bật rồi mà 😄 Bạn gõ `/status` để xem tiến độ nhé."
-    unfinished = [t for t in tasks(lines) if not t["done"]]
-    blocked = [t for t in unfinished if t["state"] == "BLOCKED"]
-    set_auto(lines, True, "RUNNING" if unfinished else "IDLE")
-    log_line(lines, "/automode on: chế độ tự động bật.")
+        return (f"Chế độ tự động đang **{'BẬT' if auto else 'TẮT'}** {'▶️' if auto else '✋'}\n"
+                + ("- Plan ổn thì mình giao OpenCode luôn, chỉ dừng hỏi bạn khi plan có rủi ro nghiêm trọng\n" if auto else
+                   "- Mỗi plan mình gửi thẻ để bạn duyệt trước khi code\n")
+                + "- Ship luôn cần bạn duyệt\n"
+                + f"- Hệ thống đang **{'chạy' if running else 'tạm dừng (gõ /resume để chạy tiếp)'}**\n"
+                "Gõ `/automode on` hoặc `/automode off` để đổi.")
+    want = BOOL_WORDS[arg] == "true"
+    if want == auto:
+        return f"Chế độ tự động đang {'bật' if auto else 'tắt'} rồi mà 😄 Bạn gõ `/status` để xem tiến độ nhé."
+    set_env("PLAN_APPROVAL", "auto" if want else "ask")
+    lines = read_board()
+    log_line(lines, f"/automode {'on' if want else 'off'}: duyệt plan {'tự động' if want else 'bởi bạn'}.")
     write_board(lines)
-    out = ["Đã **bật chế độ tự động** ▶️", ""]
-    out.append(f"- Có **{len(unfinished)} việc** đang chờ, mình xử lý lần lượt nè" if unfinished else
-               "- Board đang trống: gõ `/task <việc cần làm>` để giao việc")
-    out.append(f"- Duyệt plan: **{'bạn duyệt bằng thẻ' if e.get('PLAN_APPROVAL', 'auto') == 'ask' else 'tự duyệt'}**")
-    if blocked:
-        out.append(f"- ⚠️ {len(blocked)} task đang BLOCKED, gõ `/resume` để thử lại")
-    try:
-        with open(f"{AG}/watcher.pid", encoding="utf8") as f:
-            os.kill(int(f.read().strip()), 0)
-    except (OSError, ValueError):
-        out.append("- ⚠️ Senior Dev watcher (OpenCode) chưa chạy nên chưa giao việc được, dùng `/health` để kiểm tra")
+    waiting = [t for t in tasks(lines) if t["state"] == "awaiting_plan"]
+    if want:
+        out = ["Đã **bật chế độ tự động** ▶️", "", "- Plan ổn thì mình giao OpenCode luôn, không hỏi bạn",
+               "- Chỉ dừng hỏi khi plan có rủi ro nghiêm trọng, thiếu ngữ cảnh hoặc bị chặn (rồi làm task kế tiếp)", "- Ship vẫn cần bạn duyệt"]
+        if waiting:
+            out.append(f"- {len(waiting)} plan đang chờ bạn vẫn cần `/approve`, chế độ mới áp dụng cho các plan sau")
+    else:
+        out = ["Đã **tắt chế độ tự động** ✋ Mình vẫn làm việc bình thường, chỉ dừng ở hai chỗ:", "",
+               "- **Duyệt plan:** mỗi plan mình gửi thẻ để bạn duyệt", "- **Ship:** bạn duyệt như mọi khi"]
+    if not running:
+        out.append("- ⏸ Hệ thống đang tạm dừng vì `/stop`, gõ `/resume` để chạy tiếp")
     return "\n".join(out)
 
 
@@ -510,12 +511,14 @@ def cmd_auto(args):
     last = max([t["i"] for t in tasks(lines)] or
                [next((i for i, l in enumerate(lines) if l.startswith("## Checklist")), marker - 1)])
     lines[last + 1:last + 1] = new
+    auto = e.get("PLAN_APPROVAL", "auto") != "ask"
     set_auto(lines, True, "RUNNING")
-    log_line(lines, f"/task: thêm {len(new)} task, AUTO_MODE bật.")
+    log_line(lines, f"/task: thêm {len(new)} task.")
     write_board(lines)
     return ("Nhận rồi nha! 🚀 Mình ghi **" + str(len(new)) + " việc** vào board:\n\n"
             + "\n".join(f"{i + 1}. {short(t, 110)}" for i, t in enumerate(items))
-            + "\n\nĐã bật chế độ tự động, Tech Lead sẽ lên plan ngay đây ✨")
+            + "\n\nTech Lead sẽ lên plan ngay đây ✨ "
+            + ("Plan ổn thì mình giao OpenCode luôn." if auto else "Plan nào xong mình cũng gửi thẻ để bạn duyệt."))
 
 
 def cleanup_after_ship(lines, keep):
@@ -592,8 +595,11 @@ def cmd_ship():
             rc, out = git("pull", "--ff-only")
             if rc != 0:
                 return f"Mình chưa ship được: `git pull --ff-only` báo lỗi 😢\n{out[:400]}\nBạn xem giúp mình nhé, mình không tự ép đâu."
-        n = len([t for t in tasks(lines) if t["state"] == "done"])
-        rc, out = git("merge", "--no-ff", stg, "-m", f"Merge {stg} into {main} ({n} task)")
+        shipping = [t for t in tasks(lines) if t["state"] == "done"]
+        subject = (f"Ship {shipping[0]['id']}: {short(shipping[0]['title'], 60)}" if len(shipping) == 1 else
+                   f"Ship {len(shipping)} task: " + ", ".join(t["id"] for t in shipping[:6]) + (" …" if len(shipping) > 6 else ""))
+        body = "\n".join(f"- {t['id']}: {short(t['title'], 120)}" for t in shipping)
+        rc, out = git("merge", "--no-ff", stg, "-m", subject, "-m", f"Merge {stg} into {main}.\n\n{body}")
         if rc != 0:
             git("merge", "--abort")
             return f"Merge bị lỗi nên mình đã huỷ luôn, chưa đổi gì hết nha 🙏\n{out[:400]}"
@@ -1108,28 +1114,22 @@ def progress_flag(slug, key):
         return False
 
 
-def step_start_text(total, model, lines):
-    """The message when OpenCode STARTS steps: which steps, difficulty, model and what each is about. The 'done' report repeats none of it."""
-    rows = [(int(m.group(2)), m.group(3) or "vừa", m.group(4)) for m in (STEP_RE.match(l) for l in lines) if m]
-    nums = ", ".join(str(n) for n, _, _ in rows)
-    out = [f"🔧 **Bắt đầu bước {nums}/{total}** nè!", "", "**Mô tả**"]
-    for n, label, txt in rows:
-        out.append(f"- **Bước {n}** · mức **{label}**" + (f" · model `{model.split('/')[-1]}`" if model else ""))
-        out.append(f"  {short(txt, 200)}")
-    return "\n".join(out)
-
-
 def plan_mtime(slug):
     p = plan_path(slug)
     return os.path.getmtime(p) if p and os.path.exists(p) else 0
 
 
 def step_report(slug, total, done_steps, commits, changed, linked, notes=None):
-    """ONE message for finished step(s): description with difficulty and model, commits (linked), test results."""
+    """ONE message per finished step(s): what the step was (with difficulty), commits (linked), test results. There is no separate start message."""
     base = repo_web_url()
     nums = ", ".join(str(x[0]) for x in done_steps)
     out = [f"✅ **Bước {nums}/{total}** xong rồi nè!" if len(done_steps) == 1 else
            f"✅ **Bước {nums}/{total}** xong hết rồi nè!" if done_steps else "📝 **Phần còn lại** của task"]
+    if done_steps:
+        out += ["", "**Mô tả**"]
+        for n, _, label, txt in done_steps:
+            out.append(f"- **Bước {n}** · mức **{label or 'vừa'}**")
+            out.append(f"  {short(txt, 200)}")
     out += ["", "**Commit**"]
     if commits:
         for h, sub in commits[:8]:
@@ -1168,7 +1168,7 @@ def plan_card_text(t, text, steps, verdict, ask, held=False):
            ("⚠️ Plan này có rủi ro nghiêm trọng nên mình **giữ lại chờ bạn duyệt**. Mình làm task kế tiếp trước, bạn duyệt lúc nào thì task này chạy lúc đó." if held else
             "Tech Lead đã lên plan xong, mời bạn xem và duyệt 👀") if ask else
            "Tech Lead đã lên plan xong. Phòng đang ở chế độ tự duyệt nên mình kiểm tra rồi giao OpenCode luôn."]
-    for title, sec, n in (("Mục tiêu", "Mục tiêu", 6), ("Quyết định đã chốt", "Quyết định đã chốt", 5)):
+    for title, sec, n in (("Mục tiêu", "Mục tiêu", 6), ("Ý tưởng", "Ý tưởng", 5), ("Quyết định đã chốt", "Quyết định đã chốt", 5)):
         rows = bullet_lines(text, sec, n)
         if rows:
             out += ["", f"**{title}**"] + [f"- {r}" for r in rows]
@@ -1204,6 +1204,16 @@ def plan_card_text(t, text, steps, verdict, ask, held=False):
 
 
 def cmd_progress(slug, flush=False):
+    """One report pass per task at a time: the background progress loop and the daemon both call this, and without the lock
+    both could see "plan card not sent yet" and send it twice."""
+    import fcntl
+    os.makedirs(PROGRESS_DIR, exist_ok=True)
+    with open(f"{PROGRESS_DIR}/{slug}.lock", "w") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        return _cmd_progress(slug, flush)
+
+
+def _cmd_progress(slug, flush=False):
     lines = read_board()
     t = next((t for t in tasks(lines) if t["slug"] == slug), None)
     if not t:
@@ -1524,8 +1534,6 @@ def main(argv):
         with open(a[1], encoding="utf8") as f:
             emit(a[0], f.read().strip())
         return 0
-    if c == "step-start":  # step-start <total> <model> <plan step line>...
-        emit("dev", step_start_text(a[0], a[1], a[2:]))
         return 0
     if c == "say-steps":  # say-steps <role> <head> <plan step line>...
         a[1] = a[1].replace("\\n", "\n")
