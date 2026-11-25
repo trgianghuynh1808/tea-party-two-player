@@ -133,10 +133,15 @@ cmd_start() {
       echo "✅ Phòng '$name' chạy bằng pm2: room-$name-manager, room-$name-watcher (pm2 logs room-$name-manager)" ;;
     tmux)
       tmux has-session -t "room-$name" 2>/dev/null && die "Phòng đã chạy (tmux). Dùng stop trước."
-      tmux new-session -d -s "room-$name" -n manager -c "$ROOM_DIR" "scripts/manager-loop.sh"
-      tmux new-window  -t "room-$name" -n watcher -c "$ROOM_DIR" "scripts/watch-tasks.sh"
-      mkdir -p "$AG/logs"; touch "$AG/logs/techlead.log" "$AG/logs/manager.log"
-      tmux new-window  -t "room-$name" -n lead -c "$ROOM_DIR" "tail -n 30 -F $AG/logs/techlead.log $AG/logs/manager.log"
+      mkdir -p "$AG/logs"; touch "$AG/logs/activity.log"
+      local board_cmd='while true; do clear; sed "/^## Activity Log/q" .agents/board.md; sleep 2; done'
+      # dashboard: board (trái trên) · log gộp (trái dưới) · OpenCode watcher (phải); manager-loop chạy ở cửa sổ riêng
+      tmux new-session -d -s "room-$name" -n dashboard -c "$ROOM_DIR" "bash -c '$board_cmd'"
+      tmux split-window -h -t "room-$name:dashboard" -c "$ROOM_DIR" "scripts/watch-tasks.sh"
+      tmux split-window -v -t "room-$name:dashboard.0" -c "$ROOM_DIR" "tail -n 40 -F $AG/logs/activity.log"
+      tmux new-window -t "room-$name" -n manager -c "$ROOM_DIR" "scripts/manager-loop.sh"
+      tmux set-option -t "room-$name" mouse on >/dev/null
+      tmux select-window -t "room-$name:dashboard"
       echo "✅ Phòng '$name' chạy bằng tmux: session room-$name (tmux attach -t room-$name)" ;;
     *) die "ROOM_RUNNER không hợp lệ: $r" ;;
   esac
