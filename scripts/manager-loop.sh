@@ -23,6 +23,7 @@ OUTBOX="$AG/outbox"
 LOGDIR="$AG/logs"
 LOCK="$AG/manager.lock"
 SIG="$AG/manager.sig"
+SEQ=0
 POLL="${POLL:-10}"
 CLAUDE_FLAGS="${CLAUDE_FLAGS:---dangerously-skip-permissions}"
 MANAGER_PROMPT="${MANAGER_PROMPT:-$AG/MANAGER.md}"
@@ -48,9 +49,10 @@ log() {
   printf '\033[90m%s\033[0m %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$ACTIVITY"
 }
 
-say_user() {   # gửi một tin ra outbox (ghi tạm rồi đổi tên để bridge không đọc file dở)
-  local f="$OUTBOX/$(date +%s)-$$-$RANDOM.json"
-  python3 -c 'import json,sys; print(json.dumps({"text": sys.argv[1]}, ensure_ascii=False))' "$1" > "$f.tmp" && mv "$f.tmp" "$f"
+say_user() {   # text [role]  — ghi một tin ra outbox (ghi tạm rồi đổi tên để bridge không đọc file dở)
+  SEQ=$((SEQ + 1))   # bộ đếm giữ đúng thứ tự gửi khi nhiều tin trong cùng một giây
+  local f; f="$OUTBOX/$(date +%s)-$(printf '%04d' "$SEQ")-$$.json"
+  python3 -c 'import json,sys; print(json.dumps({"from": sys.argv[2], "text": sys.argv[1]}, ensure_ascii=False))' "$1" "${2:-manager}" > "$f.tmp" && mv "$f.tmp" "$f"
 }
 
 room_env() {   # nạp lại mỗi vòng để thấy AUTO_MODE mới
@@ -77,6 +79,7 @@ run_claude() { # tên-log prompt [nhãn]
   local role="$1" label="${3:-$1}" col rc
   col="$(c_role "$role")"
   log "▶ ${role}: ${label}"
+  [[ "$role" == techlead ]] && say_user "▶ $label" techlead
   printf '\n━━ %s ━━ %s\n' "$(date '+%F %T')" "$label" >> "$LOGDIR/$role.log"
   # shellcheck disable=SC2086
   claude -p "$2" $CLAUDE_FLAGS 2>&1 | while IFS= read -r l; do
@@ -85,7 +88,13 @@ run_claude() { # tên-log prompt [nhãn]
     printf '%s %s%-9s\033[0m %s\n' "$(date +%H:%M:%S)" "$col" "$role" "$l" >> "$ACTIVITY"
   done
   rc=${PIPESTATUS[0]}
-  if (( rc == 0 )); then log "✔ ${role}: ${label}"; else log "⚠ ${role}: ${label} thoát với mã $rc"; fi
+  if (( rc == 0 )); then
+    log "✔ ${role}: ${label}"
+    [[ "$role" == techlead ]] && say_user "✔ $label" techlead
+  else
+    log "⚠ ${role}: ${label} thoát với mã $rc"
+    [[ "$role" == techlead ]] && say_user "⚠ $label thất bại (mã $rc). Xem .agents/logs/techlead.log" techlead
+  fi
   return $rc
 }
 
@@ -96,7 +105,7 @@ manager_prompt() { # MODE extra
 techlead_prompt() { # phase id slug
   local common="Bạn là Tech Lead (Claude Code) trong phòng tự động (AUTO_MODE=true). Làm theo CLAUDE.md, mục Autopilot/AUTO_MODE.
 Nhánh nền là '$STAGING_BRANCH' (không phải $MAIN_BRANCH). Task: $2, slug: $3 (xem tiêu đề trên .agents/board.md).
-Không hỏi người dùng, không dừng chờ input. Báo tiến độ cho user bằng outbox với "from": "techlead" như CLAUDE.md hướng dẫn. Gặp việc không làm được: đặt task thành [BLOCKED] trên board.md, ghi lý do vào Activity Log, rồi dừng."
+Không hỏi người dùng, không dừng chờ input. Ngoài tin mốc daemon tự gửi, hãy báo kết quả quan trọng cho user bằng cách ghi MỘT file JSON vào .agents/outbox/ (ghi ra file .tmp rồi đổi tên thành <unix-ts>-techlead-<n>.json): {\"from\": \"techlead\", \"text\": \"<tối đa 4 dòng tiếng Việt>\", \"images\": [\"đường/dẫn/tương/đối.png\"]} (images không bắt buộc). Báo khi: plan xong (tiêu đề + số bước), kết quả Verify (PASS/FAIL kèm 1-3 ảnh), đã merge vào staging, hoặc BLOCKED. Không đưa secret vào tin. Gặp việc không làm được: đặt task thành [BLOCKED] trên board.md, ghi lý do vào Activity Log, rồi dừng."
   case "$1" in
     plan) printf '%s\n\nVIỆC CỦA BẠN: chỉ LÊN PLAN. Checkout %s, tạo nhánh task/%s, viết plan vào .agents/tasks/<ngày>-%s.md theo CLAUDE.md, commit file plan. KHÔNG chạy scripts/handoff.sh (Manager duyệt plan rồi mới giao). Cuối cùng đổi task %s trên board.md từ [pending] sang [plan_ready].\n' "$common" "$STAGING_BRANCH" "$3" "$3" "$2" ;;
     finish) printf '%s\n\nVIỆC CỦA BẠN: plan đã được duyệt và đã giao cho OpenCode. Chạy Autopilot từ bước Wait (scripts/wait-task.sh với file plan của task này), Verify, Review, Fix cycle (tối đa %s vòng). Lưu ảnh verify vào .agents/screenshots/. Khi PASS: merge --squash nhánh task/%s vào %s (KHÔNG push, KHÔNG merge vào %s), xóa nhánh task, đổi task %s thành [done] và [x] trên board.md, ghi Activity Log. Nếu hết vòng sửa mà chưa đạt: [BLOCKED] + lý do.\n' "$common" "${MAX_FIX_CYCLES:-2}" "$3" "$STAGING_BRANCH" "$MAIN_BRANCH" "$2" ;;
