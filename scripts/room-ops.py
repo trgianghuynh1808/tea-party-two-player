@@ -1042,6 +1042,8 @@ def git_remote_cmd(*args, timeout=40):
     try:
         p = subprocess.run(["git", *args], capture_output=True, text=True, timeout=timeout,
                            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+        if p.returncode != 0:   # keep the reason: the user-facing notice cannot say what went wrong
+            print(f"git {' '.join(args)} failed: {(p.stdout + p.stderr).strip()[-300:]}", file=sys.stderr)
         return p.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
@@ -1094,6 +1096,10 @@ def push_branch(branch, st, key="push_retry_at"):
         return False
     if time.time() < st.get(key, 0):
         return False
+    if git("show-ref", "--verify", "--quiet", f"refs/heads/{branch}")[0] != 0:
+        # The Tech Lead deletes the local task branch after the squash merge. Nothing is left to push: the links still work
+        # if the branch is on the remote (it is deleted at /ship). This is not a login problem, so say nothing to the user.
+        return bool(git("ls-remote", "--heads", "origin", branch)[1].strip())
     if git_remote_cmd("push", "-q", "origin", branch):
         return True
     st[key] = time.time() + 600   # offline or no rights: do not retry on every tick
