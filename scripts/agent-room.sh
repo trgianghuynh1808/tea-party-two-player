@@ -125,6 +125,8 @@ cmd_start() {
       tmux has-session -t "room-$name" 2>/dev/null && die "Phòng đã chạy (tmux). Dùng stop trước."
       tmux new-session -d -s "room-$name" -n manager -c "$ROOM_DIR" "scripts/manager-loop.sh"
       tmux new-window  -t "room-$name" -n watcher -c "$ROOM_DIR" "scripts/watch-tasks.sh"
+      mkdir -p "$AG/logs"; touch "$AG/logs/techlead.log" "$AG/logs/manager.log"
+      tmux new-window  -t "room-$name" -n lead -c "$ROOM_DIR" "tail -n 30 -F $AG/logs/techlead.log $AG/logs/manager.log"
       echo "✅ Phòng '$name' chạy bằng tmux: session room-$name (tmux attach -t room-$name)" ;;
     *) die "ROOM_RUNNER không hợp lệ: $r" ;;
   esac
