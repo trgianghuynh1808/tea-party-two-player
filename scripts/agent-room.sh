@@ -69,6 +69,8 @@ MODEL_TECHLEAD=""
 # Giới hạn số lượt mỗi lần gọi (chặn một lần chạy lạc đốt quota)
 MAX_TURNS_MANAGER="20"
 MAX_TURNS_TECHLEAD="150"
+# Duyệt plan: "auto" = tự duyệt, chỉ giữ lại khi plan rủi ro nghiêm trọng / thiếu ngữ cảnh / bị chặn (rồi làm task kế tiếp); "ask" = luôn gửi THẺ có nút Duyệt / Sửa plan / Hủy và chờ bạn
+PLAN_APPROVAL="auto"
 # Tin báo bước của Dev kèm link commit trên GitHub: daemon sẽ git push nhánh task lên origin (xóa sau /ship). "false" = không push, không link
 COMMIT_LINKS="true"
 # Chế độ /plan (Tech Lead đọc repo để trả lời câu hỏi): giới hạn số lượt
@@ -102,7 +104,7 @@ BOARD
   fi
 
   touch .gitignore
-  for e in ".agents/board.md" ".agents/room.env" ".agents/inbox/" ".agents/outbox/" ".agents/screenshots/" ".agents/logs/" ".agents/manager.lock" ".agents/manager.sig" ".agents/kit-dir" ".agents/kit-version" ".agents/watcher.pid" ".agents/plan.pid" ".agents/plan/" ".agents/board-archive/" ".agents/progress/" ".agents/bin/"; do
+  for e in ".agents/board.md" ".agents/room.env" ".agents/inbox/" ".agents/outbox/" ".agents/screenshots/" ".agents/logs/" ".agents/manager.lock" ".agents/manager.sig" ".agents/kit-dir" ".agents/kit-version" ".agents/watcher.pid" ".agents/plan.pid" ".agents/plan/" ".agents/plan-feedback/" ".agents/board-archive/" ".agents/notices/" ".agents/progress/" ".agents/bin/"; do
     grep -qxF "$e" .gitignore || { echo "$e" >> .gitignore; echo "  ✓ .gitignore: $e"; }
   done
 

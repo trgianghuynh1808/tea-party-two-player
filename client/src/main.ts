@@ -39,6 +39,9 @@ import { OrdersPanel } from "./ui/OrdersPanel";
 import { buildRecipeGuide } from "./ui/RecipeGuide";
 import { ShiftOverlay } from "./ui/ShiftOverlay";
 import { TEST_MODE_PARAM, installTestHook, isTestMode } from "./testHook";
+import { initUpdateChecker } from "./updateChecker";
+
+initUpdateChecker();
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 

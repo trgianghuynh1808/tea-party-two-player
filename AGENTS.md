@@ -23,6 +23,7 @@ Guidelines for coding agents working in this repo.
 
 - `client/src/main.ts` — entry: username/lobby UI, join/create room, boots Phaser with `ShopScene`, wires DOM panels and events.
 - `client/src/customCatalog.ts` — fetches the portal-added furniture catalog before the first game boot (turns its image paths into absolute URLs) and exports `decorImageUrl` for the panels.
+- `client/src/updateChecker.ts` — `initUpdateChecker()`: polls the build's `version.json`, compares it with `__BUILD_ID__` and shows the undismissable reload popup when a newer build is deployed; exposes `window.__UPDATE__` under `?test=1`.
 - `client/src/scenes/ShopScene.ts` — main scene: game loop, input handling, sends `Messages.*`, renders world.
 - `client/src/scenes/` — sub-controllers/views: `CustomerController`, `DecorController`, `BuildController`, `RestaurantView`, `YardView`, `CupView`, art modules.
 - `client/src/ui/` — DOM panels: `OrdersPanel`, `DecorPanel`, `BuildPanel`, `ShiftOverlay`, `RecipeGuide`, `rotateUi` (shared ⟳ Xoay button + ⟳ badge used by both the decorate and build panels).

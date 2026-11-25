@@ -202,7 +202,8 @@ verify() {
 Dev server: xem AGENTS.md. App tại $VERIFY_URL. Nếu AGENTS.md mô tả test hook để set state, dùng nó.
 $VERIFY_HINT
 $SAFETY_RULES
-Nếu 'Trạng thái hiện tại' có dòng 'Selectors:', dùng nó thay vì grep code."
+Nếu 'Trạng thái hiện tại' có dòng 'Selectors:', dùng nó thay vì grep code.
+$NOTES_RULES"
 
   if [[ "$mode" == "full" ]]; then
     prompt="$common
@@ -303,6 +304,8 @@ SAFETY_RULES="AN TOÀN VỚI TIẾN TRÌNH: KHÔNG kill, restart hay dừng bấ
 Nếu cổng bị chiếm bởi server không phù hợp (thiếu biến môi trường như ADMIN_TOKEN, sai cấu hình), KHÔNG kill: ghi vào 'Đã thử mà không được' cổng, PID và lý do không phù hợp, không tick bước, commit file task rồi DỪNG để Tech Lead xử lý."
 SELECTOR_RULES="SELECTOR CHO BƯỚC TEST: nếu bước này tạo hoặc đổi giao diện (id, class, data-*, nút, input, route mới), cuối bước hãy ghi vào 'Trạng thái hiện tại' MỘT dòng 'Selectors: ...' liệt kê các selector chính kèm file chứa chúng (ví dụ 'Selectors: #customFile, #analyzeBtn, .cd-candidate (server/portal/index.html)').
 Nếu bước này là bước viết test cho giao diện đã có: ĐỌC dòng 'Selectors:' trong 'Trạng thái hiện tại' TRƯỚC, chỉ grep code khi còn thiếu selector."
+
+NOTES_RULES="LƯU Ý CHO NGƯỜI DUYỆT: khi có điều người duyệt cần biết thì ghi một dòng bắt đầu bằng 'Lưu ý:' vào 'Trạng thái hiện tại' (hoặc vào mục '## Lưu ý' nếu file task có). Ví dụ: chỗ làm lệch plan, phần chưa được kiểm tra hoặc kiểm tra ít hơn mục tiêu, bug đã biết (kể cả test đánh dấu test.fail), việc nên làm tiếp, phát hiện không chặn khi review. Hệ thống chuyển những dòng này lên Telegram; chỉ dòng có tiền tố 'Lưu ý:' hoặc 'Cảnh báo:' mới được chuyển."
 
 # Đường dẫn file đầu tiên nhắc tới trong dòng bước (vd client/src/ui/OrdersPanel.ts)
 first_path_of() {
@@ -429,12 +432,16 @@ while (( runs < MAX_RUNS )); do
   done
 
   if [[ "$first_step" == "$failed_step" ]]; then
+    # ghi lại lần leo thang model: thẻ duyệt ship báo "N lần leo thang"
+    if [[ -f .agents/room.env ]]; then
+      mkdir -p .agents/progress
+      echo "$first_step $model" >> ".agents/progress/$(basename "$TASK" .md | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}-//').esc"
+    fi
     say_dev_steps "Bước **$range/$total** hơi khó nhằn, mình gọi model mạnh hơn hỗ trợ nha 💪 mức **${LABELS[$level]}** · model \`${model#opencode-go/}\`" "${batch_lines[@]}"
   fi
-  # Không gửi tin "bắt đầu bước": mỗi bước chỉ báo MỘT lần lúc xong (room-ops.py progress). Ghi lại model để tin đó nêu được.
-  if [[ -f .agents/room.env ]]; then
-    mkdir -p .agents/progress
-    for s in "${batch_steps[@]}"; do echo "$s $model" >> ".agents/progress/$(basename "$TASK" .md | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}-//').models"; done
+  # Tin lúc BẮT ĐẦU bước có mô tả (mức, model, nội dung); tin lúc XONG (room-ops.py progress) chỉ có commit và kết quả test.
+  if [[ "$first_step" != "$failed_step" && -f .agents/room.env && -f "$OPS_PY" ]]; then
+    python3 "$OPS_PY" step-start "$total" "$model" "${batch_lines[@]}" >/dev/null 2>&1 || true
   fi
 
   prompt="Đọc AGENTS.md và $TASK. Làm LẦN LƯỢT các bước $steps_csv, không làm bước nào khác.
@@ -445,7 +452,8 @@ commit với message rõ ràng; tick checkbox của bước đó; cập nhật '
 Nếu một bước sau 2 lần sửa vẫn fail: KHÔNG tick checkbox của bước đó, ghi nguyên nhân và cách đã thử vào
 'Đã thử mà không được', commit file task, rồi DỪNG (không làm các bước sau).
 $SAFETY_RULES
-$SELECTOR_RULES"
+$SELECTOR_RULES
+$NOTES_RULES"
 
   continue_flag=0
   if [[ "$REUSE_SESSION" == "1" ]] && (( runs > 1 )) && [[ "$(fresh_session_for "$first_line")" == "0" ]]; then
