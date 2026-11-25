@@ -1,7 +1,7 @@
 # Project Board: tea-party-two-players
 
 - **Auto Mode:** OFF
-- **Current Phase:** AWAITING_SHIP_APPROVAL
+- **Current Phase:** SHIPPED
 - **Staging Branch:** staging
 
 ## Checklist & Tasks
@@ -21,3 +21,4 @@
 - [2026-11-25 12:25] FINALIZE: tất cả task done, Phase AWAITING_SHIP_APPROVAL, AUTO_MODE=false, chờ /ship.
 - [2026-11-25 12:13] /ship bị hoãn: working tree dơ (scripts/agent-room.sh chưa commit). Phase giữ AWAITING_SHIP_APPROVAL.
 - [2026-11-25 12:14] Theo yêu cầu user: commit board.md + scripts/agent-room.sh lên staging. Phase giữ AWAITING_SHIP_APPROVAL, chờ /ship.
+- [2026-11-25 12:15] /ship: merge staging vào main (8c12e99) và push thành công. Phase SHIPPED.
