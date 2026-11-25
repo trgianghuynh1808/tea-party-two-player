@@ -335,16 +335,16 @@ const CRATES: FoodId[] = [
   "beef", "salmon", "egg", "potato", "tomato", "lettuce",
   "mushroom", "rice", "noodles", "milk", "orange", "coffee",
 ];
-/** Left galley, outer column (top to bottom): a pan and a pot. */
+/** Left galley, outer column (top to bottom): a pan, a pot and the fryer. */
 const LEFT_OUTER: [ProcessId, number][] = [
   ["fry", 1],
   ["boil", 1],
+  ["deepfry", 1],
 ];
-/** Left galley, inner column (top to bottom): the chop board, the grill and the fryer. */
+/** Left galley, inner column (top to bottom): the chop board and the grill. */
 const LEFT_INNER: [ProcessId, number][] = [
   ["chop", 1],
   ["grill", 1],
-  ["deepfry", 1],
 ];
 /** Right column (top to bottom): the second chop board, the blender, the coffee machine. */
 const RIGHT_MACHINES: [ProcessId, number][] = [
