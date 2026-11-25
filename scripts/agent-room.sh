@@ -86,7 +86,7 @@ BOARD
   fi
 
   touch .gitignore
-  for e in ".agents/inbox/" ".agents/outbox/" ".agents/screenshots/" ".agents/logs/" ".agents/manager.lock" ".agents/manager.sig" ".agents/kit-dir"; do
+  for e in ".agents/board.md" ".agents/room.env" ".agents/inbox/" ".agents/outbox/" ".agents/screenshots/" ".agents/logs/" ".agents/manager.lock" ".agents/manager.sig" ".agents/kit-dir" ".agents/watcher.pid"; do
     grep -qxF "$e" .gitignore || { echo "$e" >> .gitignore; echo "  ✓ .gitignore: $e"; }
   done
 
@@ -134,9 +134,8 @@ cmd_start() {
     tmux)
       tmux has-session -t "room-$name" 2>/dev/null && die "Phòng đã chạy (tmux). Dùng stop trước."
       mkdir -p "$AG/logs"; touch "$AG/logs/activity.log"
-      local board_cmd='while true; do clear; sed "/^## Activity Log/q" .agents/board.md; sleep 2; done'
       # dashboard: board (trái trên) · log gộp (trái dưới) · OpenCode watcher (phải); manager-loop chạy ở cửa sổ riêng
-      tmux new-session -d -s "room-$name" -n dashboard -c "$ROOM_DIR" "bash -c '$board_cmd'"
+      tmux new-session -d -s "room-$name" -n dashboard -c "$ROOM_DIR" "scripts/board-view.sh"
       tmux split-window -h -t "room-$name:dashboard" -c "$ROOM_DIR" "scripts/watch-tasks.sh"
       tmux split-window -v -t "room-$name:dashboard.0" -c "$ROOM_DIR" "tail -n 40 -F $AG/logs/activity.log"
       tmux new-window -t "room-$name" -n manager -c "$ROOM_DIR" "scripts/manager-loop.sh"
