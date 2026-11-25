@@ -96,7 +96,7 @@ manager_prompt() { # MODE extra
 techlead_prompt() { # phase id slug
   local common="Bạn là Tech Lead (Claude Code) trong phòng tự động (AUTO_MODE=true). Làm theo CLAUDE.md, mục Autopilot/AUTO_MODE.
 Nhánh nền là '$STAGING_BRANCH' (không phải $MAIN_BRANCH). Task: $2, slug: $3 (xem tiêu đề trên .agents/board.md).
-Không hỏi người dùng, không dừng chờ input. Gặp việc không làm được: đặt task thành [BLOCKED] trên board.md, ghi lý do vào Activity Log, rồi dừng."
+Không hỏi người dùng, không dừng chờ input. Báo tiến độ cho user bằng outbox với "from": "techlead" như CLAUDE.md hướng dẫn. Gặp việc không làm được: đặt task thành [BLOCKED] trên board.md, ghi lý do vào Activity Log, rồi dừng."
   case "$1" in
     plan) printf '%s\n\nVIỆC CỦA BẠN: chỉ LÊN PLAN. Checkout %s, tạo nhánh task/%s, viết plan vào .agents/tasks/<ngày>-%s.md theo CLAUDE.md, commit file plan. KHÔNG chạy scripts/handoff.sh (Manager duyệt plan rồi mới giao). Cuối cùng đổi task %s trên board.md từ [pending] sang [plan_ready].\n' "$common" "$STAGING_BRANCH" "$3" "$3" "$2" ;;
     finish) printf '%s\n\nVIỆC CỦA BẠN: plan đã được duyệt và đã giao cho OpenCode. Chạy Autopilot từ bước Wait (scripts/wait-task.sh với file plan của task này), Verify, Review, Fix cycle (tối đa %s vòng). Lưu ảnh verify vào .agents/screenshots/. Khi PASS: merge --squash nhánh task/%s vào %s (KHÔNG push, KHÔNG merge vào %s), xóa nhánh task, đổi task %s thành [done] và [x] trên board.md, ghi Activity Log. Nếu hết vòng sửa mà chưa đạt: [BLOCKED] + lý do.\n' "$common" "${MAX_FIX_CYCLES:-2}" "$3" "$STAGING_BRANCH" "$MAIN_BRANCH" "$2" ;;
@@ -149,7 +149,15 @@ tick_auto() {
   fi
   id="$(line_id "$line")"; state="$(line_state "$line")"; slug="$(line_slug "$line")"
   case "$state" in
-    pending)     guard "$id:$state" && run_claude techlead "$(techlead_prompt plan "$id" "$slug")" "$id lên plan" ;;
+    pending)
+      # Tiền đề: watcher OpenCode phải sống trước khi bắt đầu task (không thì hand-off sẽ treo ở 'queued')
+      if ! { [[ -f "$AG/watcher.pid" ]] && kill -0 "$(cat "$AG/watcher.pid" 2>/dev/null)" 2>/dev/null; }; then
+        set_env_key AUTO_MODE false
+        say_user "⛔ Senior Dev watcher (OpenCode) không chạy nên chưa bắt đầu $id. Đã tắt AUTO_MODE. Chạy scripts/agent-room.sh start rồi /resume. Dùng /health để kiểm tra."
+        log "⛔ preflight: watcher không chạy — tắt AUTO_MODE"
+        return 0
+      fi
+      guard "$id:$state" && run_claude techlead "$(techlead_prompt plan "$id" "$slug")" "$id lên plan" ;;
     plan_ready)  guard "$id:$state" && run_claude manager "$(manager_prompt APPROVE_PLAN "Task: $id (slug: $slug)")" "$id duyệt plan" ;;
     in_progress) guard "$id:$state" && run_claude techlead "$(techlead_prompt finish "$id" "$slug")" "$id verify, review, merge" ;;
     BLOCKED)

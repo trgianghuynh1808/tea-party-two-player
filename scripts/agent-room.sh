@@ -86,7 +86,7 @@ BOARD
   fi
 
   touch .gitignore
-  for e in ".agents/inbox/" ".agents/outbox/" ".agents/screenshots/" ".agents/logs/" ".agents/manager.lock" ".agents/manager.sig" ".agents/kit-dir"; do
+  for e in ".agents/board.md" ".agents/room.env" ".agents/inbox/" ".agents/outbox/" ".agents/screenshots/" ".agents/logs/" ".agents/manager.lock" ".agents/manager.sig" ".agents/kit-dir" ".agents/watcher.pid"; do
     grep -qxF "$e" .gitignore || { echo "$e" >> .gitignore; echo "  ✓ .gitignore: $e"; }
   done
 

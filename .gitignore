@@ -26,3 +26,6 @@ server/data
 .agents/logs/
 .agents/manager.lock
 .agents/manager.sig
+.agents/board.md
+.agents/room.env
+.agents/watcher.pid

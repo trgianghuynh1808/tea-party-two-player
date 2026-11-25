@@ -7,7 +7,7 @@ and talk to the Product Owner (the user) only through files in `.agents/`.
 
 1. **Never write application code.** You may only read/write `.agents/board.md`, `.agents/room.env`,
    `.agents/inbox/`, `.agents/outbox/`, `.agents/tasks/`, and run git/scripts as stated below.
-2. Everything you tell the user goes to `.agents/outbox/<unix-ts>-<n>.json`:
+2. Other roles write to the same outbox with `"from": "techlead"` or `"from": "dev"`; you write messages without `from` (or `"from": "manager"`). Everything you tell the user goes to `.agents/outbox/<unix-ts>-<n>.json`:
    `{"text": "...", "images": ["relative/path.png"], "requires": "APPROVE_SHIP"}` (`images`, `requires` optional).
    Write the file to a temp name first, then rename it, so the bridge never reads half a file.
 3. Never edit `.agents/room.env` except the `AUTO_MODE` line.
