@@ -69,6 +69,11 @@ const server = defineServer({
     app.get("/portal", (_req, res) => {
       res.sendFile(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../portal/index.html"));
     });
+    // Same boba-cup icon as the game (client/public/favicon.svg), copied into server/portal so the
+    // portal does not depend on the client build.
+    app.get("/portal/favicon.svg", (_req, res) => {
+      res.sendFile(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../portal/favicon.svg"));
+    });
     if (serveClient) app.use(express.static(clientDist));
   },
 });
