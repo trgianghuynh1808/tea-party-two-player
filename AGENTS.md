@@ -26,7 +26,7 @@ Guidelines for coding agents working in this repo.
 - `client/src/updateChecker.ts` — `initUpdateChecker()`: polls the build's `version.json`, compares it with `__BUILD_ID__` and shows the undismissable reload popup when a newer build is deployed; exposes `window.__UPDATE__` under `?test=1`.
 - `client/src/scenes/ShopScene.ts` — main scene: game loop, input handling, sends `Messages.*`, renders world.
 - `client/src/scenes/` — sub-controllers/views: `CustomerController`, `DecorController`, `BuildController`, `RestaurantView`, `YardView`, `PondView`, `CupView`, art modules.
-- `client/src/ui/` — DOM panels: `OrdersPanel`, `DecorPanel`, `BuildPanel`, `FishingPanel`, `ShiftOverlay`, `RecipeGuide`, `rotateUi` (shared ⟳ Xoay button + ⟳ badge used by both the decorate and build panels).
+- `client/src/ui/` — DOM panels: `OrdersPanel`, `DecorPanel`, `BuildPanel`, `FishingPanel`, `FishGuide` (sidebar fish/rod guide shown at the pond, replacing the orders panel), `ShiftOverlay`, `RecipeGuide`, `rotateUi` (shared ⟳ Xoay button + ⟳ badge used by both the decorate and build panels).
 - `client/src/input/` — `KeyboardState` (WASD/arrows + Space), `TouchControls` (joystick + action button).
 - `client/src/forceLandscape.ts` — forces landscape on phones (orientation lock or CSS rotation).
 - `client/assets-src/` — source art sheets and the art tools in `tools/` (`cut_food.py`, `cut_bathroom.py` — cuts both `bathroom-sheet-1.png` and `bathroom-sheet-2.png`, one background + cut list per sheet — `draw_bathroom_props.py`, `draw_gadget_props.py` — head-on phone/tablet/TV stand/piano sprites).

@@ -41,6 +41,7 @@ import { ShiftOverlay } from "./ui/ShiftOverlay";
 import { TEST_MODE_PARAM, installTestHook, isTestMode } from "./testHook";
 import { initUpdateChecker } from "./updateChecker";
 import { FishingPanel } from "./ui/FishingPanel";
+import { FishGuide } from "./ui/FishGuide";
 
 initUpdateChecker();
 
@@ -71,6 +72,7 @@ const buildBtn = $<HTMLButtonElement>("build-btn");
 const buildRoot = $<HTMLElement>("build-panel");
 const shiftOverlayRoot = $<HTMLElement>("shift-overlay");
 const fishingPanelRoot = $<HTMLElement>("fishing-panel");
+const fishGuideRoot = $<HTMLElement>("fish-guide");
 const modal = $<HTMLElement>("modal");
 const modalTitle = $<HTMLElement>("modal-title");
 const modalBody = $<HTMLElement>("modal-body");
@@ -90,6 +92,7 @@ let currentRoom: Room<BobaShopState> | undefined;
 let ordersPanel: OrdersPanel | undefined;
 let shiftOverlay: ShiftOverlay | undefined;
 let fishingPanel: FishingPanel | undefined;
+let fishGuide: FishGuide | undefined;
 let decorPanel: DecorPanel | undefined;
 let decorating = false;
 let buildPanel: BuildPanel | undefined;
@@ -475,6 +478,8 @@ function startGame(room: Room<BobaShopState>) {
   shiftOverlay = new ShiftOverlay(shiftOverlayRoot, room);
   // The pond's own overlay: clock, start button, reel bar, summary (shown while at the pond).
   fishingPanel = new FishingPanel(fishingPanelRoot, room);
+  // The pond's fish & rod guide in the sidebar (replaces the orders list there).
+  fishGuide = new FishGuide(fishGuideRoot, room);
   decorPanel = new DecorPanel(
     decorRoot,
     room,
@@ -533,6 +538,9 @@ function startGame(room: Room<BobaShopState>) {
     updateDecorateBtn();
     shiftOverlay?.setArea(next);
     fishingPanel?.setArea(next);
+    fishGuide?.setArea(next);
+    // At the pond the fish & rod guide replaces the orders (nothing to brew there).
+    ordersRoot.hidden = next === "pond";
   });
   $state.listen("phase", updateDecorateBtn);
   $state.listen("hostName", updateDecorateBtn);
@@ -569,6 +577,8 @@ function stopGame() {
   shiftOverlay = undefined;
   fishingPanel?.destroy();
   fishingPanel = undefined;
+  fishGuide?.destroy();
+  fishGuide = undefined;
   ordersPanel = undefined;
   currentRoom = undefined;
 }

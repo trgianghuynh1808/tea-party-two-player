@@ -86,6 +86,9 @@ Interaction rules live in `shared/src/interaction.ts` (`planInteraction`), used 
   fishing money is never split.
 - There are 8 fish in 5 rarities and 5 rods. A better rod makes rare fish bite more often and reels faster; buy
   the next level with your own money in the pond HUD. The rod level is saved per username (like the wallet).
+- While at the pond, the sidebar swaps the orders panel for a read-only fish & rod guide: every species grouped by
+  rarity with its price, every rod with its price and reel speed, the one you own highlighted
+  (`client/src/ui/FishGuide.ts`). Leaving the pond brings the orders back.
 - Fishing is not a shift: a shift can't start during a session, and a session can't start during a shift.
   The pond has no furniture, so decorate mode is off there. Numbers live in `shared/src/fishing.ts`; rendering
   and UI in `client/src/scenes/PondView.ts` and `client/src/ui/FishingPanel.ts`.
