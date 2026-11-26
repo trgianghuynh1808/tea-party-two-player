@@ -827,6 +827,21 @@ def ensure_plan_on_disk(slug):
     return plan_path(slug)
 
 
+ENV_FILE_RE = re.compile(r"(?<![\w.])\.env(?!\.example)(\.[\w.]+)?\b")
+NEGATION_RE = re.compile(r"\b(không|khong|đừng|never|not|no|without|don't)\b", re.I)
+
+
+def plan_touches_env(text):
+    """True when a step of the plan works on a .env file. Only the "## Plan" section counts (the context and decisions often say where
+    env values live or promise not to touch them), and a mention after a negation ("KHÔNG sửa .env") is not a touch."""
+    m = re.search(r"^## Plan\b.*?(?=^## |\Z)", text, re.M | re.S)
+    for line in (m.group(0) if m else text).split("\n"):
+        for hit in ENV_FILE_RE.finditer(line):
+            if not NEGATION_RE.search(line[:hit.start()]):
+                return True
+    return False
+
+
 def cmd_check_plan(slug):
     p = ensure_plan_on_disk(slug)
     if not p or not os.path.exists(p):
@@ -835,7 +850,7 @@ def cmd_check_plan(slug):
     steps = re.findall(r"^- \[[ x]\] \d+\. .*$", text, re.M)
     if not steps:
         return "BLOCK: plan không có bước nào theo mẫu '- [ ] N. [dễ|vừa|khó] ...'"
-    if re.search(r"(?<![\w.])\.env(?!\.example)(\.[\w.]+)?\b", text):
+    if plan_touches_env(text):
         return "BLOCK: plan đụng tới file .env"
     if re.search(r"DROP\s+(TABLE|DATABASE|SCHEMA)|TRUNCATE\s|DELETE\s+FROM", text, re.I):
         return "BLOCK: plan có thao tác xoá dữ liệu (DROP/TRUNCATE/DELETE FROM)"
