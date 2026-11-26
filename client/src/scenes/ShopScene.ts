@@ -56,7 +56,7 @@ import { CupView, foodTextureKey, preloadCupTextures } from "./CupView";
 import { DecorController, bedPillowPoint, preloadDecorTextures } from "./DecorController";
 import { CustomerController } from "./CustomerController";
 import { YardView, preloadBuildTextures } from "./YardView";
-import { PondView } from "./PondView";
+import { PondView, preloadPondTextures } from "./PondView";
 import { RestaurantView, ensureTileTexture } from "./RestaurantView";
 import { KITCHEN_ART_RISE, kitchenStationTexture, makeKitchenStationTextures } from "./KitchenArt";
 import { makeTeaStationTextures, teaStationTexture } from "./TeaArt";
@@ -295,6 +295,7 @@ export class ShopScene extends Phaser.Scene {
     preloadCupTextures(this);
     preloadDecorTextures(this);
     preloadBuildTextures(this);
+    preloadPondTextures(this);
   }
 
   init(data: ShopSceneData) {

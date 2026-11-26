@@ -34,12 +34,19 @@ export interface FishDef {
 export const FISH: readonly FishDef[] = [
   { id: "ca_ro", name: "Cá rô", tier: "common", price: 8, hold: 2, speed: 40, weight: 40 },
   { id: "ca_chep", name: "Cá chép", tier: "common", price: 14, hold: 2.5, speed: 46, weight: 30 },
+  { id: "ca_thu", name: "Cá thu", tier: "common", price: 18, hold: 2.5, speed: 50, weight: 30 },
   { id: "ca_tre", name: "Cá trê", tier: "uncommon", price: 25, hold: 3, speed: 55, weight: 12 },
+  { id: "ca_bon", name: "Cá bơn", tier: "uncommon", price: 32, hold: 3, speed: 58, weight: 8 },
   { id: "ca_he", name: "Cá hè", tier: "uncommon", price: 40, hold: 3.5, speed: 62, weight: 8 },
+  { id: "luon", name: "Lươn", tier: "uncommon", price: 48, hold: 3.5, speed: 66, weight: 8 },
   { id: "ca_tram", name: "Cá trầm", tier: "rare", price: 80, hold: 5, speed: 72, weight: 4 },
   { id: "ca_loc", name: "Cá lóc vàng", tier: "rare", price: 130, hold: 5.5, speed: 80, weight: 3 },
+  { id: "ca_nuc", name: "Cá nóc", tier: "rare", price: 150, hold: 5.5, speed: 84, weight: 3 },
   { id: "ca_koi", name: "Cá koi", tier: "epic", price: 300, hold: 7, speed: 92, weight: 2 },
+  { id: "ca_duoi", name: "Cá đuối", tier: "epic", price: 380, hold: 7.5, speed: 98, weight: 2 },
+  { id: "ca_mat_trang", name: "Cá mặt trăng", tier: "epic", price: 450, hold: 8, speed: 104, weight: 2 },
   { id: "ca_rong", name: "Cá rồng", tier: "mythic", price: 900, hold: 9, speed: 110, weight: 1 },
+  { id: "ca_map", name: "Cá mập", tier: "mythic", price: 1200, hold: 10, speed: 118, weight: 1 },
 ];
 
 export const getFish = (id: string): FishDef | undefined => FISH.find((f) => f.id === id);
@@ -91,7 +98,7 @@ export const REEL_DECAY = 0.15;
 /** A bite not landed within this many seconds escapes. */
 export const REEL_TIMEOUT = 25;
 
-/** Pick a species for a new fish, weighted (common 40/30, uncommon 12/8, rare 4/3, epic 2, mythic 1). */
+/** Pick a species for a new fish, weighted (common 40/30/30, uncommon 12/8/8/8, rare 4/3/3, epic 2/2/2, mythic 1/1). */
 export function pickFishSpecies(rng: () => number = Math.random): FishDef {
   const total = FISH.reduce((sum, f) => sum + f.weight, 0);
   let roll = rng() * total;
