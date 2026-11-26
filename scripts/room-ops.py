@@ -49,7 +49,7 @@ HELP = ("Mình chỉ hiểu mấy lệnh này thôi nha 😅\n"
         "- `/clear` · dọn board và trạng thái cũ (lưu bản sao board)\n"
         "- `/clearlog` · dọn log chạy (giữ vài trăm dòng cuối)\n"
         "- `/stop` · dừng lại\n"
-        "- `/resume` · chạy tiếp\n"
+        "- `/resume` · chạy tiếp · `/resume T03` thử lại đúng một task bị chặn\n"
         "- `/ship` · đưa lên main\n"
         "Gõ `/` để xem menu. Tin thường mình không đọc để tiết kiệm quota nhé 🌱")
 
@@ -347,27 +347,67 @@ def cmd_stop():
     return "Okê, mình dừng lại đây ⏹\nChế độ tự động đã tắt. Việc đang dở sẽ nằm yên cho tới khi bạn gõ `/resume` nha."
 
 
-def cmd_resume():
+def unblock_task(lines, t, note=""):
+    """BLOCKED -> pending again (the Tech Lead plans it anew); an optional note reaches the Tech Lead like a /revise note."""
+    set_state(lines, t["id"], "pending")
+    for f in glob.glob(f"{AG}/notices/skip-{t['id']}-*"):
+        os.remove(f)
+    if note:
+        d = f"{AG}/plan-feedback"
+        os.makedirs(d, exist_ok=True)
+        with open(f"{d}/{t['slug']}.md", "a", encoding="utf8") as f:
+            f.write(f"## Góp ý lúc {datetime.now():%Y-%m-%d %H:%M}\n{note}\n\n")
+
+
+def cmd_resume(arg=""):
+    """/resume: continue after a stop, a stuck task or a BLOCKED task. `/resume T03 [note]` retries ONE blocked task even while the
+    room is running (a blocked task is skipped and the others carry on, so plain /resume used to answer 'already running')."""
+    parts = arg.split(None, 1)
+    key = parts[0].upper() if parts and re.match(r"^T\d+$", parts[0], re.I) else ""
+    note = (parts[1] if key and len(parts) > 1 else "").strip()
     lines = read_board()
-    e = read_env()
-    if e.get("AUTO_MODE") == "true":
-        return "Mình đang chạy sẵn rồi mà 😄 Bạn gõ `/status` để xem tiến độ nhé."
-    ts = [t for t in tasks(lines) if not t["done"]]
-    if not ts:
+    running = read_env().get("AUTO_MODE") == "true"
+    all_tasks = tasks(lines)
+    open_tasks = [t for t in all_tasks if not t["done"]]
+    busy = [t for t in all_tasks if t["state"] in ("planning", "plan_ready", "in_progress", "revise")]
+
+    def finish(unblocked):
+        for t in unblocked:
+            unblock_task(lines, t, note)
+        if not running:
+            set_auto(lines, True, "RUNNING")
+        log_line(lines, "/resume " + (", ".join(t["id"] for t in unblocked) or "") + ": " +
+                 ("chạy tiếp, " if not running else "") + ("task BLOCKED chuyển lại pending." if unblocked else "AUTO_MODE bật."))
+        write_board(lines)
+        try:
+            os.remove(f"{AG}/manager.sig")
+        except FileNotFoundError:
+            pass
+
+    if key:
+        t = next((x for x in all_tasks if x["id"] == key), None)
+        if not t:
+            return f"Mình không thấy task **{key}** trên board 🙈 Gõ `/status` để xem danh sách nhé."
+        if t["state"] != "BLOCKED":
+            hint = (f" Bạn trả lời bằng `/revise {key} <thông tin>` nhé." if t["state"] == "needs_info" else
+                    " Plan đang chờ bạn: gõ `/approve` hoặc `/revise`." if t["state"] == "awaiting_plan" else "")
+            return f"**{key}** đang ở trạng thái **{STATE_VI.get(t['state'], t['state'])}**, không bị chặn nên không cần `/resume` 🙂{hint}"
+        finish([t])
+        wait = f" Mình đang làm **{busy[0]['id']}**, xong sẽ tới **{key}** ngay." if busy else " Mình chạy lại ngay nè."
+        return f"Thử lại **{key}** thôi! ▶️{wait}" + (" Mình đã chuyển ghi chú của bạn cho Tech Lead." if note else "")
+
+    blocked = [t for t in open_tasks if t["state"] == "BLOCKED"]
+    if running:
+        if not blocked:
+            return "Mình đang chạy sẵn rồi mà 😄 Bạn gõ `/status` để xem tiến độ nhé."
+        finish(blocked)
+        ids = ", ".join(f"**{t['id']}**" for t in blocked)
+        return f"Mình đang chạy sẵn, nhưng có task bị chặn nên mình cho thử lại: {ids} ▶️" + (
+            f" Mình làm xong **{busy[0]['id']}** là tới lượt." if busy else "")
+    if not open_tasks:
         return "Không còn việc nào dang dở để chạy tiếp đâu 🎉"
-    for t in ts:
-        if t["state"] == "BLOCKED":
-            set_state(lines, t["id"], "pending")
-            for f in glob.glob(f"{AG}/notices/skip-{t['id']}-*"):
-                os.remove(f)
-    set_auto(lines, True, "RUNNING")
-    log_line(lines, "/resume: AUTO_MODE bật, task BLOCKED chuyển lại pending.")
-    write_board(lines)
-    try:
-        os.remove(f"{AG}/manager.sig")
-    except FileNotFoundError:
-        pass
-    return f"Tiếp tục thôi! ▶️ Còn **{len(ts)} việc** chưa xong, mình chạy lại ngay nè."
+    finish(blocked)
+    return f"Tiếp tục thôi! ▶️ Còn **{len(open_tasks)} việc** chưa xong, mình chạy lại ngay nè."
 
 
 def clean_item(line):
@@ -1206,12 +1246,13 @@ def plan_mtime(slug):
     return os.path.getmtime(p) if p and os.path.exists(p) else 0
 
 
-def step_report(slug, total, done_steps, commits, changed, linked, notes=None):
+def step_report(slug, total, done_steps, commits, changed, linked, notes=None, tid=""):
     """ONE message per finished step(s): what the step was (with difficulty), commits (linked), test results. There is no separate start message."""
     base = repo_web_url()
     nums = ", ".join(str(x[0]) for x in done_steps)
-    out = [f"✅ **Bước {nums}/{total}** xong rồi nè!" if len(done_steps) == 1 else
-           f"✅ **Bước {nums}/{total}** xong hết rồi nè!" if done_steps else "📝 **Phần còn lại** của task"]
+    who = f"{tid} · " if tid else ""   # several tasks can be in flight: every message names its task
+    out = [f"✅ **{who}Bước {nums}/{total}** xong rồi nè!" if len(done_steps) == 1 else
+           f"✅ **{who}Bước {nums}/{total}** xong hết rồi nè!" if done_steps else f"📝 **{who}Phần còn lại** của task"]
     if done_steps:
         out += ["", "**Mô tả**"]
         for n, _, label, txt in done_steps:
@@ -1372,7 +1413,7 @@ def _cmd_progress(slug, flush=False):
     # Notes alone never make a message: with no step, commit or test to report they wait for the end-of-task report (F), which lists them all.
     if (done_steps and settled) or (flush and (new_commits or changed)):
         linked = push_task_branch(slug, st) if new_commits else False
-        emit("dev", step_report(slug, total, done_steps, new_commits, changed, linked, new_notes))
+        emit("dev", step_report(slug, total, done_steps, new_commits, changed, linked, new_notes, tid=t["id"]))
         st["steps"] += [x[0] for x in done_steps]
         st["commits"] += [c[0] for c in new_commits]
         st["tests"].update(dict(changed))
@@ -1387,7 +1428,7 @@ def _cmd_progress(slug, flush=False):
         st["shots"] = sorted(set(st["shots"]) | set(new_shots))
         st["task_shots"] = sorted(set(st.get("task_shots", [])) | set(new_shots))   # evidence of THIS task, used by the reports
         if verify == "FAIL":
-            body = ["🔎 **Verify chưa qua** ❌ Mình thấy có chỗ chưa đúng, đang xem lại nha."]
+            body = [f"🔎 **{t['id']} · Verify chưa qua** ❌ Mình thấy có chỗ chưa đúng, đang xem lại nha."]
             if st["verify_notes"]:
                 body += ["", "**Ghi chú**"] + [f"- {n}" for n in st["verify_notes"]]
             if new_shots:
@@ -1405,7 +1446,7 @@ def _cmd_progress(slug, flush=False):
                 if not _done and _txt.lstrip().lower().startswith("fix"):
                     todo.append("- " + short(re.sub(r"^Fix:\s*", "", _txt.lstrip(), flags=re.I), 100))
             todo = todo[:3]
-            emit("techlead", f"Có chút trục trặc nên mình mở **vòng sửa {n_fix}** rồi giao lại OpenCode nha 🔁"
+            emit("techlead", f"Có chút trục trặc ở **{t['id']}** nên mình mở **vòng sửa {n_fix}** rồi giao lại OpenCode nha 🔁"
                  + ("\n\n**Sẽ sửa**\n" + "\n".join(todo) if todo else ""))
             st["fix"].append(h)
             sent += 1
@@ -1615,7 +1656,7 @@ def cmd_inbox(path):
     elif cmd == "/stop":
         reply = cmd_stop()
     elif cmd == "/resume":
-        reply = cmd_resume()
+        reply = cmd_resume(args)
     elif cmd == "/ship":
         reply = cmd_ship()
     elif cmd == "/usage":
@@ -1663,6 +1704,10 @@ def main(argv):
     c, a = argv[1], argv[2:]
     if c == "inbox":
         return cmd_inbox(a[0])
+    if c == "task-id":   # task-id <slug|task file>: print the task id (T12) so shell callers can name the task in their messages
+        key = re.sub(r"^\d{4}-\d{2}-\d{2}-", "", os.path.basename(a[0]).removesuffix(".md")) if a else ""
+        print(next((t["id"] for t in tasks(read_board()) if t["slug"] == key), ""))
+        return 0
     if c == "say":
         emit(a[0], a[1].replace("\\n", "\n"))  # shell callers write \n inside "..." strings
         return 0
@@ -1688,7 +1733,10 @@ def main(argv):
     if c == "usage":
         print(cmd_usage(int(a[0]) if a and a[0].isdigit() else 1))
         return 0
-    simple = {"status": status_text, "stop": cmd_stop, "resume": cmd_resume, "finalize": cmd_finalize}
+    simple = {"status": status_text, "stop": cmd_stop, "finalize": cmd_finalize}
+    if c == "resume":
+        print(cmd_resume(" ".join(a)))
+        return 0
     if c in simple:
         print(simple[c]())
         return 0

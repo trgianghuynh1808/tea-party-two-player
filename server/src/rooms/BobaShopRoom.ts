@@ -6,7 +6,11 @@ import {
   EMPTY_CUP,
   EMPTY_HAND,
   FAST_SERVICE_TIP,
+  FISH_COUNT,
+  FISH_SECONDS,
   GamePhase,
+  HOOK_RADIUS,
+  HOOK_SPEED,
   JoinError,
   MAX_PLAYERS,
   CustomerKind,
@@ -14,11 +18,18 @@ import {
   MACHINE_OVERFLOW_SECONDS,
   MISSED_ORDER_PENALTY,
   PICKY_FAST_BONUS,
+  REEL_DECAY,
+  REEL_START,
+  REEL_TIMEOUT,
   VIP_DURATION_SECONDS,
   VIP_PRICE_MULTIPLIER,
+  WATER,
+  biteChance,
   comboBonusRate,
   getCustomer,
+  getFish,
   getMenuItem,
+  getRod,
   getVenue,
   isVenue,
   orderDrinkIds,
@@ -26,6 +37,7 @@ import {
   pendingDrinksAt,
   pendingOrderDrinkIds,
   pickCustomerKind,
+  pickFishSpecies,
   seatTableMap,
   tablesWaiting,
   SEAT_COOLDOWN_SECONDS,
@@ -60,6 +72,8 @@ import {
   venueOrderDuration,
   venueSpawnInterval,
   type BedSpot,
+  type DebugWarpMessage,
+  type FishDef,
   PLAYER_SPEED,
   resolveCollisions,
   cupContents,
@@ -73,6 +87,7 @@ import {
   type DeliveredEvent,
   type MenuItem,
   type MoveTileMessage,
+  type ReelMessage,
   type SellTileMessage,
   type StartShiftMessage,
   type Venue,
@@ -82,12 +97,21 @@ import {
   type PositionMessage,
   type RoomMetadata,
 } from "@boba/shared";
-import { BobaShopState, Decoration, Order, Player, Station } from "@boba/shared/schema";
+import { BobaShopState, Decoration, Fish, Order, Player, Station } from "@boba/shared/schema";
 import { openShop, shopOf, type Piece, type SharedShop, type ShopEvent } from "../shop/SharedShop.js";
 
 const FIRST_ORDER_DELAY_SECONDS = 2;
 /** Override shift length for quick testing, e.g. SHIFT_SECONDS=20 npm run dev. */
 const shiftDuration = (venue: string) => Number(process.env.SHIFT_SECONDS) || getVenue(venue).shiftSeconds;
+/** Override fishing session length for tests, e.g. FISH_SECONDS=20 (see FISH_SECONDS in @boba/shared). */
+const fishDuration = () => Number(process.env.FISH_SECONDS) || FISH_SECONDS;
+/**
+ * Test mode for fishing (FISH_TEST=1): every fish spawns as a Cá rô that always bites, so e2e runs
+ * don't depend on luck. Progression is unchanged, just deterministic.
+ */
+const FISH_TEST = process.env.FISH_TEST === "1";
+/** Fish positions go to the schema at most this often (the sim runs at 60 Hz; patches cost bandwidth). */
+const FISH_SYNC_SECONDS = 0.1;
 const DELIVERY_CLEAR_SECONDS = 0.8;
 const SPAWN_POINTS = [
   { x: 300, y: 400 },
@@ -117,6 +141,14 @@ function shuffle<T>(items: T[]): T[] {
 interface MoveBudget {
   budget: number;
   lastAt: number;
+}
+
+/** A fish as simulated (its synced body lives in the schema; this is the authoritative position). */
+interface FishSim {
+  x: number;
+  y: number;
+  dir: 1 | -1;
+  species: string;
 }
 
 /** Validated join request (returned by onAuth, available as client.auth in onJoin). */
@@ -165,6 +197,20 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
   /** Seat id -> seconds left before a new customer may sit there (the previous one is walking out). */
   private seatCooldowns = new Map<string, number>();
 
+  // Fishing (room-internal sim state; the synced bits live in the schema, see Fish / Player fields)
+  /** sessionId -> fish swimming positions (authoritative; synced to state.fish every FISH_SYNC_SECONDS). */
+  private fishSim = new Map<string, FishSim>();
+  private fishSyncTimer = 0;
+  private fishSeq = 0;
+  /** sessionId -> id of the fish on that player's hook. */
+  private hookedFish = new Map<string, string>();
+  /** sessionId -> reel held (true) or released; only matters while a fish is on the hook. */
+  private reelHolding = new Map<string, boolean>();
+  /** sessionId -> seconds since the fish took the hook (it escapes after REEL_TIMEOUT). */
+  private hookTimer = new Map<string, number>();
+  /** sessionId -> fish that already rolled on this player's current drop (one roll per drop each). */
+  private biteRolled = new Map<string, Set<string>>();
+
   messages = {
     position: (client: Client, payload: PositionMessage) => {
       this.handlePosition(client, payload);
@@ -197,9 +243,36 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
       const player = this.state.players.get(client.sessionId);
       if (player?.bedId) this.getUp(client.sessionId, player);
     },
-    start_shift: (_client: Client, payload?: StartShiftMessage) => {
+    start_shift: (client: Client, payload?: StartShiftMessage) => {
+      // A shift can't run during a fishing session (the reverse guard is in handleStartFishing).
+      if (this.state.fishPhase === "fishing") {
+        return client.send(ServerEvents.InteractFailed, { reason: "Đang câu cá, chờ hết phiên câu nhé" });
+      }
       if (this.state.phase !== GamePhase.Playing) this.startShift(isVenue(payload?.venue) ? payload.venue : "shop");
     },
+    start_fishing: (client: Client) => {
+      this.handleStartFishing(client);
+    },
+    cast: (client: Client) => {
+      this.handleCast(client);
+    },
+    reel: (client: Client, payload: ReelMessage) => {
+      this.handleReel(client, payload);
+    },
+    retract: (client: Client) => {
+      this.handleRetract(client);
+    },
+    upgrade_rod: (client: Client) => {
+      this.handleUpgradeRod(client);
+    },
+    // Registered only for e2e runs (server env DEBUG_WARP=1): teleports the player anywhere.
+    ...(process.env.DEBUG_WARP === "1"
+      ? {
+          debug_warp: (client: Client, payload: DebugWarpMessage) => {
+            this.handleDebugWarp(client, payload);
+          },
+        }
+      : {}),
   };
 
   async onCreate(options: Partial<JoinOptions> = {}) {
@@ -270,6 +343,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     player.online = true;
     player.host = key === this.hostKey;
     player.money = shopOf(key).money;
+    player.rodLevel = shopOf(key).rodLevel;
     this.state.players.set(client.sessionId, player);
     this.sessionNames.set(client.sessionId, key);
     this.watchWallet(key);
@@ -309,7 +383,10 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     const key = this.sessionNames.get(sessionId);
     this.sessionNames.delete(sessionId);
     if (key && seats.get(key)?.sessionId === sessionId) seats.delete(key);
-    const name = this.state.players.get(sessionId)?.name;
+    const player = this.state.players.get(sessionId);
+    // Their hook comes in and any fish on it goes free.
+    if (player) this.clearHook(sessionId, player);
+    const name = player?.name;
     this.state.players.delete(sessionId);
     this.moveBudgets.delete(sessionId);
     if (key) this.unwatchWallet(key);
@@ -329,6 +406,8 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
   releaseName(key: string) {
     for (const [sessionId, k] of this.sessionNames) {
       if (k !== key) continue;
+      const player = this.state.players.get(sessionId);
+      if (player) this.clearHook(sessionId, player);
       this.state.players.delete(sessionId);
       this.moveBudgets.delete(sessionId);
       this.sessionNames.delete(sessionId);
@@ -357,6 +436,8 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
   /** Move the player of an old session to a new one, and disconnect the old session. */
   private takeOver(oldSessionId: string, newSessionId: string): Player {
     const old = this.state.players.get(oldSessionId);
+    // The old connection's hook comes in (its fish goes free); the clone starts hookless.
+    if (old) this.clearHook(oldSessionId, old);
     const player = old ? old.clone() : this.createPlayer({});
     player.teleportSeq++; // the new client starts exactly where the player was
     this.state.players.delete(oldSessionId);
@@ -405,16 +486,21 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     }
   }
 
-  /** Keep Player.money in sync with the player's wallet (it may also change from another room). */
+  /**
+   * Keep Player.money / Player.rodLevel in sync with the player's shop (both may also change from
+   * another room: shifts pay into the wallet, fishing rod upgrades change the saved rod).
+   */
   private watchWallet(key: string) {
     if (this.walletSubs.has(key)) return;
     const shop = shopOf(key);
     this.touchedShops.add(shop);
     const off = shop.subscribe((event) => {
-      if (event.type !== "money") return;
       for (const [sessionId, k] of this.sessionNames) {
-        const player = k === key ? this.state.players.get(sessionId) : undefined;
-        if (player) player.money = event.money;
+        if (k !== key) continue;
+        const player = this.state.players.get(sessionId);
+        if (!player) continue;
+        if (event.type === "money") player.money = event.money;
+        else if (event.type === "rodLevel") player.rodLevel = event.level;
       }
     });
     this.walletSubs.set(key, off);
@@ -492,6 +578,8 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
       this.state.shiftTimeLeft = Math.max(0, this.state.shiftTimeLeft - dt);
       if (this.state.shiftTimeLeft <= 0) this.endShift();
     }
+
+    this.updateFishing(dt);
 
     // Delivered drinks disappear from the counter after a short delay.
     for (const [stationId, remaining] of this.deliveryTimers) {
@@ -745,6 +833,230 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     this.broadcast(ServerEvents.OrderExpired, event);
   }
 
+  // ---------------------------------------------------------------- Fishing (a timed co-op session at the pond)
+  //
+  // Fully server-side: fish swim in the sim map (synced to state.fish every FISH_SYNC_SECONDS), hooks
+  // sink and reels are pulled here. Clients only send cast / reel / retract intents. Fish sell straight
+  // into the catcher's own wallet (no split), and rod upgrades are saved with the player's shop.
+
+  /**
+   * Run the fishing session while fishPhase === "fishing": the clock, the fish and every player's
+   * hook / reel. Stops (and shows the summary) once fishTimeLeft hits zero.
+   */
+  private updateFishing(dt: number) {
+    if (this.state.fishPhase !== "fishing") return;
+
+    this.state.fishTimeLeft = Math.max(0, this.state.fishTimeLeft - dt);
+    if (this.state.fishTimeLeft <= 0) return this.endFishing();
+
+    // Fish swim back and forth in their lanes; hooked ones wait at the hook.
+    this.fishSyncTimer += dt;
+    const sync = this.fishSyncTimer >= FISH_SYNC_SECONDS;
+    if (sync) this.fishSyncTimer = 0;
+    for (const [id, sim] of this.fishSim) {
+      const fish = this.state.fish.get(id);
+      if (!fish || fish.hooked) continue;
+      const def = getFish(sim.species);
+      if (!def) continue;
+      sim.x += sim.dir * def.speed * dt;
+      if (sim.x <= WATER.left) {
+        sim.x = WATER.left;
+        sim.dir = 1;
+      } else if (sim.x >= WATER.right) {
+        sim.x = WATER.right;
+        sim.dir = -1;
+      }
+      if (sync) {
+        fish.x = sim.x;
+        fish.dir = sim.dir;
+      }
+    }
+
+    this.state.players.forEach((player, sessionId) => {
+      if (player.hookState === "drop") this.updateHookDrop(sessionId, player, dt);
+      else if (player.hookState === "reel") this.updateHookReel(sessionId, player, dt);
+    });
+  }
+
+  /** Session over: summary on screen (fishPhase "ended"), everyone's hook in, pond emptied. */
+  private endFishing() {
+    this.state.fishPhase = "ended";
+    this.state.fishTimeLeft = 0;
+    this.state.players.forEach((player, sessionId) => this.clearHook(sessionId, player));
+    this.state.fish.clear();
+    this.fishSim.clear();
+    this.fishSyncTimer = 0;
+    console.log(`[BobaShopRoom] ${this.roomId} fishing session ended`);
+  }
+
+  /** Put a new fish in the pond: random species (weighted), lane and direction. */
+  private spawnFish() {
+    const def = FISH_TEST ? getFish("ca_ro")! : pickFishSpecies();
+    const id = `fish_${++this.fishSeq}`;
+    const y = WATER.top + 40 + Math.random() * (WATER.bottom - WATER.top - 80);
+    const x = WATER.left + Math.random() * (WATER.right - WATER.left);
+    const dir: 1 | -1 = Math.random() < 0.5 ? -1 : 1;
+    this.fishSim.set(id, { x, y, dir, species: def.id });
+
+    const fish = new Fish();
+    fish.id = id;
+    fish.species = def.id;
+    fish.x = x;
+    fish.y = y;
+    fish.dir = dir;
+    this.state.fish.set(id, fish);
+  }
+
+  private removeFish(id: string) {
+    this.fishSim.delete(id);
+    this.state.fish.delete(id);
+  }
+
+  /** A dropped hook sinks; the first fish it touches may take it (one roll per drop each), the floor reels it in. */
+  private updateHookDrop(sessionId: string, player: Player, dt: number) {
+    player.hookY += HOOK_SPEED * dt;
+    const rolled = this.biteRolled.get(sessionId) ?? new Set<string>();
+    this.biteRolled.set(sessionId, rolled);
+    for (const [id, sim] of this.fishSim) {
+      if (rolled.has(id)) continue;
+      const fish = this.state.fish.get(id);
+      if (!fish || fish.hooked) continue;
+      if (Math.hypot(sim.x - player.hookX, sim.y - player.hookY) > HOOK_RADIUS) continue;
+      const def = getFish(fish.species);
+      if (!def) continue;
+      rolled.add(id);
+      // Rare fish shake hooks off: the rod's bite table decides (tests force the bite).
+      if (!FISH_TEST && Math.random() >= biteChance(player.rodLevel, def.tier)) continue;
+      // On the line: the fish freezes at the hook and reeling starts part-way through.
+      sim.x = player.hookX;
+      sim.y = player.hookY;
+      fish.x = sim.x;
+      fish.y = sim.y;
+      fish.hooked = true;
+      this.hookedFish.set(sessionId, id);
+      this.hookTimer.set(sessionId, 0);
+      player.hookState = "reel";
+      player.reelProgress = REEL_START;
+      return;
+    }
+    if (player.hookY >= WATER.bottom) this.clearHook(sessionId, player);
+  }
+
+  /** A fish on the line: holding gains reel progress, releasing loses it; not landed in time, it escapes. */
+  private updateHookReel(sessionId: string, player: Player, dt: number) {
+    const timer = (this.hookTimer.get(sessionId) ?? 0) + dt;
+    this.hookTimer.set(sessionId, timer);
+    const fishId = this.hookedFish.get(sessionId);
+    const fish = fishId ? this.state.fish.get(fishId) : undefined;
+    const def = fish ? getFish(fish.species) : undefined;
+    if (!fish || !def) return this.loseHook(sessionId, player);
+
+    const rod = getRod(player.rodLevel);
+    const holding = this.reelHolding.get(sessionId) === true;
+    player.reelProgress += holding ? dt * ((rod?.reel ?? 1) / def.hold) : -dt * REEL_DECAY;
+    if (player.reelProgress >= 1) return this.landFish(sessionId, player, fish, def);
+    if (player.reelProgress <= 0 || timer >= REEL_TIMEOUT) return this.loseHook(sessionId, player);
+  }
+
+  /** Landed: the fish sells straight into the catcher's own wallet (never split), and a new one spawns. */
+  private landFish(sessionId: string, player: Player, fish: Fish, def: FishDef) {
+    const key = this.sessionNames.get(sessionId);
+    const earned = key ? shopOf(key).earn(def.price) : 0;
+    player.fishCaught++;
+    player.fishEarned += earned;
+    player.lastCatch = def.id;
+    player.catchSeq++;
+    this.removeFish(fish.id);
+    this.spawnFish();
+    this.clearHook(sessionId, player);
+  }
+
+  /** The fish got away (progress hit zero, or nobody landed it within REEL_TIMEOUT). */
+  private loseHook(sessionId: string, player: Player) {
+    player.escapeSeq++;
+    this.clearHook(sessionId, player);
+  }
+
+  /** Take the hook back: releases any fish on it and clears the player's fishing bookkeeping. */
+  private clearHook(sessionId: string, player?: Player) {
+    const fishId = this.hookedFish.get(sessionId);
+    if (fishId) {
+      const fish = this.state.fish.get(fishId);
+      if (fish) fish.hooked = false;
+    }
+    this.hookedFish.delete(sessionId);
+    this.hookTimer.delete(sessionId);
+    this.reelHolding.delete(sessionId);
+    this.biteRolled.delete(sessionId);
+    if (player) player.hookState = "";
+  }
+
+  /** Start a fishing session: only from the pond, never during a shift, never twice in a row. */
+  private handleStartFishing(client: Client) {
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+    const fail = (reason: string) => client.send(ServerEvents.InteractFailed, { reason });
+    if (this.state.fishPhase === "fishing") return;
+    if (this.state.phase === GamePhase.Playing) return fail("Đang trong ca làm, câu cá sau khi hết ca nhé");
+    if (areaOf(player) !== "pond") return fail("Phải đứng ở ao hồ mới câu được");
+
+    // A fresh session zeroes everyone's catch counters, then fills the pond.
+    this.state.players.forEach((p) => {
+      p.fishCaught = 0;
+      p.fishEarned = 0;
+    });
+    this.state.fish.clear();
+    this.fishSim.clear();
+    const seconds = fishDuration();
+    this.state.fishTimeLeft = seconds;
+    for (let i = 0; i < FISH_COUNT; i++) this.spawnFish();
+    this.state.fishPhase = "fishing";
+    console.log(`[BobaShopRoom] ${this.roomId} fishing session started (${seconds}s)`);
+  }
+
+  /** Drop the hook at the player's position; it sinks until a fish takes it (or the floor reels it in). */
+  private handleCast(client: Client) {
+    const player = this.state.players.get(client.sessionId);
+    if (!player || player.hookState !== "" || this.state.fishPhase !== "fishing" || areaOf(player) !== "pond") return;
+    player.hookX = player.x;
+    player.hookY = WATER.top;
+    player.hookState = "drop";
+    this.biteRolled.set(client.sessionId, new Set());
+  }
+
+  /** Hold / release the reel (only matters while a fish is on the line). */
+  private handleReel(client: Client, payload: ReelMessage) {
+    if (!this.state.players.has(client.sessionId)) return;
+    this.reelHolding.set(client.sessionId, payload?.holding === true);
+  }
+
+  /** Pull the hook back up before any fish took it. */
+  private handleRetract(client: Client) {
+    const player = this.state.players.get(client.sessionId);
+    if (!player || player.hookState !== "drop") return;
+    this.clearHook(client.sessionId, player);
+  }
+
+  /** Buy the next rod level with the sender's own wallet (saved with their shop, mirrors to Player). */
+  private handleUpgradeRod(client: Client) {
+    const key = this.sessionNames.get(client.sessionId);
+    if (!key) return;
+    const error = shopOf(key).upgradeRod();
+    if (error) client.send(ServerEvents.InteractFailed, { reason: error });
+  }
+
+  /** Test-only (server env DEBUG_WARP=1): put the player anywhere, e.g. onto the pond's doormat. */
+  private handleDebugWarp(client: Client, payload: DebugWarpMessage) {
+    const player = this.state.players.get(client.sessionId);
+    const x = Number(payload?.x);
+    const y = Number(payload?.y);
+    if (!player || !Number.isFinite(x) || !Number.isFinite(y)) return;
+    player.x = x;
+    player.y = y;
+    player.teleportSeq++;
+    this.resetMoveBudget(client.sessionId);
+  }
+
   // ---------------------------------------------------------------- Movement
 
   private resetMoveBudget(sessionId: string) {
@@ -829,13 +1141,15 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     });
   }
 
-  /** Through a door (tea shop or restaurant): from the doormat outside to inside, or from the exit inside to the yard. */
+  /** Through a door (tea shop, restaurant, pond): from the doormat outside to inside, or from the exit inside to the yard. */
   private handleUseDoor(client: Client) {
     const player = this.state.players.get(client.sessionId);
     if (!player) return;
     // A little slack: the client reports positions every 50 ms.
     const at = doorAt(player, 24);
     if (!at) return;
+    // Leaving the pond takes the hook in; any fish on it goes free (no escape counted).
+    if (areaOf(player) === "pond") this.clearHook(client.sessionId, player);
     const outside = at.outside;
     const spawn = outside ? at.door.insideSpawn : at.door.outsideSpawn;
     player.bedId = "";

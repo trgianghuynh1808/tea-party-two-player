@@ -40,6 +40,7 @@ import { buildRecipeGuide } from "./ui/RecipeGuide";
 import { ShiftOverlay } from "./ui/ShiftOverlay";
 import { TEST_MODE_PARAM, installTestHook, isTestMode } from "./testHook";
 import { initUpdateChecker } from "./updateChecker";
+import { FishingPanel } from "./ui/FishingPanel";
 
 initUpdateChecker();
 
@@ -69,6 +70,7 @@ const decorRoot = $<HTMLElement>("decor-panel");
 const buildBtn = $<HTMLButtonElement>("build-btn");
 const buildRoot = $<HTMLElement>("build-panel");
 const shiftOverlayRoot = $<HTMLElement>("shift-overlay");
+const fishingPanelRoot = $<HTMLElement>("fishing-panel");
 const modal = $<HTMLElement>("modal");
 const modalTitle = $<HTMLElement>("modal-title");
 const modalBody = $<HTMLElement>("modal-body");
@@ -87,6 +89,7 @@ let game: Phaser.Game | undefined;
 let currentRoom: Room<BobaShopState> | undefined;
 let ordersPanel: OrdersPanel | undefined;
 let shiftOverlay: ShiftOverlay | undefined;
+let fishingPanel: FishingPanel | undefined;
 let decorPanel: DecorPanel | undefined;
 let decorating = false;
 let buildPanel: BuildPanel | undefined;
@@ -470,6 +473,8 @@ function startGame(room: Room<BobaShopState>) {
     if (guide) openModal("📖 Cách làm", guide);
   });
   shiftOverlay = new ShiftOverlay(shiftOverlayRoot, room);
+  // The pond's own overlay: clock, start button, reel bar, summary (shown while at the pond).
+  fishingPanel = new FishingPanel(fishingPanelRoot, room);
   decorPanel = new DecorPanel(
     decorRoot,
     room,
@@ -493,7 +498,7 @@ function startGame(room: Room<BobaShopState>) {
     () => game?.events.emit(BUILD_ROTATE),
   );
 
-  // Only the host decorates (the room shows their furniture), and only between shifts, inside the tea shop.
+  // Only the host decorates (the room shows their furniture), and only between shifts, inside a building.
   // Building is on the host's land outside the shop: anyone (paying from their own wallet), any time.
   let amHost = false;
   let area: Area = "shop";
@@ -501,15 +506,18 @@ function startGame(room: Room<BobaShopState>) {
     const playing = room.state.phase === GamePhase.Playing;
     const host = room.state.hostName || "chủ phòng";
     const inYard = area === "yard";
-    // Decorating happens inside a building: the tea shop or the restaurant.
-    decorateBtn.disabled = playing || !amHost || inYard;
+    // The pond is a place to fish, not to decorate.
+    const inPond = area === "pond";
+    decorateBtn.disabled = playing || !amHost || inYard || inPond;
     decorateBtn.title = !amHost
       ? `Quán này dùng nội thất của ${host}, chỉ chủ phòng mới trang trí được`
       : inYard
         ? "Vào trong tiệm trà hoặc nhà hàng để trang trí"
-        : area === "restaurant"
-          ? "Trang trí nhà hàng (ngoài giờ ca)"
-          : "Trang trí quán (ngoài giờ ca)";
+        : inPond
+          ? "Khu câu cá không có đồ trang trí"
+          : area === "restaurant"
+            ? "Trang trí nhà hàng (ngoài giờ ca)"
+            : "Trang trí quán (ngoài giờ ca)";
     if (decorateBtn.disabled && decorating) setDecorating(false);
     // Guests build on the host's land too, paid from their own wallet (empty cells only).
     buildBtn.disabled = !inYard;
@@ -524,6 +532,7 @@ function startGame(room: Room<BobaShopState>) {
     area = next;
     updateDecorateBtn();
     shiftOverlay?.setArea(next);
+    fishingPanel?.setArea(next);
   });
   $state.listen("phase", updateDecorateBtn);
   $state.listen("hostName", updateDecorateBtn);
@@ -558,6 +567,8 @@ function stopGame() {
   buildPanel = undefined;
   if (building) setBuilding(false);
   shiftOverlay = undefined;
+  fishingPanel?.destroy();
+  fishingPanel = undefined;
   ordersPanel = undefined;
   currentRoom = undefined;
 }

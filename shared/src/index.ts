@@ -25,6 +25,8 @@ import { STATIONS, WALL_BOTTOM, type StationDef } from "./menu";
 /** The restaurant's kitchen, menu and dining room; venue rules (tea shop / restaurant). */
 export * from "./restaurant";
 export * from "./venues";
+/** The fishing pond: species, rods, reel maths. */
+export * from "./fishing";
 import { RESTAURANT_STATIONS } from "./restaurant";
 import type { Venue } from "./venues";
 
@@ -62,6 +64,18 @@ export const Messages = {
   SellTile: "sell_tile",
   /** Get out of bed (sent when a player lying down tries to walk). */
   LeaveBed: "leave_bed",
+  /** Start a fishing session at the pond (refused during a shift). */
+  StartFishing: "start_fishing",
+  /** Drop the hook straight down from the player's position. */
+  Cast: "cast",
+  /** Hold / release the reel while a fish is on the line: ReelMessage. */
+  Reel: "reel",
+  /** Pull the hook back up before any fish took it. */
+  Retract: "retract",
+  /** Buy the next rod level with the sender's own wallet. */
+  UpgradeRod: "upgrade_rod",
+  /** Test-only teleport (registered just when the server env DEBUG_WARP=1): DebugWarpMessage. */
+  DebugWarp: "debug_warp",
 } as const;
 
 export interface StartShiftMessage {
@@ -93,6 +107,17 @@ export interface MoveTileMessage {
 export interface SellTileMessage {
   cx: number;
   cy: number;
+}
+
+/** Reel: hold (true) or release (false) while a fish is on the line. */
+export interface ReelMessage {
+  holding: boolean;
+}
+
+/** Test-only teleport: put the player at (x, y) (see Messages.DebugWarp). */
+export interface DebugWarpMessage {
+  x: number;
+  y: number;
 }
 
 // Server -> client events
@@ -133,8 +158,10 @@ export * from "./placement";
 export * from "./world";
 import {
   BUILD_TILE,
+  DOCK,
   OUTDOOR,
   PROP_ART_DROP,
+  POND_BUILDING,
   RESTAURANT,
   RESTAURANT_BUILDING,
   SHOP_BUILDING,
@@ -212,6 +239,8 @@ export const ALL_STATIONS: StationDef[] = [...STATIONS, ...RESTAURANT_STATIONS];
 export function resolveCollisions(pos: Vec2, tiles?: TileGetter): Vec2 {
   const area = areaOf(pos);
   if (area === "yard") return resolveYardCollisions(pos, tiles);
+  // At the pond, players stay on the wooden dock (no stations, no back wall).
+  if (area === "pond") return resolveDockCollisions(pos);
   let { x, y } = pos;
 
   for (const s of area === "shop" ? STATIONS : RESTAURANT_STATIONS) {
@@ -227,7 +256,7 @@ export function resolveCollisions(pos: Vec2, tiles?: TileGetter): Vec2 {
 
 function resolveYardCollisions(pos: Vec2, tiles?: TileGetter): Vec2 {
   let { x, y } = pos;
-  for (const b of [SHOP_BUILDING, RESTAURANT_BUILDING]) ({ x, y } = pushOutOfRect(x, y, b.left, b.top, b.right, b.bottom));
+  for (const b of [SHOP_BUILDING, RESTAURANT_BUILDING, POND_BUILDING]) ({ x, y } = pushOutOfRect(x, y, b.left, b.top, b.right, b.bottom));
   if (tiles) {
     // Only the cells the player circle can touch.
     const c0 = Math.floor((x - PLAYER_RADIUS - YARD.x) / BUILD_TILE);
@@ -242,6 +271,13 @@ function resolveYardCollisions(pos: Vec2, tiles?: TileGetter): Vec2 {
   }
   x = Math.max(OUTDOOR.x + PLAYER_RADIUS, Math.min(OUTDOOR.x + OUTDOOR.width - PLAYER_RADIUS, x));
   y = Math.max(OUTDOOR.y + PLAYER_RADIUS, Math.min(OUTDOOR.y + OUTDOOR.height - PLAYER_RADIUS, y));
+  return { x, y };
+}
+
+/** At the pond, players walk on the wooden dock only (clamped inside it). */
+function resolveDockCollisions(pos: Vec2): Vec2 {
+  const x = Math.max(DOCK.left + PLAYER_RADIUS, Math.min(DOCK.right - PLAYER_RADIUS, pos.x));
+  const y = Math.max(DOCK.top + PLAYER_RADIUS, Math.min(DOCK.bottom - PLAYER_RADIUS, pos.y));
   return { x, y };
 }
 

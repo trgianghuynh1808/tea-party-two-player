@@ -398,6 +398,8 @@ export interface PlacedDecoration {
 export interface ShopSave {
   version: 1;
   money: number;
+  /** Fishing rod level 1..5 (missing in saves from before the pond: read back as level 1). */
+  rodLevel?: number;
   decorations: { kind: string; x: number; y: number; rotation?: number }[];
   /** Yard buildings: tileKey(cx, cy) -> tile kind (missing in saves from before the yard existed). */
   tiles?: Record<string, string>;
