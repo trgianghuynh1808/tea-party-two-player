@@ -202,6 +202,15 @@ def set_auto(lines, on, phase):
     set_header(lines, "Current Phase", phase)
 
 
+def wake(lines):
+    """Answering a plan (/approve, /revise, /reject) means work follows: turn the room back on when it was paused (batch closed for
+    /ship, /stop), otherwise the daemon never picks the task up. Returns True when it had to be turned on."""
+    if read_env().get("AUTO_MODE") == "true":
+        return False
+    set_auto(lines, True, "RUNNING")
+    return True
+
+
 # ---------- outbox ----------
 def emit(role, text, **extra):
     os.makedirs(OUTBOX, exist_ok=True)
@@ -928,6 +937,7 @@ def cmd_plan_approve(arg):
     busy = [x for x in tasks(lines) if x["state"] in ("planning", "plan_ready", "in_progress", "revise")]
     if busy:   # one task at a time in the working tree: queue it, the daemon hands it off when its turn comes
         set_state(lines, t["id"], "approved")
+        wake(lines)
         log_line(lines, f"{t['id']}: bạn duyệt plan, chờ {busy[0]['id']} xong.")
         write_board(lines)
         return f"Đã duyệt plan **{t['id']}** ✅ Mình đang làm **{busy[0]['id']}**, xong sẽ làm tới task này ngay."
@@ -935,6 +945,7 @@ def cmd_plan_approve(arg):
     if r.startswith("✅"):
         lines = read_board()
         set_header(lines, "Current Phase", "RUNNING")
+        wake(lines)
         write_board(lines)
         return ""   # cmd_approve already told the user
     return r
@@ -948,6 +959,8 @@ def cmd_plan_reject(arg):
     set_state(lines, t["id"], "cancelled")
     others = [x for x in tasks(lines) if not x["done"]]
     set_header(lines, "Current Phase", "RUNNING" if others else "IDLE")
+    if others:
+        wake(lines)
     log_line(lines, f"{t['id']}: bạn hủy plan.")
     write_board(lines)
     return (f"Đã hủy **{t['id']}** 🚫 Nhánh `task/{t['slug']}` vẫn còn nếu bạn muốn xem lại plan." +
@@ -974,6 +987,7 @@ def cmd_plan_revise(arg, images=None):
     needs_info = t["state"] == "needs_info"
     set_state(lines, t["id"], "pending" if needs_info else "revise")   # no plan exists yet when context was missing
     set_header(lines, "Current Phase", "RUNNING")
+    wake(lines)
     log_line(lines, f"{t['id']}: bạn " + ("bổ sung thông tin." if needs_info else "yêu cầu sửa plan."))
     write_board(lines)
     if needs_info:
