@@ -16,10 +16,9 @@ const GROUND_DEPTH = -1000;
 const DOCK_DEPTH = -950;
 /** Lines + hooks: always readable, above fish and players, below the HUD. */
 const LINE_DEPTH = 8000;
-/** Decor rooted on the pond's bottom; drifters float above it. Both stay below the fish
- *  (whose depth is their y, always positive), so no fish is ever hidden by a decoration. */
+/** Decor rooted on the pond's bottom; it stays below the fish (whose depth is their y,
+ *  always positive), so no fish is ever hidden by a decoration. */
 const DECOR_DEPTH = -990;
-const DRIFT_DEPTH = -980;
 
 /** How a tier of fish looks: display width (rarer fish are bigger). Colour only tints the fallback body. */
 const TIER_LOOK: Record<FishTier, { color: number; width: number; height: number }> = {
@@ -36,15 +35,10 @@ const FISH_FACING: Record<string, 1 | -1> = {};
 
 /** The pond's decorations, loaded by `preloadPondTextures` (client-only visuals, no interaction). */
 const POND_DECOR = [
-  "seaweed_brown",
   "seaweed_green",
   "starfish",
   "shell",
   "crab",
-  "turtle",
-  "jellyfish",
-  "octopus",
-  "seahorse",
 ] as const;
 
 const fishTextureKey = (id: string) => `fish_${id}`;
@@ -66,21 +60,8 @@ interface FishView {
   facing: 1 | -1;
   /** Display height of the body, for the name label's offset. */
   bodyH: number;
-  /** Name label shown above rare+ fish so the two players can shout about them. */
+  /** Name label shown above every fish so both players can shout about them. */
   label?: Phaser.GameObjects.Text;
-}
-
-/** One slowly drifting decoration (turtle, jellyfish, octopus, seahorse). */
-interface Drifter {
-  img: Phaser.GameObjects.Image;
-  baseX: number;
-  baseY: number;
-  /** Half of the back-and-forth swing (px) and its speed (rad/s). */
-  span: number;
-  speed: number;
-  phase: number;
-  /** Vertical bobbing (px); 0 = stays at baseY. */
-  bob: number;
 }
 
 /**
@@ -94,7 +75,6 @@ export class PondView {
   private readonly lines: Phaser.GameObjects.Graphics;
   private readonly ripples: Phaser.GameObjects.Ellipse[] = [];
   private readonly decor: Phaser.GameObjects.Image[] = [];
-  private readonly drifters: Drifter[] = [];
   private readonly unsubscribers: (() => void)[] = [];
   private time = 0;
 
@@ -121,11 +101,10 @@ export class PondView {
     );
   }
 
-  /** Smooth fish positions towards the schema's, drift the decorations and draw everyone's hook lines. */
+  /** Smooth fish positions towards the schema's and draw everyone's hook lines. */
   update(dt: number) {
     this.time += dt;
     this.updateRipples();
-    this.updateDrifters();
 
     const k = Math.min(1, dt * 10);
     for (const view of this.fishViews.values()) {
@@ -169,7 +148,6 @@ export class PondView {
     }
     // The pond's living decorations, drawn on top of the ground art.
     this.drawBottomDecor();
-    this.drawDrifters();
 
     // Slow-drifting highlight ripples.
     for (let i = 0; i < 4; i++) {
@@ -180,7 +158,7 @@ export class PondView {
     }
   }
 
-  /** Seaweed clusters, starfish, shells and a crab rooted along the sandy bottom. */
+  /** Green seaweed clusters, starfish, shells and a crab rooted along the sandy bottom. */
   private drawBottomDecor() {
     const put = (name: (typeof POND_DECOR)[number], x: number, h: number, flip = false) => {
       const img = this.scene.add
@@ -191,37 +169,13 @@ export class PondView {
       this.decor.push(img);
     };
     put("seaweed_green", 60, 56);
-    put("seaweed_brown", 110, 44, true);
     put("seaweed_green", 640, 48, true);
-    put("seaweed_brown", 700, 58);
     put("seaweed_green", 860, 50);
     put("starfish", 180, 24);
     put("starfish", 780, 28, true);
     put("shell", 320, 22);
     put("shell", 560, 26);
     put("crab", 380, 30);
-  }
-
-  /** A turtle, two jellyfish, an octopus and a seahorse drifting slowly through the water. */
-  private drawDrifters() {
-    const add = (name: (typeof POND_DECOR)[number], x: number, y: number, h: number, span: number, speed: number, phase: number, bob: number, flip = false) => {
-      const img = this.scene.add.image(WATER.left + x, y, pondTextureKey(name)).setDepth(DRIFT_DEPTH);
-      img.setScale(h / img.height, flip ? -h / img.height : h / img.height);
-      this.decor.push(img);
-      this.drifters.push({ img, baseX: img.x, baseY: y, span, speed, phase, bob });
-    };
-    add("turtle", 200, 390, 46, 90, 0.05, 0.0, 5);
-    add("jellyfish", 460, 300, 36, 60, 0.08, 1.1, 10);
-    add("jellyfish", 620, 430, 30, 80, 0.06, 2.3, 12, true);
-    add("octopus", 760, 455, 50, 70, 0.04, 3.4, 4);
-    add("seahorse", 120, 315, 40, 50, 0.07, 4.6, 8, true);
-  }
-
-  private updateDrifters() {
-    for (const d of this.drifters) {
-      d.img.x = d.baseX + Math.sin(this.time * d.speed + d.phase) * d.span;
-      if (d.bob) d.img.y = d.baseY + Math.sin(this.time * d.speed * 2 + d.phase) * d.bob;
-    }
   }
 
   private drawDock() {
@@ -299,21 +253,21 @@ export class PondView {
     }
     container.setDepth(fish.y);
 
-    // Rare and better fish wear their name so both players see what just took the hook.
-    let label: Phaser.GameObjects.Text | undefined;
-    if (tier === "rare" || tier === "epic" || tier === "mythic") {
-      label = this.scene.add
-        .text(0, 0, `${def?.name ?? fish.species} · ${TIER_LABELS[tier]}`, {
-          fontFamily: "sans-serif",
-          fontSize: "11px",
-          fontStyle: "bold",
-          color: "#3d2c29",
-          backgroundColor: "#fdf6eccc",
-          padding: { x: 3, y: 1 },
-        })
-        .setOrigin(0.5)
-        .setDepth(LINE_DEPTH - 1);
-    }
+    // Every fish wears its (small) name so both players see what is in the pond; rare and
+    // better also show their tier.
+    const rare = tier === "rare" || tier === "epic" || tier === "mythic";
+    const name = def?.name ?? fish.species;
+    const label = this.scene.add
+      .text(0, 0, rare ? `${name} · ${TIER_LABELS[tier]}` : name, {
+        fontFamily: "sans-serif",
+        fontSize: "9px",
+        fontStyle: "bold",
+        color: "#3d2c29",
+        backgroundColor: "#fdf6eccc",
+        padding: { x: 3, y: 1 },
+      })
+      .setOrigin(0.5)
+      .setDepth(LINE_DEPTH - 1);
     return { state: fish, container, x: fish.x, y: fish.y, facing: FISH_FACING[fish.species] ?? 1, bodyH, label };
   }
 

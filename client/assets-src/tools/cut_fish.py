@@ -12,7 +12,7 @@ slice_sheet.py's flat background mask maps to a (row, col) by its centre.
 Outputs (all RGBA cut-outs, tight-cropped, native pixel size):
 - client/public/assets/fish/<id>.png  -- 15 fish (13 from sheet 1, ca_rong/ca_map from sheet 2),
   each rotated (nearest-neighbour) so its long body axis is horizontal, head facing right
-- client/public/assets/pond/<name>.png -- 9 pond decorations from sheet 2 (never rotated)
+- client/public/assets/pond/<name>.png -- 4 pond decorations from sheet 2 (never rotated)
 Rows/cols count from 1. The cell -> species/decor mapping follows the task sheet
 (and each cell's dominant colour); FISH_FACING etc. is handled later by the game.
 """
@@ -66,15 +66,10 @@ FISH_CUTS = {
 
 # Sheet 2 only: pond-bottom decorations (visual only, no interaction).
 POND_CUTS = {
-    "seaweed_brown": (3, 7),
     "seaweed_green": (3, 2),
-    "jellyfish": (3, 4),
-    "octopus": (3, 6),
     "crab": (4, 1),
-    "seahorse": (4, 3),
     "shell": (4, 6),
     "starfish": (4, 7),
-    "turtle": (5, 5),
 }
 
 # Long-bodied fish are drawn tilted on the sheets (head up-right ~30-45deg),

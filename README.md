@@ -79,7 +79,7 @@ Interaction rules live in `shared/src/interaction.ts` (`planInteraction`), used 
 - Outside, walk further left past the restaurant to the **🎣 Khu câu cá** gate; its doormat leads into a pond.
   The wooden dock at the top is where you walk, and fish swim back and forth in the water below (both players
   see the same fish, drawn as pixel-art sprites). The pond bed is decorated with seaweed, starfish, shells and a
-  crab, while a turtle, jellyfish, octopus and seahorse drift by — decoration only, nothing to interact with.
+  crab. Every fish shows its name in a small label above it (rare and better add their rarity).
 - From the yard, the **🎣 Câu cá** card in the **☀️ Sẵn sàng mở quán?** picker walks you into the pond and
   opens a 10-minute fishing session for the room (`FISH_SECONDS` overrides it); once at the pond, **Bắt đầu câu**
   does the same. When the time is up, a summary shows every player's fish count and fishing money.
