@@ -8,6 +8,7 @@ import {
   TIER_LABELS,
   WATER,
   getFish,
+  rodLineColor,
   type FishTier,
 } from "@boba/shared";
 import type { BobaShopState, Fish as FishState } from "@boba/shared/schema";
@@ -44,10 +45,19 @@ const POND_DECOR = [
 const fishTextureKey = (id: string) => `fish_${id}`;
 const pondTextureKey = (name: string) => `pond_${name}`;
 
-/** Load every fish sprite and the pond's decoration art (call from the scene's preload). */
+/** The angler's rod sprite: one art for every level, the line colour differs per level. */
+const ROD_TEXTURE = "rod";
+/** Rod.png px: the grip held in the angler's hands (bottom-right of the art) = the image's origin. */
+const ROD_HANDLE = { x: 130, y: 150 };
+/** Rod.png px: the bottom-left end of the baked-in short line (task file, step 1); the coloured
+ *  line continues from this point down to the hook. */
+const ROD_LINE_ANCHOR = { x: 1, y: 139 };
+
+/** Load every fish sprite, the pond's decoration art and the rod (call from the scene's preload). */
 export function preloadPondTextures(scene: Phaser.Scene) {
   for (const f of FISH) scene.load.image(fishTextureKey(f.id), `assets/fish/${f.id}.png`);
   for (const name of POND_DECOR) scene.load.image(pondTextureKey(name), `assets/pond/${name}.png`);
+  scene.load.image(ROD_TEXTURE, "assets/rod.png");
 }
 
 interface FishView {
@@ -73,6 +83,8 @@ interface FishView {
 export class PondView {
   private readonly fishViews = new Map<string, FishView>();
   private readonly lines: Phaser.GameObjects.Graphics;
+  /** Rod image per sessionId, out only while that player's hook is sinking or being reeled. */
+  private readonly rods = new Map<string, Phaser.GameObjects.Image>();
   private readonly ripples: Phaser.GameObjects.Ellipse[] = [];
   private readonly decor: Phaser.GameObjects.Image[] = [];
   private readonly unsubscribers: (() => void)[] = [];
@@ -85,6 +97,7 @@ export class PondView {
     // Pixel-art sprites: nearest-neighbour scaling keeps them crisp (text stays smooth).
     for (const f of FISH) this.scene.textures.get(fishTextureKey(f.id)).setFilter(Phaser.Textures.FilterMode.NEAREST);
     for (const name of POND_DECOR) this.scene.textures.get(pondTextureKey(name)).setFilter(Phaser.Textures.FilterMode.NEAREST);
+    this.scene.textures.get(ROD_TEXTURE).setFilter(Phaser.Textures.FilterMode.NEAREST);
 
     this.drawWater();
     this.drawDock();
@@ -125,6 +138,8 @@ export class PondView {
     }
     this.fishViews.clear();
     this.decor.forEach((img) => img.destroy());
+    for (const rod of this.rods.values()) rod.destroy();
+    this.rods.clear();
     this.lines.destroy();
     this.ripples.forEach((ripple) => ripple.destroy());
   }
@@ -284,12 +299,40 @@ export class PondView {
   private drawLines() {
     const g = this.lines;
     g.clear();
-    this.room.state.players.forEach((player) => {
+    const angling = new Set<string>();
+    this.room.state.players.forEach((player, id) => {
       if (player.hookState !== "drop" && player.hookState !== "reel") return;
-      // From the angler's hands down to the hook.
-      g.lineStyle(2, 0x3d2c29, 0.85).lineBetween(player.x, player.y + 6, player.hookX, player.hookY);
+      angling.add(id);
+      // The rod: grip in the angler's hands, art leaning away from them, just under the lines.
+      let rod = this.rods.get(id);
+      if (!rod) {
+        rod = this.scene.add.image(player.x, player.y + 6, ROD_TEXTURE);
+        rod.setOrigin(ROD_HANDLE.x / rod.width, ROD_HANDLE.y / rod.height).setDepth(LINE_DEPTH - 1);
+        this.rods.set(id, rod);
+      }
+      rod.setPosition(player.x, player.y + 6);
+      // The level-coloured line continues the baked-in short line down to the hook.
+      g.lineStyle(2, rodLineColor(player.rodLevel), 0.95).lineBetween(
+        player.x + ROD_LINE_ANCHOR.x - ROD_HANDLE.x,
+        player.y + 6 + ROD_LINE_ANCHOR.y - ROD_HANDLE.y,
+        player.hookX,
+        player.hookY,
+      );
       // The hook: a small ring; a fish on it hides the point (it's in its mouth).
       g.lineStyle(2, 0xe63946, 0.95).strokeCircle(player.hookX, player.hookY, 3.5);
     });
+    // Rods of players whose hook is gone (or who left the room) come off.
+    for (const [id, rod] of this.rods) {
+      if (angling.has(id)) continue;
+      rod.destroy();
+      this.rods.delete(id);
+    }
+  }
+
+  /** What the e2e hook asks about a player's rod: whether it is held out and its line colour. */
+  rodInfo(sessionId: string): { visible: boolean; lineColor: number } | null {
+    const player = this.room.state.players.get(sessionId);
+    if (!player) return null;
+    return { visible: this.rods.has(sessionId), lineColor: rodLineColor(player.rodLevel) };
   }
 }

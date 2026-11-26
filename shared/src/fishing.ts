@@ -61,17 +61,22 @@ export interface RodDef {
   reel: number;
   /** P(a fish of FISH_TIERS[i] takes the hook when the hook touches it). */
   bite: readonly number[];
+  /** Line colour drawn while this rod is out (hex RGB number); distinct per level, readable on water. */
+  lineColor: number;
 }
 
 export const RODS: readonly RodDef[] = [
-  { level: 1, name: "Cần tre", price: 0, reel: 1.0, bite: [1, 0.9, 0.5, 0.25, 0.05] },
-  { level: 2, name: "Cần gỗ", price: 300, reel: 1.2, bite: [1, 1, 0.65, 0.4, 0.12] },
-  { level: 3, name: "Cần carbon", price: 900, reel: 1.5, bite: [1, 1, 0.8, 0.6, 0.25] },
-  { level: 4, name: "Cần hợp kim", price: 2200, reel: 1.9, bite: [1, 1, 0.95, 0.8, 0.5] },
-  { level: 5, name: "Cần vàng", price: 5000, reel: 2.4, bite: [1, 1, 1, 1, 0.85] },
+  { level: 1, name: "Cần tre", price: 0, reel: 1.0, bite: [1, 0.9, 0.5, 0.25, 0.05], lineColor: 0x3d2c29 },
+  { level: 2, name: "Cần gỗ", price: 300, reel: 1.2, bite: [1, 1, 0.65, 0.4, 0.12], lineColor: 0x2e9e44 },
+  { level: 3, name: "Cần carbon", price: 900, reel: 1.5, bite: [1, 1, 0.8, 0.6, 0.25], lineColor: 0x1e88e5 },
+  { level: 4, name: "Cần hợp kim", price: 2200, reel: 1.9, bite: [1, 1, 0.95, 0.8, 0.5], lineColor: 0x8e44ad },
+  { level: 5, name: "Cần vàng", price: 5000, reel: 2.4, bite: [1, 1, 1, 1, 0.85], lineColor: 0xf5b301 },
 ];
 
 export const getRod = (level: number): RodDef | undefined => RODS.find((r) => r.level === level);
+
+/** Line colour for `rodLevel` (unknown levels fall back to the level-1 colour). */
+export const rodLineColor = (level: number) => getRod(level)?.lineColor ?? RODS[0].lineColor;
 
 /** P(a fish of `tier` takes a hook cast with `rodLevel`). */
 export function biteChance(rodLevel: number, tier: FishTier): number {
