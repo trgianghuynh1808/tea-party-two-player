@@ -52,6 +52,8 @@ const ROD_HANDLE = { x: 130, y: 150 };
 /** Rod.png px: the bottom-left end of the baked-in short line (task file, step 1); the coloured
  *  line continues from this point down to the hook. */
 const ROD_LINE_ANCHOR = { x: 1, y: 139 };
+/** Display scale for the rod sprite so it fits the angler's hands (art is 151x169 px). */
+const ROD_SCALE = 0.4;
 
 /** Load every fish sprite, the pond's decoration art and the rod (call from the scene's preload). */
 export function preloadPondTextures(scene: Phaser.Scene) {
@@ -307,14 +309,15 @@ export class PondView {
       let rod = this.rods.get(id);
       if (!rod) {
         rod = this.scene.add.image(player.x, player.y + 6, ROD_TEXTURE);
+        rod.setScale(ROD_SCALE);
         rod.setOrigin(ROD_HANDLE.x / rod.width, ROD_HANDLE.y / rod.height).setDepth(LINE_DEPTH - 1);
         this.rods.set(id, rod);
       }
       rod.setPosition(player.x, player.y + 6);
       // The level-coloured line continues the baked-in short line down to the hook.
       g.lineStyle(2, rodLineColor(player.rodLevel), 0.95).lineBetween(
-        player.x + ROD_LINE_ANCHOR.x - ROD_HANDLE.x,
-        player.y + 6 + ROD_LINE_ANCHOR.y - ROD_HANDLE.y,
+        player.x + (ROD_LINE_ANCHOR.x - ROD_HANDLE.x) * ROD_SCALE,
+        player.y + 6 + (ROD_LINE_ANCHOR.y - ROD_HANDLE.y) * ROD_SCALE,
         player.hookX,
         player.hookY,
       );
