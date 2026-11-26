@@ -312,6 +312,61 @@ test("T2: T22 pond fish use valid species and load without errors", async ({ pag
   expect(bad, "console errors").toEqual([]);
 });
 
+test("T1: T23 long fish sprites lie flat (main axis within 12° of horizontal)", async ({ page }) => {
+  await page.goto("/?test=1");
+  const angles = await page.evaluate(async () => {
+    const ids = ["ca_thu", "ca_he", "ca_tram", "ca_tre", "ca_rong", "ca_ro", "ca_loc", "ca_map", "ca_chep", "ca_koi"];
+    const out: { id: string; angle: number }[] = [];
+    for (const id of ids) {
+      const img = new Image();
+      img.src = `/assets/fish/${id}.png`;
+      await img.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("no 2d context");
+      ctx.drawImage(img, 0, 0);
+      const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      let n = 0;
+      let mx = 0;
+      let my = 0;
+      for (let y = 0; y < canvas.height; y++) {
+        for (let x = 0; x < canvas.width; x++) {
+          if (data[(y * canvas.width + x) * 4 + 3] > 0) {
+            n++;
+            mx += x;
+            my += y;
+          }
+        }
+      }
+      mx /= n;
+      my /= n;
+      let sxx = 0;
+      let syy = 0;
+      let sxy = 0;
+      for (let y = 0; y < canvas.height; y++) {
+        for (let x = 0; x < canvas.width; x++) {
+          if (data[(y * canvas.width + x) * 4 + 3] > 0) {
+            const dx = x - mx;
+            const dy = y - my;
+            sxx += dx * dx;
+            syy += dy * dy;
+            sxy += dx * dy;
+          }
+        }
+      }
+      const angle = (0.5 * Math.atan2(2 * sxy, sxx - syy) * 180) / Math.PI;
+      out.push({ id, angle });
+    }
+    return out;
+  });
+
+  const tilted = angles.filter((a) => Math.abs(a.angle) >= 12);
+  const detail = tilted.map((a) => `${a.id}=${a.angle.toFixed(1)}°`).join(", ");
+  expect(tilted, `fish still tilted (>= 12°): ${detail}`).toEqual([]);
+});
+
 test("T4: two players in the pond see the same fish and each other's hook", async ({ browser }) => {
   const hostCtx = await browser.newContext();
   const guestCtx = await browser.newContext();
