@@ -115,6 +115,9 @@ run_claude() { # vai(manager|techlead) prompt [nhãn]
   [[ -n "$model" ]] && args+=(--model "$model")
   local flags="$CLAUDE_FLAGS"
   if [[ -n "${RC_TOOLS+x}" ]]; then args+=(--tools "$RC_TOOLS"); flags=""; fi   # chế độ chỉ đọc: giới hạn công cụ, không bỏ qua quyền
+  # Trim the tool list: the built-in tool schemas cost ~12k tokens on EVERY turn (measured 28.7k -> 16.2k base context). The Tech Lead only uses Bash/Read/Write/Edit.
+  # CLAUDE_TOOLS in room.env overrides it; CLAUDE_TOOLS=default keeps all of Claude's tools.
+  if [[ -z "${RC_TOOLS+x}" && "${CLAUDE_TOOLS:-Bash,Read,Write,Edit}" != default ]]; then args+=(--tools "${CLAUDE_TOOLS:-Bash,Read,Write,Edit}"); fi
 
   log "▶ ${role}: ${label}${model:+ [$model]}"
   if [[ "$role" == techlead && -z "${RC_QUIET:-}" ]]; then
