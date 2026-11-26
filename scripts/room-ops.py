@@ -1687,6 +1687,35 @@ def cmd_claude_result(role, label, model):
     return 0
 
 
+READ_ONLY = False   # set while answering during a Claude call: must not write the board the Tech Lead is editing
+READ_ONLY_CMDS = ("/status", "/usage")
+
+
+def cmd_inbox_ro():
+    """Answer the read-only commands waiting in the inbox (/status, /usage) while a long Claude call blocks the daemon loop.
+    Everything else stays queued for the daemon. Prints nothing."""
+    global READ_ONLY
+    READ_ONLY = True
+    for f in sorted(glob.glob(f"{AG}/inbox/*.json")):
+        try:
+            with open(f, encoding="utf8") as fh:
+                cmd = json.load(fh).get("command")
+        except (OSError, ValueError):
+            continue
+        if cmd not in READ_ONLY_CMDS:
+            continue
+        dest = f"{AG}/inbox/processed/{os.path.basename(f)}"
+        try:
+            os.replace(f, dest)   # claim the file first, so the daemon cannot answer it a second time
+        except OSError:
+            continue
+        try:
+            cmd_inbox(dest)
+        except Exception as e:   # noqa: BLE001
+            sys.stderr.write(f"inbox-ro {os.path.basename(f)}: {e}\n")
+    return 0
+
+
 def cmd_inbox(path):
     with open(path, encoding="utf8") as f:
         d = json.load(f)
@@ -1694,7 +1723,8 @@ def cmd_inbox(path):
     args = (d.get("args") or "").strip()
     e = read_env()
     if cmd == "/status":
-        write_board(read_board())   # refresh the settings block in case room.env was edited by hand
+        if not READ_ONLY:
+            write_board(read_board())   # refresh the settings block in case room.env was edited by hand
         reply = status_text()
     elif cmd == "/stop":
         reply = cmd_stop()
@@ -1748,6 +1778,8 @@ def main(argv):
     c, a = argv[1], argv[2:]
     if c == "inbox":
         return cmd_inbox(a[0])
+    if c == "inbox-ro":
+        return cmd_inbox_ro()
     if c == "task-id":   # task-id <slug|task file>: print the task id (T12) so shell callers can name the task in their messages
         key = re.sub(r"^\d{4}-\d{2}-\d{2}-", "", os.path.basename(a[0]).removesuffix(".md")) if a else ""
         print(next((t["id"] for t in tasks(read_board()) if t["slug"] == key), ""))

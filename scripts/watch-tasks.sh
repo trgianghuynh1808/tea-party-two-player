@@ -47,6 +47,14 @@ waiting_msg() {
   echo "👀 Đang chờ task từ Claude ($QUEUE/*.job)... Ctrl+C để thoát."
 }
 
+# A job still marked .running when this watcher starts was cut off (room stopped, upgrade, crash): this is the only watcher, so nothing runs it.
+# Put it back in the queue; run-task.sh continues from the first unchecked step. Without this /resume answers "đang chạy" forever.
+for stale in "$QUEUE"/*.job.running; do
+  [[ -f "$stale" ]] || continue
+  mv "$stale" "${stale%.running}"
+  echo "↻ Job bị cắt ngang lần trước, xếp lại hàng: $(basename "${stale%.running}")"
+done
+
 waiting_msg
 
 while true; do

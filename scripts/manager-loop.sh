@@ -135,8 +135,14 @@ run_claude() { # vai(manager|techlead) prompt [nhãn]
     [[ -n "$tl_kind" ]] && { mkdir -p "$AG/timeline"; printf '%s %s_start\n' "$(date +%s)" "$tl_kind" >> "$AG/timeline/$CUR_SLUG.log"; }
   fi
 
-  if [[ "$role" == techlead && -n "${CUR_SLUG:-}" ]]; then
-    ( while true; do python3 "$OPS" progress "$CUR_SLUG" >/dev/null 2>&1; sleep 5; done ) &
+  if [[ "$role" == techlead ]]; then
+    # Background loop while Claude runs (the daemon loop is blocked): progress reports every ~6 s, and read-only commands
+    # (/status, /usage) answered every 3 s, so the room never looks dead during a long call.
+    ( n=0; while true; do
+        python3 "$OPS" inbox-ro >/dev/null 2>&1
+        (( n % 2 == 0 )) && [[ -n "${CUR_SLUG:-}" ]] && python3 "$OPS" progress "$CUR_SLUG" >/dev/null 2>&1
+        n=$((n + 1)); sleep 3
+      done ) &
     PROGRESS_PID=$!
   fi
   # shellcheck disable=SC2086
@@ -144,7 +150,7 @@ run_claude() { # vai(manager|techlead) prompt [nhãn]
   if [[ -n "$PROGRESS_PID" ]]; then
     pkill -P "$PROGRESS_PID" 2>/dev/null; kill "$PROGRESS_PID" 2>/dev/null; wait "$PROGRESS_PID" 2>/dev/null
     PROGRESS_PID=""
-    report_progress "$CUR_SLUG" --flush   # lần cuối: bắt những gì xảy ra sau lượt kiểm tra cuối cùng
+    [[ -n "${CUR_SLUG:-}" ]] && report_progress "$CUR_SLUG" --flush   # lần cuối: bắt những gì xảy ra sau lượt kiểm tra cuối cùng
   fi
   [[ -n "$tl_kind" ]] && printf '%s %s_end\n' "$(date +%s)" "$tl_kind" >> "$AG/timeline/$CUR_SLUG.log"
   text="$(printf '%s' "$raw" | python3 "$OPS" claude-result "$role" "$label" "$model")"; prc=$?
