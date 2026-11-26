@@ -3,6 +3,7 @@ import { Callbacks, type Room } from "@colyseus/sdk";
 import {
   DOCK,
   FISH,
+  HOOK_SPEED,
   POND,
   POND_EXIT_ZONE,
   TIER_LABELS,
@@ -11,7 +12,7 @@ import {
   rodLineColor,
   type FishTier,
 } from "@boba/shared";
-import type { BobaShopState, Fish as FishState } from "@boba/shared/schema";
+import type { BobaShopState, Fish as FishState, Player } from "@boba/shared/schema";
 
 const GROUND_DEPTH = -1000;
 const DOCK_DEPTH = -950;
@@ -65,9 +66,11 @@ export function preloadPondTextures(scene: Phaser.Scene) {
 interface FishView {
   state: FishState;
   container: Phaser.GameObjects.Container;
-  /** Interpolated position (the schema updates every FISH_SYNC_SECONDS). */
+  /** Predicted position: swum forward every frame, pulled to the schema's FISH_SYNC_SECONDS updates. */
   x: number;
   y: number;
+  /** Swim speed (px/s, from the species) used to predict x between the schema's updates. */
+  speed: number;
   /** Which way the sprite's nose points by default (FISH_FACING), combined with the swim direction. */
   facing: 1 | -1;
   /** Display height of the body, for the name label's offset. */
@@ -78,15 +81,20 @@ interface FishView {
 
 /**
  * The fishing pond's interior: water, a wooden dock to walk on, the fish synced in state.fish
- * (sprite art, interpolated smoothly between the schema's 100 ms updates) and every player's
- * hook line. The ground and dock are still code art; the fish and the pond decorations are
- * pixel-art sprites from assets/fish and assets/pond (see the task file).
+ * (sprite art, swum forward between the schema's 100 ms updates and pulled back to them) and
+ * every player's hook line (drawn from the angler's rendered position, the hook's y predicted
+ * between patches the same way). The ground and dock are still code art; the fish and the pond
+ * decorations are pixel-art sprites from assets/fish and assets/pond (see the task file).
  */
 export class PondView {
   private readonly fishViews = new Map<string, FishView>();
   private readonly lines: Phaser.GameObjects.Graphics;
   /** Rod image per sessionId, out only while that player's hook is sinking or being reeled. */
   private readonly rods = new Map<string, Phaser.GameObjects.Image>();
+  /** Predicted hook y per angler, drawn instead of the schema's patchy value (see predictHookY). */
+  private readonly hookYs = new Map<string, number>();
+  /** Last hookState/hookX seen per angler: a change means a new cast, so the prediction restarts. */
+  private readonly hookCasts = new Map<string, { state: string; x: number }>();
   private readonly ripples: Phaser.GameObjects.Ellipse[] = [];
   private readonly decor: Phaser.GameObjects.Image[] = [];
   private readonly unsubscribers: (() => void)[] = [];
@@ -95,6 +103,9 @@ export class PondView {
   constructor(
     private readonly scene: Phaser.Scene,
     private readonly room: Room<BobaShopState>,
+    /** Where each player's sprite is drawn this frame (already interpolated by ShopScene); the
+     *  rod and line follow it so they don't lag a patch behind the walking angler. Falls back to the schema. */
+    private readonly playerPos: (id: string) => { x: number; y: number } | undefined,
   ) {
     // Pixel-art sprites: nearest-neighbour scaling keeps them crisp (text stays smooth).
     for (const f of FISH) this.scene.textures.get(fishTextureKey(f.id)).setFilter(Phaser.Textures.FilterMode.NEAREST);
@@ -116,20 +127,31 @@ export class PondView {
     );
   }
 
-  /** Smooth fish positions towards the schema's and draw everyone's hook lines. */
+  /** Swim the fish and sink the hooks between the schema's patches, then draw everyone's lines. */
   update(dt: number) {
     this.time += dt;
     this.updateRipples();
 
-    const k = Math.min(1, dt * 10);
+    // Fish: swim on our own between the schema's FISH_SYNC_SECONDS updates (speed * dir, bounced at
+    // the water's edges like the server's updateFishing), then pull gently towards the server's
+    // position so prediction errors never pile up. A hooked fish rides the hook: follow the schema.
+    const pull = Math.min(1, dt * 8);
     for (const view of this.fishViews.values()) {
-      view.x += (view.state.x - view.x) * k;
-      view.y += (view.state.y - view.y) * k;
+      if (view.state.hooked) {
+        view.x = view.state.x;
+        view.y = view.state.y;
+      } else {
+        view.x += view.state.dir * view.speed * dt;
+        if (view.x <= WATER.left) view.x = WATER.left;
+        else if (view.x >= WATER.right) view.x = WATER.right;
+        view.x += (view.state.x - view.x) * pull;
+        view.y += (view.state.y - view.y) * pull;
+      }
       view.container.setPosition(view.x, view.y).setDepth(view.y);
       view.container.setScale((view.state.dir >= 0 ? 1 : -1) * view.facing, 1);
       if (view.label) view.label.setPosition(view.x, view.y - view.bodyH - 8);
     }
-    this.drawLines();
+    this.drawLines(dt);
   }
 
   destroy() {
@@ -285,7 +307,7 @@ export class PondView {
       })
       .setOrigin(0.5)
       .setDepth(LINE_DEPTH - 1);
-    return { state: fish, container, x: fish.x, y: fish.y, facing: FISH_FACING[fish.species] ?? 1, bodyH, label };
+    return { state: fish, container, x: fish.x, y: fish.y, speed: def?.speed ?? 0, facing: FISH_FACING[fish.species] ?? 1, bodyH, label };
   }
 
   private removeFishView(id: string) {
@@ -298,38 +320,64 @@ export class PondView {
 
   // ---------------------------------------------------------------- Hook lines (every player with a hook out)
 
-  private drawLines() {
+  private drawLines(dt: number) {
     const g = this.lines;
     g.clear();
     const angling = new Set<string>();
     this.room.state.players.forEach((player, id) => {
       if (player.hookState !== "drop" && player.hookState !== "reel") return;
       angling.add(id);
+      // The angler's drawn position (their sprite, already interpolated), falling back to the schema.
+      const pos = this.playerPos(id) ?? player;
       // The rod: grip in the angler's hands, art leaning away from them, just under the lines.
       let rod = this.rods.get(id);
       if (!rod) {
-        rod = this.scene.add.image(player.x, player.y + 6, ROD_TEXTURE);
+        rod = this.scene.add.image(pos.x, pos.y + 6, ROD_TEXTURE);
         rod.setScale(ROD_SCALE);
         rod.setOrigin(ROD_HANDLE.x / rod.width, ROD_HANDLE.y / rod.height).setDepth(LINE_DEPTH - 1);
         this.rods.set(id, rod);
       }
-      rod.setPosition(player.x, player.y + 6);
+      rod.setPosition(pos.x, pos.y + 6);
+      // The hook's y is predicted between the schema's patches (see predictHookY).
+      const hookY = this.predictHookY(id, player, dt);
       // The level-coloured line continues the baked-in short line down to the hook.
       g.lineStyle(2, rodLineColor(player.rodLevel), 0.95).lineBetween(
-        player.x + (ROD_LINE_ANCHOR.x - ROD_HANDLE.x) * ROD_SCALE,
-        player.y + 6 + (ROD_LINE_ANCHOR.y - ROD_HANDLE.y) * ROD_SCALE,
+        pos.x + (ROD_LINE_ANCHOR.x - ROD_HANDLE.x) * ROD_SCALE,
+        pos.y + 6 + (ROD_LINE_ANCHOR.y - ROD_HANDLE.y) * ROD_SCALE,
         player.hookX,
-        player.hookY,
+        hookY,
       );
       // The hook: a small ring; a fish on it hides the point (it's in its mouth).
-      g.lineStyle(2, 0xe63946, 0.95).strokeCircle(player.hookX, player.hookY, 3.5);
+      g.lineStyle(2, 0xe63946, 0.95).strokeCircle(player.hookX, hookY, 3.5);
     });
-    // Rods of players whose hook is gone (or who left the room) come off.
+    // Rods of players whose hook is gone (or who left the room) come off, along with their predictions.
     for (const [id, rod] of this.rods) {
       if (angling.has(id)) continue;
       rod.destroy();
       this.rods.delete(id);
+      this.hookYs.delete(id);
+      this.hookCasts.delete(id);
     }
+  }
+
+  /** The hook y drawn for `id`: while sinking it advances at HOOK_SPEED like the server and is
+   *  pulled towards the schema's value; any other state (or a new cast) follows the schema. */
+  private predictHookY(id: string, player: Player, dt: number): number {
+    // A state change (bite, retract) or a moved hookX means a new cast: restart from the server's y.
+    const cast = this.hookCasts.get(id);
+    if (!cast || cast.state !== player.hookState || cast.x !== player.hookX) {
+      this.hookCasts.set(id, { state: player.hookState, x: player.hookX });
+      this.hookYs.set(id, player.hookY);
+      return player.hookY;
+    }
+    if (player.hookState !== "drop") {
+      this.hookYs.set(id, player.hookY);
+      return player.hookY;
+    }
+    let y = (this.hookYs.get(id) ?? player.hookY) + HOOK_SPEED * dt;
+    y += (player.hookY - y) * Math.min(1, dt * 8);
+    this.hookYs.set(id, y);
+    return y;
   }
 
   /** What the e2e hook asks about a player's rod: whether it is held out and its line colour. */
@@ -337,5 +385,16 @@ export class PondView {
     const player = this.room.state.players.get(sessionId);
     if (!player) return null;
     return { visible: this.rods.has(sessionId), lineColor: rodLineColor(player.rodLevel) };
+  }
+
+  /** What the e2e hook asks about the pond's render: the hook's drawn y (null with no hook out)
+   *  and every fish's drawn x, so tests can assert smooth motion frame by frame. */
+  renderInfo(sessionId: string): { hookY: number | null; fish: { id: string; x: number }[] } {
+    const player = this.room.state.players.get(sessionId);
+    const hookOut = !!player && (player.hookState === "drop" || player.hookState === "reel");
+    const hookY = hookOut ? (this.hookYs.get(sessionId) ?? player!.hookY) : null;
+    const fish: { id: string; x: number }[] = [];
+    this.fishViews.forEach((view) => fish.push({ id: view.state.id, x: view.x }));
+    return { hookY, fish };
   }
 }
