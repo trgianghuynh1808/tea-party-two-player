@@ -283,7 +283,7 @@ export class PondView {
     let bodyH = look.height;
     const texKey = fishTextureKey(fish.species);
     if (def && this.scene.textures.exists(texKey)) {
-      // The sheet art is drawn slightly diagonal; it is shown unrotated, width by tier, aspect kept.
+      // cut_fish.py already levels the sprite (body horizontal, head right); scale to tier width, aspect kept.
       const body = this.scene.add.image(0, 0, texKey);
       body.setScale(look.width / body.width);
       bodyH = body.displayHeight;

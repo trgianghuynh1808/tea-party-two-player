@@ -10,11 +10,13 @@ blue (~#3f8eac). Every cell holds exactly one sprite, so each blob of
 slice_sheet.py's flat background mask maps to a (row, col) by its centre.
 
 Outputs (all RGBA cut-outs, tight-cropped, native pixel size):
-- client/public/assets/fish/<id>.png  -- 15 fish (13 from sheet 1, ca_rong/ca_map from sheet 2)
-- client/public/assets/pond/<name>.png -- 9 pond decorations from sheet 2
+- client/public/assets/fish/<id>.png  -- 15 fish (13 from sheet 1, ca_rong/ca_map from sheet 2),
+  each rotated (nearest-neighbour) so its long body axis is horizontal, head facing right
+- client/public/assets/pond/<name>.png -- 9 pond decorations from sheet 2 (never rotated)
 Rows/cols count from 1. The cell -> species/decor mapping follows the task sheet
 (and each cell's dominant colour); FISH_FACING etc. is handled later by the game.
 """
+import math
 import os
 import shutil
 import sys
@@ -74,6 +76,39 @@ POND_CUTS = {
     "starfish": (4, 7),
     "turtle": (5, 5),
 }
+
+# Long-bodied fish are drawn tilted on the sheets (head up-right ~30-45deg),
+# which makes them look nose-up in the pond. Rotate those cut-outs so the body
+# axis is horizontal; the head must stay on the right because PondView mirrors
+# the sprite when the fish swims left.
+NEAREST = getattr(Image, "Resampling", Image).NEAREST
+
+# Flat/round/wriggly species have no meaningful body axis: keep them as drawn
+# unless ANGLE_OVERRIDE says otherwise.
+ROUND_FISH = {"ca_duoi", "ca_mat_trang", "ca_nuc", "luon"}
+
+# Hand-picked rotation (deg, PIL counter-clockwise) per fish id; absent -> auto.
+ANGLE_OVERRIDE = {}
+
+
+def level_angle(img):
+    """PCA angle (deg) that levels the blob's long axis; 0 when too round.
+
+    Coordinates are image-style (y grows down), so a fish with its head up on
+    the right yields a negative angle and PIL's rotate() (counter-clockwise on
+    screen) brings it back down. Elongation check first: near-circular blobs
+    (eigenvalue ratio <= 1.6) have no meaningful axis. Result in (-90, 90].
+    """
+    a = np.asarray(img)
+    ys, xs = np.nonzero(a[..., 3] > 0)
+    x = xs.astype(float) - xs.mean()
+    y = ys.astype(float) - ys.mean()
+    sxx, syy, sxy = (x * x).mean(), (y * y).mean(), (x * y).mean()
+    tr = sxx + syy
+    lam = math.sqrt(max(tr * tr / 4 - (sxx * syy - sxy * sxy), 0.0))
+    if (tr / 2 + lam) / max(tr / 2 - lam, 1e-9) <= 1.6:
+        return 0.0
+    return 0.5 * math.degrees(math.atan2(2 * sxy, sxx - syy))
 
 
 def blobs_by_cell(sheet_path, cols, rows, first, pitch):
@@ -135,6 +170,14 @@ def main():
                 raise ValueError(f"{name}: no sprite found at r{cell[0]}c{cell[1]}")
             folder = OUT_POND if out_name in POND_CUTS else OUT_FISH
             img = cut(im, cells[cell])
+            if folder == OUT_FISH:
+                angle = ANGLE_OVERRIDE.get(out_name)
+                if angle is None:
+                    angle = 0.0 if out_name in ROUND_FISH else level_angle(img)
+                if angle:
+                    img = img.rotate(angle, resample=NEAREST, expand=True)
+                    img = img.crop(img.getchannel("A").getbbox())
+                print(f"  {out_name}: level {angle:+.1f} deg")
             out = os.path.join(folder, out_name + ".png")
             img.save(out)
             written.append(out)

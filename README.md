@@ -95,7 +95,8 @@ Interaction rules live in `shared/src/interaction.ts` (`planInteraction`), used 
   The pond has no furniture, so decorate mode is off there. Numbers live in `shared/src/fishing.ts`; rendering
   and UI in `client/src/scenes/PondView.ts` and `client/src/ui/FishingPanel.ts`; species and decor sprites are cut
   from `client/assets-src/sheets/fish-sheet-1.jpg` / `fish-sheet-2.jpg` by `client/assets-src/tools/cut_fish.py`
-  into `client/public/assets/fish/<id>.png` and `client/public/assets/pond/<name>.png`.
+  into `client/public/assets/fish/<id>.png` (long fish rotated level, head facing right) and
+  `client/public/assets/pond/<name>.png`.
 
 ## Mobile
 
