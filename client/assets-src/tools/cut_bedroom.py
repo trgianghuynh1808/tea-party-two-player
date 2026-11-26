@@ -64,7 +64,6 @@ SCENES = {
         # Floor, wall, skirting board (between the wardrobe and the desk).
         "bg": [(160, 800, 700, 940), (850, 720, 1140, 1000), (720, 1100, 1150, 1340), (160, 210, 520, 260), (1000, 210, 1150, 440), (400, 520, 600, 640)],
         "items": {
-            "bedroom/wardrobe_arch.png": {"box": (183, 260, 397, 668), "h": 184},
             "wall/window_curtain_teal.png": {"box": (526, 213, 997, 454), "h": 112},
             "bedroom/desk_typewriter.png": {"box": (603, 478, 920, 668), "h": 128},
             "bedroom/nightstand_teal_lamp.png": {"box": (918, 453, 1147, 700), "h": 128},

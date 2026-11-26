@@ -1,4 +1,4 @@
-"""Cut the 16 front-facing furniture pieces from the sheets in ../sheets/furniture/.
+"""Cut the 8 front-facing furniture pieces from the sheets in ../sheets/furniture/.
 
     /tmp/cut-venv/bin/python cut_furniture.py   # needs Pillow, NumPy, SciPy
 
@@ -31,8 +31,6 @@ CUTS = [
     ("armchair_cream", "c", (675, 624, 790, 823), 76),
     ("fireplace_white", "c", (2115, 1257, 2243, 1459), 80),
     ("lamp_floor_cream", "d", (283, 1454, 424, 1743), 90),
-    ("plant_slim", "d", (2210, 1130, 2316, 1331), 80),
-    ("plant_pattern_pot", "d", (914, 1443, 1099, 1727), 90),
 ]
 
 

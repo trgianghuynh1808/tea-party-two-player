@@ -40,9 +40,28 @@ const REMOVED_ITEMS: { kind: string; image: string }[] = [
   { kind: "plant_leafy", image: "furniture/plant_leafy.png" },
   { kind: "vanity_piano", image: "furniture/vanity_piano.png" },
   { kind: "vanity_mirror", image: "furniture/vanity_mirror.png" },
+  { kind: "bath_bench_plain", image: "bathroom/bench_plain.png" },
+  { kind: "bath_bench_soap", image: "bathroom/bench_soap.png" },
+  { kind: "bath_plant_shelf", image: "bathroom/plant_shelf.png" },
+  { kind: "bath_plant_tall", image: "bathroom/plant_tall.png" },
+  { kind: "bath_shower_glass", image: "bathroom/shower_glass.png" },
+  { kind: "bath_sink_wood", image: "bathroom/sink_wood.png" },
+  { kind: "bath_tall_cabinet", image: "bathroom/tall_cabinet.png" },
+  { kind: "bath_toilet_cream", image: "bathroom/toilet_cream.png" },
+  { kind: "bath_tub_duck", image: "bathroom/tub_duck.png" },
+  { kind: "bath_washers", image: "bathroom/washers.png" },
+  { kind: "wardrobe_arch", image: "bedroom/wardrobe_arch.png" },
+  { kind: "plant_pattern_pot", image: "furniture/plant_pattern_pot.png" },
+  { kind: "plant_slim", image: "furniture/plant_slim.png" },
+  { kind: "chair_kitchen", image: "kitchen/chair_kitchen_front.png" },
+  { kind: "chair_kitchen", image: "kitchen/chair_kitchen_left.png" },
+  { kind: "chair_kitchen", image: "kitchen/chair_kitchen_back.png" },
+  { kind: "chair_kitchen", image: "kitchen/chair_kitchen_right.png" },
+  { kind: "bath_vent", image: "wall/bath_vent.png" },
+  { kind: "bath_towel_shelf", image: "wall/bath_towel_shelf.png" },
 ];
 
-test("T2: the 14 removed items are gone from the catalog and disk, kept neighbours remain", () => {
+test("T2: the 33 removed items are gone from the catalog and disk, kept neighbours remain", () => {
   for (const { kind, image } of REMOVED_ITEMS) {
     expect(getDecorationDef(kind)).toBeUndefined();
     expect(existsSync(`client/public/assets/decor/${image}`)).toBe(false);
@@ -61,11 +80,9 @@ const NEW_FURNITURE: { kind: string; seat?: true }[] = [
   { kind: "lamp_floor_cream" },
   { kind: "globe" },
   { kind: "fireplace_white" },
-  { kind: "plant_slim" },
-  { kind: "plant_pattern_pot" },
 ];
 
-test("T3: the 10 remaining furniture pieces are in the catalog with art on disk, the 2 chairs are seats, and no kind is duplicated", () => {
+test("T3: the 8 remaining furniture pieces are in the catalog with art on disk, the 2 chairs are seats, and no kind is duplicated", () => {
   const kinds = DECORATION_CATALOG.map((d) => d.kind);
   for (const { kind, seat } of NEW_FURNITURE) {
     const def = getDecorationDef(kind);
@@ -206,18 +223,6 @@ test("bathroom T1: the category is registered and all its items have art on disk
   }
 });
 
-const BATHROOM_2_FLOOR = [
-  "bath_shower_glass",
-  "bath_toilet_cream",
-  "bath_tall_cabinet",
-  "bath_plant_shelf",
-  "bath_sink_wood",
-  "bath_bench_soap",
-  "bath_washers",
-  "bath_bench_plain",
-  "bath_tub_duck",
-  "bath_plant_tall",
-];
 const BATHROOM_2_WALL = [
   "bath_mirror_framed",
   "bath_wall_lamp",
@@ -235,36 +240,51 @@ function pngSize(file: string): { width: number; height: number } {
   return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
 }
 
-test("bathroom-2 T1: the 16 new items are in the bathroom category, with art on disk and the right layer", () => {
-  for (const [kinds, layer] of [
-    [BATHROOM_2_FLOOR, "object"],
-    [BATHROOM_2_WALL, "wall"],
-  ] as const) {
-    for (const kind of kinds) {
-      const def = getDecorationDef(kind);
-      expect(def, kind).toBeDefined();
-      expect(def!.category, kind).toBe("bathroom");
-      expect(def!.layer, kind).toBe(layer);
-      expect(def!.rotation ?? "none", kind).toBe("none");
-      const file = `client/public/${def!.image}`;
-      expect(existsSync(file), kind).toBe(true);
-      const { width, height } = pngSize(file);
-      expect(width, `${kind} width`).toBeGreaterThan(0);
-      expect(height, `${kind} height`).toBeGreaterThan(0);
-    }
+test("bathroom-2 T1: the 6 new items are in the bathroom category, with art on disk and the right layer", () => {
+  for (const kind of BATHROOM_2_WALL) {
+    const def = getDecorationDef(kind);
+    expect(def, kind).toBeDefined();
+    expect(def!.category, kind).toBe("bathroom");
+    expect(def!.layer, kind).toBe("wall");
+    expect(def!.rotation ?? "none", kind).toBe("none");
+    const file = `client/public/${def!.image}`;
+    expect(existsSync(file), kind).toBe(true);
+    const { width, height } = pngSize(file);
+    expect(width, `${kind} width`).toBeGreaterThan(0);
+    expect(height, `${kind} height`).toBeGreaterThan(0);
   }
-  for (const kind of ["bath_mirror", "bath_towel_shelf", "bath_toilet_front", "bath_bathtub"])
+  for (const kind of ["bath_mirror", "bath_toilet_front", "bath_bathtub"])
     expect(getDecorationDef(kind), kind).toBeDefined();
-  expect(DECORATION_CATALOG.filter((d) => d.category === "bathroom")).toHaveLength(25);
+  expect(DECORATION_CATALOG.filter((d) => d.category === "bathroom")).toHaveLength(13);
+});
+
+const BATHROOM_WALL_IMAGES = [
+  "bath_mirror",
+  "hook_rack",
+  "mirror_framed",
+  "wall_lamp",
+  "towel_rail",
+  "towel_hook",
+  "towel_shelf_wood",
+  "water_heater",
+];
+
+test("bathroom-images T1: every bathroom item's art lives in assets/decor/bathroom/ and the old wall/ files are gone", () => {
+  for (const def of DECORATION_CATALOG.filter((d) => d.category === "bathroom")) {
+    expect(def.image.startsWith("assets/decor/bathroom/"), `${def.kind}: ${def.image}`).toBe(true);
+    expect(existsSync(`client/public/${def.image}`), def.kind).toBe(true);
+  }
+  for (const name of BATHROOM_WALL_IMAGES)
+    expect(existsSync(`client/public/assets/decor/wall/${name}.png`), name).toBe(false);
 });
 
 // ---------------------------------------------------------------- 🍳 kitchen set
 
-const KITCHEN_KINDS = ["fridge_kitchen", "washer_kitchen", "chair_kitchen"];
+const KITCHEN_KINDS = ["fridge_kitchen", "washer_kitchen"];
 
-test("kitchen T1: the kitchen category has its 3 four-view items with alpha art on disk", () => {
+test("kitchen T1: the kitchen category has its 2 four-view items with alpha art on disk", () => {
   expect(DECORATION_CATEGORIES.some((c) => c.id === "kitchen" && c.title.includes("Nhà bếp"))).toBe(true);
-  expect(DECORATION_CATALOG.filter((d) => d.category === "kitchen")).toHaveLength(3);
+  expect(DECORATION_CATALOG.filter((d) => d.category === "kitchen")).toHaveLength(2);
   for (const kind of KITCHEN_KINDS) {
     const def = getDecorationDef(kind);
     expect(def, kind).toBeDefined();
@@ -293,7 +313,6 @@ test("kitchen T1: the kitchen category has its 3 four-view items with alpha art 
       expect(solid, `${kind}/${view} solid middle`).toBe(true);
     }
   }
-  expect(getDecorationDef("chair_kitchen")!.role).toBe("seat");
 });
 
 test("kitchen T2: turning a kitchen piece swaps its footprint and normalizeRotation clamps to 0..3", () => {

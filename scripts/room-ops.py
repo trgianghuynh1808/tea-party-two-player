@@ -16,9 +16,10 @@ Used by scripts/manager-loop.sh so the Manager only needs Claude for judgement c
   room-ops.py block <id> <reason>   mark task BLOCKED, turn AUTO_MODE off, tell the user
   room-ops.py finalize              build the ship report (outbox, APPROVE_SHIP), phase AWAITING_SHIP_APPROVAL
   room-ops.py progress <slug>       report new progress (plan, steps, tests, verify, fix, merge) read from the task file and git
-  room-ops.py claude-result <role> <label> <model>   stdin: `claude -p --output-format json`; prints text, logs usage
+  room-ops.py claude-result <role> <label> <model>   stdin: `claude -p --output-format stream-json --verbose` (or json); prints text, logs usage and tool calls
 """
 import glob
+import collections
 import json
 import os
 import re
@@ -533,6 +534,8 @@ def cleanup_after_ship(lines, keep):
                 os.remove(f); n_status += 1
             for pf in glob.glob(f"{PROGRESS_DIR}/{t['slug']}.*"):
                 os.remove(pf); n_prog += 1
+            for tf in glob.glob(f"{AG}/timeline/{t['slug']}.log"):
+                os.remove(tf)
         if n_status or n_prog:
             out.append(f"{n_status} status, {n_prog} progress")
         if read_env().get("COMMIT_LINKS", "true") == "true" and repo_web_url():
@@ -574,6 +577,78 @@ def cleanup_after_ship(lines, keep):
     return ", ".join(out)
 
 
+def fmt_dur(sec):
+    sec = int(round(sec))
+    if sec < 60:
+        return f"{sec}s"
+    m, s = divmod(sec, 60)
+    if m < 60:
+        return f"{m}m {s:02d}s"
+    h, m = divmod(m, 60)
+    return f"{h}h {m:02d}m"
+
+
+def task_timeline(slug):
+    """Phase durations of one task from .agents/timeline/<slug>.log (lines '<epoch> <event>', written by the daemon and the watcher).
+    plan = Tech Lead planning calls (+ time spent waiting for the user before the first hand-off), code = OpenCode running,
+    verify = Tech Lead verify/review/merge calls. None when nothing was recorded (a task from before this existed)."""
+    ev = []
+    try:
+        with open(f"{AG}/timeline/{slug}.log", encoding="utf8") as f:
+            for line in f:
+                p = line.split()
+                if len(p) == 2 and p[0].isdigit():
+                    ev.append((int(p[0]), p[1]))
+    except OSError:
+        return None
+    ev.sort(key=lambda x: x[0])
+
+    def spans(kind):
+        out, start = [], None
+        for ts, name in ev:
+            if name == f"{kind}_start":
+                start = ts
+            elif name == f"{kind}_end" and start is not None:
+                out.append((start, ts)); start = None
+        return out
+
+    plan, code, fin = spans("plan"), spans("code"), spans("finish")
+    if not (plan or code or fin):
+        return None
+    begin = min(s for s, _ in plan + code + fin)
+    end = max(e for _, e in plan + code + fin)
+    first_code = code[0][0] if code else None
+    plan_active = sum(e - s for s, e in plan)
+    plan_span = (first_code - plan[0][0]) if plan and first_code and first_code >= plan[0][0] else plan_active
+    return {"begin": begin, "end": end, "total": end - begin, "plan": plan_active, "wait": max(0, plan_span - plan_active),
+            "code": sum(e - s for s, e in code), "verify": sum(e - s for s, e in fin), "fixes": max(0, len(code) - 1)}
+
+
+def timeline_block(shipped_tasks):
+    """The 'Thời gian' block of the /ship message: one entry per shipped task that has a timeline, plus the whole range."""
+    rows, begins, ends = [], [], []
+    for t in shipped_tasks:
+        tl = task_timeline(t["slug"])
+        if not tl:
+            continue
+        b, e = datetime.fromtimestamp(tl["begin"]), datetime.fromtimestamp(tl["end"])
+        begins.append(tl["begin"]); ends.append(tl["end"])
+        when = f"{b:%H:%M} → {e:%H:%M}" + ("" if b.date() == e.date() else f" ({e:%d/%m})")
+        plan = f"Plan {fmt_dur(tl['plan'])}" + (f" (+ chờ bạn {fmt_dur(tl['wait'])})" if tl["wait"] >= 30 else "")
+        parts = [plan, f"Code {fmt_dur(tl['code'])}", f"Test/Verify {fmt_dur(tl['verify'])}"]
+        if tl["fixes"]:
+            parts.append(f"{tl['fixes']} vòng sửa")
+        rows.append(f"- **{t['id']}** · tổng **{fmt_dur(tl['total'])}** · {when}, {b:%d/%m}\n  " + " · ".join(parts))
+    if not rows:
+        return ""
+    out = "⏱ **Thời gian**\n" + "\n".join(rows[:8])
+    if len(rows) > 8:
+        out += f"\n- … và {len(rows) - 8} task nữa"
+    if len(rows) > 1:
+        out += f"\n\nCả đợt: {datetime.fromtimestamp(min(begins)):%H:%M %d/%m} → {datetime.fromtimestamp(max(ends)):%H:%M %d/%m}"
+    return out
+
+
 def cmd_ship():
     lines = read_board()
     phase = get_phase(lines)
@@ -608,6 +683,7 @@ def cmd_ship():
         if has_remote:
             rc, out = git("push", "origin", main)
             msg += " Đã push lên remote luôn." if rc == 0 else f"\n⚠️ Merge xong rồi nhưng push bị lỗi: {out[:300]}"
+        timing = timeline_block(shipping)   # before cleanup removes the timeline files
         lines = read_board()
         for t in tasks(lines):
             if t["state"] == "done":
@@ -620,7 +696,7 @@ def cmd_ship():
             keep = 5
         cleaned = cleanup_after_ship(lines, keep)
         write_board(lines)
-        return msg + (f"\n\n🧹 **Dọn dẹp xong:** {cleaned}." if cleaned else "")
+        return msg + (f"\n\n{timing}" if timing else "") + (f"\n\n🧹 **Dọn dẹp xong:** {cleaned}." if cleaned else "")
     finally:
         git("checkout", stg)
 
@@ -1452,12 +1528,55 @@ def cmd_usage(days=1):
     return "\n".join(out)
 
 
-def cmd_claude_result(role, label, model):
-    raw = sys.stdin.read()
+TOOLS_LOG_NAME = "tools.log"
+
+
+def _tool_target(name, inp):
+    """What a tool call touched, short enough for one log line."""
+    inp = inp or {}
+    if name in ("Grep", "Glob"):
+        return " ".join(str(inp[k]) for k in ("pattern", "glob", "path") if inp.get(k))[:140]
+    for k in ("file_path", "path", "notebook_path"):
+        if inp.get(k):
+            return str(inp[k])
+    if name == "Bash":
+        return str(inp.get("command", "")).replace("\n", " ⏎ ")[:140]
+    return ""
+
+
+def parse_claude_output(raw):
+    """(result dict, tool calls) from `claude -p`: either one JSON object (output-format json) or the NDJSON event stream
+    (stream-json: the tool_use blocks name every file the model opened). (None, []) when it is neither (plain text)."""
     try:
         d = json.loads(raw)
-        assert isinstance(d, dict)
-    except (ValueError, AssertionError):
+        if isinstance(d, dict):
+            return d, []
+    except ValueError:
+        pass
+    result, tools = None, []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(ev, dict):
+            continue
+        if ev.get("type") == "result":
+            result = ev
+        elif ev.get("type") == "assistant":
+            for c in (ev.get("message") or {}).get("content") or []:
+                if isinstance(c, dict) and c.get("type") == "tool_use":
+                    tools.append((c.get("name", "?"), _tool_target(c.get("name"), c.get("input"))))
+    return result, tools
+
+
+def cmd_claude_result(role, label, model):
+    raw = sys.stdin.read()
+    d, tools = parse_claude_output(raw)
+    if d is None:
         print(raw.strip())  # plain text (older CLI or a stub): pass through
         return 0
     u = d.get("usage") or {}
@@ -1468,8 +1587,14 @@ def cmd_claude_result(role, label, model):
             "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "role": role, "label": label, "model": model or "default",
             "turns": d.get("num_turns", 0), "cost_usd": d.get("total_cost_usd", 0), "input": u.get("input_tokens", 0),
             "output": u.get("output_tokens", 0), "cache_read": u.get("cache_read_input_tokens", 0),
-            "cache_create": u.get("cache_creation_input_tokens", 0), "ok": ok, "subtype": d.get("subtype")},
+            "cache_create": u.get("cache_creation_input_tokens", 0), "ok": ok, "subtype": d.get("subtype"),
+            "tools": dict(collections.Counter(n for n, _ in tools))},
             ensure_ascii=False) + "\n")
+    if tools:   # one line per tool call: which files the model read, searched or ran, per call
+        with open(os.path.join(os.path.dirname(USAGE_LOG), TOOLS_LOG_NAME), "a", encoding="utf8") as f:
+            f.write(f"━━ {datetime.now():%F %T} {role} · {label}\n")
+            for i, (n, tgt) in enumerate(tools, 1):
+                f.write(f"{i:3}. {n:<6} {tgt}\n")
     text = (d.get("result") or "").strip()
     if not ok:
         print(f"[lỗi: {d.get('subtype')}] {text}".strip())

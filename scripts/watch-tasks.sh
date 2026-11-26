@@ -33,6 +33,13 @@ say_user() {   # role text
 set_status() {   # task state
   local f="$STATUS_DIR/$(basename "$1" .md).status"
   printf '%s %s\n' "$2" "$(date +%s)" > "$f"
+  # timeline for the ship report: one line per event, keyed by the task slug (the file name without its date)
+  local ev=""
+  case "$2" in running) ev=code_start ;; done|stuck) ev=code_end ;; esac
+  if [[ -n "$ev" ]]; then
+    mkdir -p .agents/timeline
+    printf '%s %s\n' "$(date +%s)" "$ev" >> ".agents/timeline/$(basename "$1" .md | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}-//').log"
+  fi
 }
 
 waiting_msg() {

@@ -37,3 +37,4 @@ server/data
 .agents/board-archive/
 .agents/plan-feedback/
 .agents/notices/
+.agents/timeline/

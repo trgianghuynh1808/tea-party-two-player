@@ -1,14 +1,14 @@
-"""Cut the 3 kitchen furniture pieces (front/back/left) out of the purple-background sheet.
+"""Cut the 2 kitchen furniture pieces (front/back/left) out of the purple-background sheet.
 
     .venv-art/bin/python cut_kitchen.py   # needs Pillow, NumPy, SciPy
 
 Sheet client/assets-src/sheets/kitchen-sheet-1.jpeg (736x899) holds top-down kitchen furniture on a flat
 purple background (~#8e87b0). Only the pieces drawn with a front, a back and a side view are used
-(fridge, washing machine, wooden kitchen chair); the missing right view of each is the horizontal
+(fridge, washing machine); the missing right view of each is the horizontal
 mirror of its left view. The background is removed by colour distance from the corner colour plus a
 border flood fill, with no resampling at all (pixel art must stay pixel-sharp; if a view ever needs
 scaling use Image.NEAREST, never LANCZOS). Each view is written as an RGBA cut-out to
-client/public/assets/decor/kitchen/<kind>_<view>.png (3 kinds x 4 views = 12 files).
+client/public/assets/decor/kitchen/<kind>_<view>.png (2 kinds x 4 views = 8 files).
 """
 import os
 
@@ -35,11 +35,6 @@ BOXES = {
         "front": (52, 272, 128, 382),   # round porthole
         "left": (220, 265, 288, 382),    # side panel
         "back": (132, 272, 206, 382),    # hoses
-    },
-    "chair_kitchen": {
-        "front": (145, 535, 188, 606),
-        "left": (58, 535, 100, 606),
-        "back": (470, 545, 513, 608),
     },
 }
 

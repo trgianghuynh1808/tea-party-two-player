@@ -1,17 +1,16 @@
-"""Draw the 5 tilted bathroom pieces head-on as original pixel art, straight from code.
+"""Draw the 3 tilted bathroom pieces head-on as original pixel art, straight from code.
 
     .venv-art/bin/python client/assets-src/tools/draw_bathroom_props.py
 
 Writes  client/public/assets/decor/bathroom/bath_{vanity_sink,bathtub}.png
-and     client/public/assets/decor/wall/bath_{towel_shelf,mirror,vent}.png
-plus a  preview client/assets-src/sheets/bathroom-preview.png (all 9 bathroom pieces,
+and     client/public/assets/decor/bathroom/bath_mirror.png
+plus a  preview client/assets-src/sheets/bathroom-preview.png (all 7 bathroom pieces,
 cut and drawn, on a neutral grey, 3x, labelled).
 
 Style follows draw_yard_props.py: light from the top-left, 3-4 tones per material with
 a 2x2 Bayer dither, sel-out outline. Palettes are sampled from bathroom-sheet-1.png so
 the drawn pieces match the cut ones (wood #b26c24/#cb6e28, porcelain #f2f2f2, mirror
-frame #60c5f1, towels #b7543f / #82b300 / #4482b5). The vent is not a separable
-object in the sheet, so it follows the plan's description.
+frame #60c5f1, towels #b7543f / #82b300 / #4482b5).
 
 Each sprite is drawn at half its display height in pixels (like the cut pieces after
 their H/2 downscale) and saved upscaled x4, so every bathroom PNG ends up at the same
@@ -26,7 +25,7 @@ import pngio  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 OUT_FLOOR = os.path.join(ROOT, "client", "public", "assets", "decor", "bathroom")
-OUT_WALL = os.path.join(ROOT, "client", "public", "assets", "decor", "wall")
+OUT_WALL = OUT_FLOOR
 PREVIEW = os.path.join(ROOT, "client", "assets-src", "sheets", "bathroom-preview.png")
 
 # ---------------------------------------------------------------- palette (dark -> light), sampled from the sheet
@@ -222,37 +221,6 @@ def bathtub():
 # ---------------------------------------------------------------- wall pieces
 
 
-def towel_shelf():
-    """Wooden wall shelf carrying three towel stacks: red, green, blue."""
-    w, h = 34, 22
-    c = Canvas(w, h)
-    # Board: top face bright, front mid, bottom shadow.
-    slab(c, 2, 31, 13, 14, WOOD, 0.9, 0.2)
-    slab(c, 2, 31, 15, 17, WOOD, 0.25, -0.7)
-    c.put(2, 13, WOOD[1])
-    c.put(31, 13, WOOD[1])
-    # Wall brackets under the board.
-    for bx in (4, 27):
-        for y in range(18, 21):
-            k = (y - 18) / 2
-            for x in range(bx, bx + 3):
-                c.put(x, y, tone(WOOD, -0.2 - k * 0.5, x, y))
-    # Towel stacks folded on the board (fold lines every few rows).
-    stacks = ((5, 12, 6, TOWEL_R), (14, 20, 8, TOWEL_G), (22, 29, 5, TOWEL_B))
-    for x0, x1, top, pal in stacks:
-        for y in range(top, 14):
-            for x in range(x0, x1 + 1):
-                rel = (x - x0) / (x1 - x0)
-                v = 0.5 - rel * 0.6
-                if (y - top) % 3 == 2:
-                    v -= 0.8  # fold shadow
-                if y == top:
-                    v += 0.4
-                c.put(x, y, tone(pal, v, x, y))
-    outline(c)
-    return to_rgba(c)
-
-
 def mirror():
     """Rectangular mirror, blue frame, four screws, glass with a diagonal shine."""
     w, h = 24, 30
@@ -282,48 +250,17 @@ def mirror():
     return to_rgba(c)
 
 
-def vent():
-    """Wall air vent: framed horizontal louvers with shadow gaps, on a small bottom ledge."""
-    w, h = 32, 17
-    c = Canvas(w, h)
-    # Ledge under the grill.
-    slab(c, 2, 29, 13, 14, METAL, 0.8, 0.1)
-    slab(c, 2, 29, 15, 15, METAL, -0.6, -0.6)
-    # Frame.
-    for y in range(1, 13):
-        for x in range(1, 30):
-            if x in (1, 29) or y in (1, 12):
-                v = 0.6 if x + y < 18 else 0.1
-                c.put(x, y, tone(METAL, v, x, y))
-    # Louvers: each slat bright on top, shadowed below; transparent gaps in between
-    # that the sel-out outline turns into shadow lines.
-    for y0 in (3, 6, 9):
-        for y in range(y0, y0 + 2):
-            for x in range(3, 28):
-                v = 0.7 if y == y0 else -0.2
-                if x == 3 or x == 27:
-                    v -= 0.5
-                c.put(x, y, tone(METAL, v, x, y))
-    # Corner screws.
-    for x, y in ((2, 2), (28, 2)):
-        c.put(x, y, METAL[3])
-    outline(c)
-    return to_rgba(c)
-
-
 PROPS = [
     ("bath_vanity_sink", "bathroom", vanity_sink),
     ("bath_bathtub", "bathroom", bathtub),
-    ("bath_towel_shelf", "wall", towel_shelf),
     ("bath_mirror", "wall", mirror),
-    ("bath_vent", "wall", vent),
 ]
 
 
-# ---------------------------------------------------------------- preview (all 9 bathroom pieces)
+# ---------------------------------------------------------------- preview (all 7 bathroom pieces)
 
 FLOOR_PNGS = ["cabinet_bottles", "bath_vanity_sink", "bath_bathtub", "toilet_front", "trash_can"]
-WALL_PNGS = ["hook_rack", "bath_towel_shelf", "bath_mirror", "bath_vent"]
+WALL_PNGS = ["hook_rack", "bath_mirror"]
 
 
 def preview():
@@ -335,7 +272,7 @@ def preview():
     for names, folder, align in ((FLOOR_PNGS, "bathroom", "bottom"), (WALL_PNGS, "wall", "top")):
         imgs = []
         for n in names:
-            im = Image.open(os.path.join(ROOT, "client", "public", "assets", "decor", folder, n + ".png"))
+            im = Image.open(os.path.join(OUT_FLOOR if folder == "bathroom" else OUT_WALL, n + ".png"))
             imgs.append((n, im.resize((im.width // 4, im.height // 4), Image.NEAREST)))
         rows.append((imgs, align, max(im.height for _, im in imgs)))
     W = max(sum(im.width * scale for _, im in imgs) + pad * (len(imgs) + 1) for imgs, _, _ in rows)
