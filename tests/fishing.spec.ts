@@ -98,6 +98,17 @@ const send = (page: Page, type: string, payload?: unknown) =>
 /** Test-only teleport (server env DEBUG_WARP=1). */
 const warp = (page: Page, x: number, y: number) => send(page, "debug_warp", { x, y });
 
+/** The local player's rod sprite at the pond (must be idle before casting). */
+const pondRod = (page: Page): Promise<{ visible: boolean; lineColor: number } | null> =>
+  page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          __GAME__: { pondRod(): { visible: boolean; lineColor: number } | null };
+        }
+      ).__GAME__.pondRod(),
+  );
+
 const enterPond = async (page: Page): Promise<void> => {
   await warp(page, POND_DOOR_X, (POND_ENTER_ZONE.top + POND_ENTER_ZONE.bottom) / 2);
   await expect.poll(async () => (await snap(page)).me.x, { timeout: 10_000 }).toBeGreaterThanOrEqual(POND.x);
@@ -414,4 +425,67 @@ test("T4: two players in the pond see the same fish and each other's hook", asyn
     await hostCtx.close();
     await guestCtx.close();
   }
+});
+
+test("T5: rod sprite shows while the hook is out", async ({ page }) => {
+  await joinAsHost(page, `rod1-${Date.now().toString(36)}`);
+  await enterPond(page);
+  await send(page, "start_fishing");
+  await expect.poll(async () => (await snap(page)).fishPhase).toBe("fishing");
+
+  // 1. No rod in hand before casting.
+  const before = await pondRod(page);
+  expect(before === null || before.visible === false).toBe(true);
+
+  // 2. Cast: the hook falls, so the player holds the rod out.
+  await warp(page, (HOOK_SAFE_LEFT + HOOK_SAFE_RIGHT) / 2, DOCK_CAST_Y);
+  await send(page, "cast");
+  await expect.poll(async () => (await snap(page)).me.hookState, { timeout: 10_000 }).toBe("drop");
+
+  // 3. The rod is visible while the hook is in the water.
+  const during = await pondRod(page);
+  expect(during?.visible).toBe(true);
+
+  // 4. Retract the hook.
+  await send(page, "retract");
+  await expect.poll(async () => (await snap(page)).me.hookState, { timeout: 10_000 }).toBe("");
+
+  // 5. The rod is gone once the line is back in.
+  const after = await pondRod(page);
+  expect(after === null || after.visible === false).toBe(true);
+});
+
+test("T6: line color changes after a rod upgrade", async ({ page, request }) => {
+  const user = `rod2-${Date.now().toString(36)}`;
+  // Fund the shop before the room opens it so the level-2 rod (300) is affordable.
+  const put = await request.put(`${TEST_SERVER_URL}/admin/users/${encodeURIComponent(user)}/shop`, {
+    headers: { Authorization: `Bearer ${ADMIN_TOKEN}` },
+    data: { money: 500, decorations: [] },
+  });
+  expect(put.status()).toBe(200);
+
+  await joinAsHost(page, user);
+  await enterPond(page);
+  await send(page, "start_fishing");
+  await expect.poll(async () => (await snap(page)).fishPhase).toBe("fishing");
+
+  // 1. Level-1 rod: cast and read the line colour.
+  await warp(page, (HOOK_SAFE_LEFT + HOOK_SAFE_RIGHT) / 2, DOCK_CAST_Y);
+  await send(page, "cast");
+  await expect.poll(async () => (await snap(page)).me.hookState, { timeout: 10_000 }).toBe("drop");
+  const c1 = (await pondRod(page))?.lineColor;
+  expect(c1).toBe(RODS[0].lineColor);
+
+  // 2. Retract, then buy the next rod.
+  await send(page, "retract");
+  await expect.poll(async () => (await snap(page)).me.hookState, { timeout: 10_000 }).toBe("");
+  await send(page, "upgrade_rod");
+  await expect.poll(async () => (await snap(page)).me.rodLevel).toBe(2);
+
+  // 3. Cast again: the line now uses the level-2 colour.
+  await send(page, "cast");
+  await expect.poll(async () => (await snap(page)).me.hookState, { timeout: 10_000 }).toBe("drop");
+  const c2 = (await pondRod(page))?.lineColor;
+  expect(c2).toBe(RODS[1].lineColor);
+  expect(c1).not.toBe(c2);
 });

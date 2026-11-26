@@ -9,7 +9,10 @@ export const TEST_MODE_PARAM = "test";
  * The slice of ShopScene the hook reads. Structural on purpose: testHook does not import the scene,
  * main.ts owns the Phaser game and passes in the accessor.
  */
-type StationLabelScene = { stationLabelTexts(): string[] };
+type StationLabelScene = {
+  stationLabelTexts(): string[];
+  pondRodInfo(sessionId: string): { visible: boolean; lineColor: number } | null;
+};
 
 /**
  * Minimal hook for e2e tests, exposed as `window.__GAME__` when `?test=1` is set.
@@ -28,6 +31,8 @@ export type GameTestHook = {
   tileRotations(): Record<string, number>;
   /** Label text of every station currently showing one; [] until the scene has booted. */
   stationLabels(): string[];
+  /** The local player's rod at the pond: whether it is held out and its line colour; null off-pond. */
+  pondRod(): { visible: boolean; lineColor: number } | null;
 };
 
 declare global {
@@ -49,5 +54,6 @@ export function installTestHook(room: Room<BobaShopState>, getShopScene: () => S
     tiles: () => Object.fromEntries(room.state.tiles ?? []),
     tileRotations: () => Object.fromEntries(room.state.tileRotations ?? []),
     stationLabels: () => getShopScene()?.stationLabelTexts() ?? [],
+    pondRod: () => getShopScene()?.pondRodInfo(room.sessionId) ?? null,
   };
 }

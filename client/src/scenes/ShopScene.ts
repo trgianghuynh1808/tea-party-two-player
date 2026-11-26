@@ -735,6 +735,11 @@ export class ShopScene extends Phaser.Scene {
     return [...this.stationLabels.values()].map((label) => label.text);
   }
 
+  /** The rod of the player `sessionId` at the pond; null while the pond view is inactive. */
+  pondRodInfo(sessionId: string): { visible: boolean; lineColor: number } | null {
+    return this.pond?.rodInfo(sessionId) ?? null;
+  }
+
   /**
    * Restaurant: what a crate holds (its ingredient on top) and what a shelf hands out (a few plates / bowls / glasses).
    * Drawn under any item placed there (same depth, created earlier).

@@ -83,11 +83,12 @@ Interaction rules live in `shared/src/interaction.ts` (`planInteraction`), used 
 - From the yard, the **🎣 Câu cá** card in the **☀️ Sẵn sàng mở quán?** picker walks you into the pond and
   opens a 10-minute fishing session for the room (`FISH_SECONDS` overrides it); once at the pond, **Bắt đầu câu**
   does the same. When the time is up, a summary shows every player's fish count and fishing money.
-- Space drops the hook straight down from where you stand. When a fish bites, **hold** Space to reel it in —
-  let go and it pulls back, too long and it escapes. A landed fish is sold straight into your own wallet;
-  fishing money is never split.
-- There are 15 fish in 5 rarities and 5 rods. A better rod makes rare fish bite more often and reels faster; buy
-  the next level with your own money in the pond HUD. The rod level is saved per username (like the wallet).
+- Space drops the hook straight down from where you stand. A pixel-art rod appears in your hand with the line
+  running down to the hook. When a fish bites, **hold** Space to reel it in — let go and it pulls back, too long
+  and it escapes. A landed fish is sold straight into your own wallet; fishing money is never split.
+- There are 15 fish in 5 rarities and 5 rods. A better rod makes rare fish bite more often and reels faster, and
+  its line has its own colour (brown, green, blue, purple, gold for levels 1–5); buy the next level with your own
+  money in the pond HUD. The rod level is saved per username (like the wallet).
 - While at the pond, the sidebar swaps the orders panel for a read-only fish & rod guide: every species grouped by
   rarity with its sprite icon, name and price, every rod with its price and reel speed, the one you own highlighted
   (`client/src/ui/FishGuide.ts`). Leaving the pond brings the orders back.
@@ -96,7 +97,8 @@ Interaction rules live in `shared/src/interaction.ts` (`planInteraction`), used 
   and UI in `client/src/scenes/PondView.ts` and `client/src/ui/FishingPanel.ts`; species and decor sprites are cut
   from `client/assets-src/sheets/fish-sheet-1.jpg` / `fish-sheet-2.jpg` by `client/assets-src/tools/cut_fish.py`
   into `client/public/assets/fish/<id>.png` (long fish rotated level, head facing right) and
-  `client/public/assets/pond/<name>.png`.
+  `client/public/assets/pond/<name>.png`; the rod sprite comes from `client/assets-src/tools/cut_rod.py` into
+  `client/public/assets/rod.png`.
 
 ## Mobile
 
