@@ -489,3 +489,53 @@ test("T6: line color changes after a rod upgrade", async ({ page, request }) => 
   expect(c2).toBe(RODS[1].lineColor);
   expect(c1).not.toBe(c2);
 });
+
+test("T1: T27 the sinking hook moves smoothly every frame (no stalls, no jumps)", async ({ page }) => {
+  await joinAsHost(page, uniqueUser());
+  await enterPond(page);
+  await send(page, "start_fishing");
+  await expect.poll(async () => (await snap(page)).fishPhase).toBe("fishing");
+
+  // 1. Cast from the dock: the hook sinks.
+  await warp(page, (HOOK_SAFE_LEFT + HOOK_SAFE_RIGHT) / 2, DOCK_CAST_Y);
+  await send(page, "cast");
+  await expect.poll(async () => (await snap(page)).me.hookState, { timeout: 10_000 }).toBe("drop");
+
+  // 2. Sample the drawn hook y once per frame until 40 samples or the hook stops dropping.
+  const samples = await page.evaluate(
+    () =>
+      new Promise<number[]>((resolve) => {
+        type Render = { hookY: number | null; fish: { id: string; x: number }[] };
+        const g = (
+          window as unknown as {
+            __GAME__: {
+              room: { sessionId: string };
+              state: { players: { get(id: string): { hookState: string } } };
+              pondRender(): Render | null;
+            };
+          }
+        ).__GAME__;
+        const out: number[] = [];
+        const tick = () => {
+          const hookY = g.pondRender()?.hookY;
+          if (typeof hookY === "number") out.push(hookY);
+          const state = g.state.players.get(g.room.sessionId)?.hookState;
+          if (out.length >= 40 || state !== "drop") return resolve(out);
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
+
+  // 3. The hook is drawn moving on almost every frame and never teleports between frames.
+  expect(samples.length).toBeGreaterThanOrEqual(20);
+  let still = 0;
+  let maxJump = 0;
+  for (let i = 1; i < samples.length; i++) {
+    const jump = Math.abs(samples[i] - samples[i - 1]);
+    if (jump === 0) still++;
+    if (jump > maxJump) maxJump = jump;
+  }
+  expect(still, `frames where the hook did not move (${still}/${samples.length})`).toBeLessThanOrEqual(samples.length * 0.1);
+  expect(maxJump, "biggest hook move between two frames").toBeLessThanOrEqual(6);
+});

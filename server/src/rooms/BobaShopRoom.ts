@@ -300,8 +300,9 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
       this.state.stations.set(def.id, station);
     }
 
-    // Server-authoritative simulation at 60Hz; patches go out at the default patch rate.
+    // Server-authoritative simulation at 60Hz; patches go out at ~30Hz (smoother fish/hook for clients).
     this.setSimulationInterval((deltaTime) => this.update(deltaTime / 1000), 1000 / 60);
+    this.patchRate = 1000 / 30;
   }
 
   // ---------------------------------------------------------------- Players: join / drop / come back / leave

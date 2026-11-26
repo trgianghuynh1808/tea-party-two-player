@@ -381,8 +381,12 @@ export class ShopScene extends Phaser.Scene {
     // The yard outside the shop and building on it.
     this.yard = new YardView(this, room);
     this.build = new BuildController(this, room);
-    // The fishing pond's interior (fish + hook lines), drawn from the synced state.
-    this.pond = new PondView(this, room);
+    // The fishing pond's interior (fish + hook lines), drawn from the synced state; the rod and
+    // line follow each player's rendered position so they don't lag a patch behind the walking angler.
+    this.pond = new PondView(this, room, (id) => {
+      const view = this.players.get(id);
+      return view ? { x: view.container.x, y: view.container.y } : undefined;
+    });
 
     $.onAdd("players", (player, sessionId) => {
       const view = this.createPlayerView(player, sessionId === room.sessionId);
@@ -738,6 +742,12 @@ export class ShopScene extends Phaser.Scene {
   /** The rod of the player `sessionId` at the pond; null while the pond view is inactive. */
   pondRodInfo(sessionId: string): { visible: boolean; lineColor: number } | null {
     return this.pond?.rodInfo(sessionId) ?? null;
+  }
+
+  /** The pond's rendered state for the player `sessionId`: the hook's drawn y (null with no hook
+   *  out) and every fish's drawn x, so tests can assert smooth motion frame by frame. */
+  pondRenderInfo(sessionId: string): { hookY: number | null; fish: { id: string; x: number }[] } | null {
+    return this.pond?.renderInfo(sessionId) ?? null;
   }
 
   /**

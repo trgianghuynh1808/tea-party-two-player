@@ -9,10 +9,15 @@ Used by scripts/manager-loop.sh so the Manager only needs Claude for judgement c
   room-ops.py inbox-args <file>     print the arguments of an inbox message (the /plan question)
   room-ops.py say-steps <role> <head> <step line>...   same, with the plan steps listed under <head>
   room-ops.py status | stop | resume | usage [days]
+  room-ops.py preflight <id>        before the Tech Lead plans a pending task: OK | ASK (empty task, or a picture is mentioned but not attached:
+                                    asks the user at once and sets needs_info, no Claude call)
   room-ops.py plan-path <slug>      path of the newest plan file for a task slug
   room-ops.py check-plan <slug>     prints OK | BLOCK: <why> | REVIEW: <why>
   room-ops.py review-note <id> <reasons>   tell the user why a doubted plan was still approved
   room-ops.py approve <slug>        mark plan APPROVED_BY_MANAGER, commit, hand off to OpenCode
+  room-ops.py start-task <slug>     checkout the staging branch, create (or reuse) task/<slug>; prints OK: <branch> <plan file path>
+  room-ops.py merge-task <id> <subject> [--body TEXT] [--note TEXT]   squash task/<slug> into staging with ONE commit, delete the
+                                    branch, set the task [done] on the board, add the Activity Log line (no push, never touches main)
   room-ops.py block <id> <reason>   mark task BLOCKED, turn AUTO_MODE off, tell the user
   room-ops.py finalize              build the ship report (outbox, APPROVE_SHIP), phase AWAITING_SHIP_APPROVAL
   room-ops.py progress <slug>       report new progress (plan, steps, tests, verify, fix, merge) read from the task file and git
@@ -200,6 +205,15 @@ def set_auto(lines, on, phase):
     set_env("AUTO_MODE", "true" if on else "false")
     set_header(lines, "Auto Mode", "ON" if on else "OFF")
     set_header(lines, "Current Phase", phase)
+
+
+def wake(lines):
+    """Answering a plan (/approve, /revise, /reject) means work follows: turn the room back on when it was paused (batch closed for
+    /ship, /stop), otherwise the daemon never picks the task up. Returns True when it had to be turned on."""
+    if read_env().get("AUTO_MODE") == "true":
+        return False
+    set_auto(lines, True, "RUNNING")
+    return True
 
 
 # ---------- outbox ----------
@@ -928,6 +942,7 @@ def cmd_plan_approve(arg):
     busy = [x for x in tasks(lines) if x["state"] in ("planning", "plan_ready", "in_progress", "revise")]
     if busy:   # one task at a time in the working tree: queue it, the daemon hands it off when its turn comes
         set_state(lines, t["id"], "approved")
+        wake(lines)
         log_line(lines, f"{t['id']}: bạn duyệt plan, chờ {busy[0]['id']} xong.")
         write_board(lines)
         return f"Đã duyệt plan **{t['id']}** ✅ Mình đang làm **{busy[0]['id']}**, xong sẽ làm tới task này ngay."
@@ -935,6 +950,7 @@ def cmd_plan_approve(arg):
     if r.startswith("✅"):
         lines = read_board()
         set_header(lines, "Current Phase", "RUNNING")
+        wake(lines)
         write_board(lines)
         return ""   # cmd_approve already told the user
     return r
@@ -948,6 +964,8 @@ def cmd_plan_reject(arg):
     set_state(lines, t["id"], "cancelled")
     others = [x for x in tasks(lines) if not x["done"]]
     set_header(lines, "Current Phase", "RUNNING" if others else "IDLE")
+    if others:
+        wake(lines)
     log_line(lines, f"{t['id']}: bạn hủy plan.")
     write_board(lines)
     return (f"Đã hủy **{t['id']}** 🚫 Nhánh `task/{t['slug']}` vẫn còn nếu bạn muốn xem lại plan." +
@@ -974,6 +992,7 @@ def cmd_plan_revise(arg, images=None):
     needs_info = t["state"] == "needs_info"
     set_state(lines, t["id"], "pending" if needs_info else "revise")   # no plan exists yet when context was missing
     set_header(lines, "Current Phase", "RUNNING")
+    wake(lines)
     log_line(lines, f"{t['id']}: bạn " + ("bổ sung thông tin." if needs_info else "yêu cầu sửa plan."))
     write_board(lines)
     if needs_info:
@@ -1028,6 +1047,50 @@ def cmd_skipped_notice():
     return n
 
 
+PIC_REF_RE = re.compile(r"\b(hinh|anh)\s+(tren|nay|duoi|ben duoi|dinh kem|vua gui)\b|\b(screenshot|mockup)\s+(nay|tren)\b")
+IMG_PATH_RE = re.compile(r"\.(png|jpe?g|webp|gif|svg)\b", re.I)
+
+
+def plain(s):
+    """Lower-case text without accents, so "hình này" and "hinh nay" match the same way."""
+    s = unicodedata.normalize("NFD", s.replace("đ", "d").replace("Đ", "D"))
+    return "".join(c for c in s if unicodedata.category(c) != "Mn").lower()
+
+
+def cmd_preflight(task_id):
+    """Cheap checks before a Claude call is spent on planning a pending task. Two cases where the Tech Lead could only answer
+    "I need more information" (each cost a whole call, and the answer restarted the planning from scratch):
+    - the title is only an opening line ending with ":" (the task was split from a list and the items became separate tasks);
+    - the title points at a picture ("hình trên", "ảnh này") but nothing was attached.
+    Skipped once the user has answered (plan-feedback exists). Returns OK or ASK (the question is sent and the task is [needs_info])."""
+    lines = read_board()
+    t = next((t for t in tasks(lines) if t["id"] == task_id), None)
+    if not t or t["state"] != "pending":
+        return "OK"
+    if os.path.exists(f"{AG}/plan-feedback/{t['slug']}.md"):
+        return "OK"
+    title = t["title"].strip()
+    if re.search(r"[:：]\s*$", title):
+        why = [f"Task chỉ có câu mở đầu `{short(title, 100)}` mà chưa có nội dung cụ thể.",
+               "Bạn muốn mình làm gì cụ thể? (Nếu các mục bên dưới đã thành task riêng thì gõ `/reject` để bỏ task này.)"]
+    elif PIC_REF_RE.search(plain(title)) and not IMG_PATH_RE.search(title) and not task_attachments(t["id"]):
+        why = [f"Task nhắc tới hình ảnh (`{short(title, 100)}`) nhưng mình không thấy ảnh nào đính kèm.",
+               "Bạn gửi lại ảnh (gõ `/revise` kèm ảnh) hoặc cho mình đường dẫn file ảnh trong project nhé."]
+    else:
+        return "OK"
+    q = "\n".join(f"- {w}" for w in why)
+    os.makedirs(f"{AG}/plan-feedback", exist_ok=True)
+    with open(f"{AG}/plan-feedback/{t['slug']}.question.md", "w", encoding="utf8") as f:
+        f.write(q + "\n")
+    set_state(lines, t["id"], "needs_info")
+    log_line(lines, f"{t['id']}: thiếu ngữ cảnh rõ ràng, hỏi bạn luôn (không gọi Claude).")
+    write_board(lines)
+    mark_notice(f"skip-{t['id']}-needs_info")   # this message is the notice: the queue must not send a second one
+    emit("techlead", f"Mình thiếu ngữ cảnh để lên plan **{t['id']}** ❓\n\n{q}\n\n"
+         f"Bạn trả lời bằng `/revise {t['id']} <thông tin>` để mình lập plan lại, hoặc `/reject {t['id']}` để bỏ.")
+    return "ASK"
+
+
 def cmd_block(task_id, reason):
     lines = read_board()
     set_state(lines, task_id, "BLOCKED")
@@ -1043,6 +1106,59 @@ def cmd_block(task_id, reason):
             "Mình tắt chế độ tự động rồi. Bạn xem plan và log, sau đó gõ `/resume` để chạy lại hoặc `/stop` để dừng nhé."))
     emit("manager", msg)
     return msg
+
+
+def cmd_start_task(slug):
+    """Put the working tree on a fresh task branch cut from the staging branch (or back on it when it already exists, e.g. after a
+    revise). Prints the path the plan file belongs at, so the Tech Lead only has to write the plan and commit it."""
+    stg = read_env().get("STAGING_BRANCH", "staging")
+    branch = f"task/{slug}"
+    rc, out = git("checkout", "-q", stg)
+    if rc != 0:
+        return f"ERROR: không chuyển sang được nhánh {stg}: {out[:200]}"
+    exists = git("rev-parse", "--verify", "-q", branch)[0] == 0
+    rc, out = git("checkout", "-q", branch) if exists else git("checkout", "-q", "-b", branch)
+    if rc != 0:
+        return f"ERROR: không tạo/chuyển sang được nhánh {branch}: {out[:200]}"
+    plan = plan_path(slug) or f"{AG}/tasks/{datetime.now():%Y-%m-%d}-{slug}.md"
+    return f"OK: {branch} {plan}"
+
+
+def cmd_merge_task(task_id, subject, body="", note=""):
+    """Deterministic merge step of the Tech Lead's Verify: squash task/<slug> into staging as one commit, delete the branch, mark
+    the task [done] and log it. The judgement (verify PASS, the commit message) stays with Claude; the git and board work does not.
+    Nothing is marked done unless the commit really exists."""
+    lines = read_board()
+    t = next((t for t in tasks(lines) if t["id"] == task_id), None)
+    if not t:
+        return f"ERROR: không thấy task {task_id} trên board"
+    if not subject.strip():
+        return "ERROR: thiếu dòng tiêu đề commit"
+    stg = read_env().get("STAGING_BRANCH", "staging")
+    branch = f"task/{t['slug']}"
+    if git("rev-parse", "--verify", "-q", branch)[0] != 0:
+        return f"ERROR: không thấy nhánh {branch}"
+    rc, out = git("checkout", "-q", stg)
+    if rc != 0:
+        return f"ERROR: không chuyển sang được nhánh {stg}: {out[:200]}"
+    rc, out = git("merge", "--squash", branch)
+    if rc != 0:
+        git("reset", "-q", "--merge")   # drop the half-done squash, keep unrelated local changes
+        return f"ERROR: squash {branch} vào {stg} bị lỗi (xung đột?): {out[:300]}"
+    if git("diff", "--cached", "--quiet")[0] == 0:
+        return f"ERROR: nhánh {branch} không có thay đổi nào so với {stg}, không commit gì"
+    args = ["commit", "-q", "-m", subject.strip()] + (["-m", body.strip()] if body.strip() else [])
+    rc, out = git(*args)
+    if rc != 0:
+        git("reset", "-q", "--merge")
+        return f"ERROR: commit lỗi: {out[:300]}"
+    sha = git("rev-parse", "--short", "HEAD")[1]
+    git("branch", "-D", branch)
+    lines = read_board()   # read again: checkout may have changed the board file
+    set_state(lines, task_id, "done")
+    log_line(lines, f"{task_id}: {note.strip() or 'Verify PASS'}, đã squash vào {stg} ({sha}).")
+    write_board(lines)
+    return f"✅ {task_id}: đã squash {branch} vào {stg} ({sha}), task [done]."
 
 
 def is_task_shot(t, path):
@@ -1886,6 +2002,31 @@ def main(argv):
         r = cmd_approve(a[0], by_user=len(a) > 1 and a[1] == "user")
         print(r)
         return 0 if r.startswith("✅") else 1
+    if c == "start-task":
+        r = cmd_start_task(a[0])
+        print(r)
+        return 0 if r.startswith("OK") else 1
+    if c == "merge-task":
+        body = note = ""
+        pos = []
+        i = 0
+        while i < len(a[1:]):
+            x = a[1:][i]
+            if x in ("--body", "--note") and i + 1 < len(a[1:]):
+                if x == "--body":
+                    body = a[1:][i + 1]
+                else:
+                    note = a[1:][i + 1]
+                i += 2
+                continue
+            pos.append(x)
+            i += 1
+        r = cmd_merge_task(a[0], " ".join(pos), body, note)
+        print(r)
+        return 0 if r.startswith("✅") else 1
+    if c == "preflight":
+        print(cmd_preflight(a[0]))
+        return 0
     if c == "block":
         print(cmd_block(a[0], " ".join(a[1:])))
         return 0

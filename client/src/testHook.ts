@@ -12,6 +12,7 @@ export const TEST_MODE_PARAM = "test";
 type StationLabelScene = {
   stationLabelTexts(): string[];
   pondRodInfo(sessionId: string): { visible: boolean; lineColor: number } | null;
+  pondRenderInfo(sessionId: string): { hookY: number | null; fish: { id: string; x: number }[] } | null;
 };
 
 /**
@@ -33,6 +34,9 @@ export type GameTestHook = {
   stationLabels(): string[];
   /** The local player's rod at the pond: whether it is held out and its line colour; null off-pond. */
   pondRod(): { visible: boolean; lineColor: number } | null;
+  /** The pond's rendered state for the local player: the hook's drawn y (null with no hook out)
+   *  and every fish's drawn x, so tests can assert smooth motion frame by frame. */
+  pondRender(): { hookY: number | null; fish: { id: string; x: number }[] } | null;
 };
 
 declare global {
@@ -55,5 +59,6 @@ export function installTestHook(room: Room<BobaShopState>, getShopScene: () => S
     tileRotations: () => Object.fromEntries(room.state.tileRotations ?? []),
     stationLabels: () => getShopScene()?.stationLabelTexts() ?? [],
     pondRod: () => getShopScene()?.pondRodInfo(room.sessionId) ?? null,
+    pondRender: () => getShopScene()?.pondRenderInfo(room.sessionId) ?? null,
   };
 }
