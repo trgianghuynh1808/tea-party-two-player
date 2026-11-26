@@ -38,3 +38,4 @@ server/data
 .agents/plan-feedback/
 .agents/notices/
 .agents/timeline/
+.agents/attachments/
