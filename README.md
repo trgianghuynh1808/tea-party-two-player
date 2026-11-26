@@ -79,8 +79,9 @@ Interaction rules live in `shared/src/interaction.ts` (`planInteraction`), used 
 - Outside, walk further left past the restaurant to the **🎣 Khu câu cá** gate; its doormat leads into a pond.
   The wooden dock at the top is where you walk, and fish swim back and forth in the water below (both players
   see the same fish).
-- **Bắt đầu câu** opens a 10-minute fishing session for the room (`FISH_SECONDS` overrides it). When the time is
-  up, a summary shows every player's fish count and fishing money.
+- From the yard, the **🎣 Câu cá** card in the **☀️ Sẵn sàng mở quán?** picker walks you into the pond and
+  opens a 10-minute fishing session for the room (`FISH_SECONDS` overrides it); once at the pond, **Bắt đầu câu**
+  does the same. When the time is up, a summary shows every player's fish count and fishing money.
 - Space drops the hook straight down from where you stand. When a fish bites, **hold** Space to reel it in —
   let go and it pulls back, too long and it escapes. A landed fish is sold straight into your own wallet;
   fishing money is never split.
@@ -198,6 +199,7 @@ pieces and can delete them, unless a shop still owns one.
 - WASD / arrow keys: move
 - Space: interact with the nearest station (highlighted). The hint at the bottom right shows what Space will do.
 - At the pond: Space casts the hook / pulls it back; hold Space to reel a biting fish (the action button works the same).
+  You can also start a session from the yard with the **🎣 Câu cá** card in the shift picker.
 - Decorate / build modes: **R** (or **⟳ Xoay**) turns the piece being placed or selected (only pieces with all four
   side artworks can turn), **Delete** sells the selected yard piece, **Esc** (or a click on an empty cell) deselects.
 - Touch devices: touch anywhere on the left half for a floating joystick (8 directions); the round button on the right is the action button and shows what it will do. Add `?touch=1` to the URL to force touch controls on desktop.

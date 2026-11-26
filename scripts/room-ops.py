@@ -492,6 +492,7 @@ def cmd_clear():
     n_msg = remove_files([f"{AG}/inbox/processed/*", f"{AG}/inbox/failed/*", f"{AG}/outbox/sent/*", f"{AG}/outbox/failed/*"])
     n_plan = remove_files([f"{AG}/plan/*", f"{AG}/plan-feedback/*"])
     remove_files([f"{AG}/manager.sig"])
+    shutil.rmtree(ATTACH_DIR, ignore_errors=True)
     return ("Dọn dẹp xong nè 🧹\n\n"
             f"- **Board:** đã reset ({len(ts)} task), bản sao ở `.agents/board-archive/{os.path.basename(archive)}`. Task mới sẽ tiếp tục từ **T{next_task_number(fresh):02d}**\n"
             f"- **Đã xóa:** {n_state} file trạng thái task, {n_msg} tin cũ, {n_plan} file hỏi đáp `/plan`\n"
@@ -528,7 +529,39 @@ def cmd_clearlog(args=""):
             "- `usage.log` được giữ nguyên (lịch sử chi phí cho `/usage`)")
 
 
-def cmd_auto(args):
+ATTACH_DIR = f"{AG}/attachments"
+IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+
+
+def attach_images(tid, images, tag="req"):
+    """Copy pictures the bridge saved in inbox/files into attachments/<tid>/. Only that folder is accepted. Returns the new paths."""
+    out = []
+    base = os.path.realpath(f"{AG}/inbox/files")
+    for i, rel in enumerate(images or []):
+        src = os.path.realpath(str(rel))
+        if not src.startswith(base + os.sep) or not os.path.isfile(src) or not src.lower().endswith(IMAGE_EXTS):
+            continue
+        d = f"{ATTACH_DIR}/{tid}"
+        os.makedirs(d, exist_ok=True)
+        dst = f"{d}/{tag}-{i + 1}{os.path.splitext(src)[1].lower()}"
+        shutil.copyfile(src, dst)
+        out.append(dst)
+    return out
+
+
+def drop_inbox_images(images):
+    base = os.path.realpath(f"{AG}/inbox/files")
+    for rel in images or []:
+        src = os.path.realpath(str(rel))
+        if src.startswith(base + os.sep) and os.path.isfile(src):
+            os.remove(src)
+
+
+def task_attachments(tid):
+    return sorted(glob.glob(f"{ATTACH_DIR}/{tid}/*"))
+
+
+def cmd_auto(args, images=None):
     items = [clean_item(l) for l in args.splitlines()]
     items = [i for i in items if i]
     if not items:
@@ -556,7 +589,13 @@ def cmd_auto(args):
     set_auto(lines, True, "RUNNING")
     log_line(lines, f"/task: thêm {len(new)} task.")
     write_board(lines)
-    return ("Nhận rồi nha! 🚀 Mình ghi **" + str(len(new)) + " việc** vào board:\n\n"
+    n_pics = 0
+    if images:   # the pictures belong to every task of this message
+        first = next_task_number(lines) - len(new)
+        for k in range(len(new)):
+            n_pics = len(attach_images(f"T{first + k:02d}", images))
+    return ("Nhận rồi nha! 🚀 Mình ghi **" + str(len(new)) + " việc** vào board"
+            + (f", kèm **{n_pics} ảnh** để Tech Lead xem khi lên plan 📎" if n_pics else "") + ":\n\n"
             + "\n".join(f"{i + 1}. {short(t, 110)}" for i, t in enumerate(items))
             + "\n\nTech Lead sẽ lên plan ngay đây ✨ "
             + ("Plan ổn thì mình giao OpenCode luôn." if auto else "Plan nào xong mình cũng gửi thẻ để bạn duyệt."))
@@ -576,6 +615,7 @@ def cleanup_after_ship(lines, keep):
                 os.remove(pf); n_prog += 1
             for tf in glob.glob(f"{AG}/timeline/{t['slug']}.log"):
                 os.remove(tf)
+            shutil.rmtree(f"{ATTACH_DIR}/{t['id']}", ignore_errors=True)
         if n_status or n_prog:
             out.append(f"{n_status} status, {n_prog} progress")
         if read_env().get("COMMIT_LINKS", "true") == "true" and repo_web_url():
@@ -868,7 +908,7 @@ def cmd_plan_reject(arg):
             (f"\nMình tiếp tục với {others[0]['id']} nhé." if others else ""))
 
 
-def cmd_plan_revise(arg):
+def cmd_plan_revise(arg, images=None):
     parts = arg.split(None, 1)
     key = parts[0] if parts and re.match(r"^T\d+$", parts[0], re.I) else ""
     feedback = (parts[1] if key and len(parts) > 1 else "" if key else arg).strip()
@@ -879,8 +919,11 @@ def cmd_plan_revise(arg):
         return f"Bạn muốn sửa gì ở plan **{t['id']}**? Gõ `/revise <góp ý>` nhé ✏️"
     d = f"{AG}/plan-feedback"
     os.makedirs(d, exist_ok=True)
+    pics = attach_images(t["id"], images, tag=f"rev-{datetime.now():%H%M%S}")
     with open(f"{d}/{t['slug']}.md", "a", encoding="utf8") as f:
         f.write(f"## Góp ý lúc {datetime.now():%Y-%m-%d %H:%M}\n{feedback}\n\n")
+        if pics:
+            f.write("Ảnh đính kèm (mở bằng Read): " + ", ".join(pics) + "\n\n")
     lines = read_board()
     needs_info = t["state"] == "needs_info"
     set_state(lines, t["id"], "pending" if needs_info else "revise")   # no plan exists yet when context was missing
@@ -1676,7 +1719,7 @@ def cmd_inbox(path):
     elif cmd == "/reject":
         reply = cmd_plan_reject(args)
     elif cmd == "/revise":
-        reply = cmd_plan_revise(args)
+        reply = cmd_plan_revise(args, d.get("images"))
     elif cmd == "/clear":
         reply = cmd_clear()
     elif cmd == "/clearlog":
@@ -1684,13 +1727,14 @@ def cmd_inbox(path):
     elif cmd in ("/auto", "/task"):
         if e.get("AUTO_SPLIT") == "claude":
             return 3
-        reply = cmd_auto(args)
+        reply = cmd_auto(args, d.get("images"))
     elif cmd is None:
         if e.get("CHAT_WITH_CLAUDE") == "true":
             return 3
         reply = HELP + "\n\n" + one_line_status()
     else:
         reply = HELP
+    drop_inbox_images(d.get("images"))
     if reply:
         emit("manager", reply)
     print(cmd or "text")
