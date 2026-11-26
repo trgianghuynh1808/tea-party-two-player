@@ -729,6 +729,32 @@ def timeline_block(shipped_tasks):
     return out
 
 
+def adopt_plan_files(lines, stg):
+    """A plan file of a board task can be left uncommitted (the squash did not take it, or the Tech Lead was cut off before the
+    commit). That is history, not user work: commit it on the staging branch so it does not block /ship. Plans of unknown tasks
+    are left alone. Returns the committed paths."""
+    if git("branch", "--show-current")[1].strip() != stg:
+        return []
+    slugs = [t["slug"] for t in tasks(lines)]
+    rc, out = git("status", "--porcelain", "--untracked-files=all", "--", f"{AG}/tasks")
+    mine = []
+    for l in out.splitlines() if rc == 0 else []:
+        path = l[3:].strip()
+        if "_TEMPLATE" in path or not path.endswith(".md"):
+            continue
+        if any(s in os.path.basename(path) for s in slugs):
+            mine.append(path)
+    if not mine:
+        return []
+    if git("add", "--", *mine)[0] != 0:
+        return []
+    names = ", ".join(os.path.basename(p) for p in mine)
+    if git("commit", "-q", "-m", f"docs: commit leftover task plan ({len(mine)})", "-m", names, "--", *mine)[0] != 0:
+        git("reset", "-q", "--", *mine)
+        return []
+    return mine
+
+
 def cmd_ship():
     lines = read_board()
     phase = get_phase(lines)
@@ -736,10 +762,15 @@ def cmd_ship():
         return f"Chưa có gì chờ duyệt ship hết (đang ở giai đoạn **{phase}**) 🙈"
     e = read_env()
     main, stg = e.get("MAIN_BRANCH", "main"), e.get("STAGING_BRANCH", "staging")
+    adopted = adopt_plan_files(lines, stg)
     rc, out = git("status", "--porcelain")
     if out:
+        orphans = {l[3:].strip() for l in out.splitlines()
+                   if l[3:].strip().startswith(f"{AG}/tasks/")}
         return ("Khoan đã, mình chưa ship được vì cây git còn file chưa commit ⚠️\n"
-                + "\n".join(f"- `{l[3:].strip()}`" for l in out.splitlines()[:8])
+                + "\n".join(f"- `{l[3:].strip()}`" + (" (plan không thuộc task nào trên board: commit nếu cần giữ, xoá nếu đã bỏ)"
+                                                      if l[3:].strip() in orphans else "")
+                            for l in out.splitlines()[:8])
                 + "\nBạn commit hoặc bỏ mấy file này rồi gõ `/ship` lại nhé.")
     has_remote = bool(git("remote")[1])
     rc, out = git("checkout", main)
