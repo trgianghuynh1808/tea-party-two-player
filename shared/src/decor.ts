@@ -213,9 +213,6 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     // Hanging plants (plants-sheet-1.png): hang on the wall.
     wallArt("hanging_fern", "Dương xỉ treo", 70, "hanging_fern", 71, 92, 0x2a9d8f),
     wallArt("hanging_pothos", "Trầu bà treo", 65, "hanging_pothos", 44, 96, 0x2a9d8f),
-    // Cut from client/assets-src/sheets/furniture/ by client/assets-src/tools/cut_furniture.py (front-facing pieces only).
-    decor("plant_slim", "Cây thân đứng", 75, "furniture/plant_slim", 24, 20, 80, 0x2a9d8f),
-    decor("plant_pattern_pot", "Cây lá lớn chậu hoa văn", 90, "furniture/plant_pattern_pot", 28, 22, 90, 0x2a9d8f),
   ]),
   ...inCategory("seating", [
     {
@@ -251,7 +248,6 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     decor("chest", "Rương gỗ", 60, "bedroom/chest", 46, 24, 44, 0xa0673a),
     decor("stove", "Lò sưởi gang", 110, "bedroom/stove", 44, 24, 60, 0x555a66),
     // bedroom-3-original.png
-    decor("wardrobe_arch", "Tủ áo vòm", 140, "bedroom/wardrobe_arch", 46, 24, 92, 0x8a3e1c),
     decor("desk_typewriter", "Bàn máy đánh chữ", 120, "bedroom/desk_typewriter", 104, 26, 64, 0x8a3e1c),
     decor("nightstand_teal_lamp", "Tủ đầu giường đèn xanh", 90, "bedroom/nightstand_teal_lamp", 58, 24, 64, 0x8a3e1c),
     bed(decor("bed_red_2", "Giường chăn đỏ thẫm", 150, "bedroom/bed_red_2", 50, 70, 100, 0xa82410), 0.5, 0.22),
@@ -346,19 +342,6 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     decor("bath_trash_can", "Thùng rác", 35, "bathroom/trash_can", 20, 16, 46, 0x52555a),
     wallArt("bath_hook_rack", "Giá móc", 40, "hook_rack", 46, 48, 0xcb6e28),
     wallArt("bath_mirror", "Gương", 70, "bath_mirror", 44, 56, 0x60c5f1),
-    wallArt("bath_vent", "Cửa thông gió", 40, "bath_vent", 60, 30, 0x8b8b94),
-    wallArt("bath_towel_shelf", "Kệ khăn", 60, "bath_towel_shelf", 64, 40, 0xcb6e28),
-    // Bathroom set 2: cut from bathroom-sheet-2.png (cut_bathroom.py); display size = (PNG - 8) / 2.
-    decor("bath_shower_glass", "Vách kính tắm", 160, "bathroom/shower_glass", 64, 20, 112, 0x9fd8e8),
-    decor("bath_toilet_cream", "Bồn cầu kem", 80, "bathroom/toilet_cream", 32, 24, 74, 0xf2ead8),
-    decor("bath_tall_cabinet", "Tủ cao có cây", 130, "bathroom/tall_cabinet", 40, 24, 118, 0xb26c24),
-    decor("bath_plant_shelf", "Kệ cây & giấy", 90, "bathroom/plant_shelf", 94, 24, 80, 0x7cb342),
-    decor("bath_sink_wood", "Bồn rửa gỗ", 120, "bathroom/sink_wood", 62, 26, 60, 0xcb6e28),
-    decor("bath_bench_soap", "Bàn giỏ & xà phòng", 70, "bathroom/bench_soap", 72, 26, 84, 0xd9a066),
-    decor("bath_washers", "Máy giặt đôi", 220, "bathroom/washers", 92, 28, 58, 0xe5e2dd),
-    decor("bath_bench_plain", "Bàn gỗ trống", 45, "bathroom/bench_plain", 70, 26, 54, 0xa9744f),
-    decor("bath_tub_duck", "Bồn tắm vịt vàng", 210, "bathroom/tub_duck", 100, 28, 80, 0xffd166),
-    decor("bath_plant_tall", "Cây lá cao", 85, "bathroom/plant_tall", 52, 22, 96, 0x6aa84f),
     wallArt("bath_mirror_framed", "Gương khung gỗ", 70, "mirror_framed", 38, 52, 0xb26c24),
     wallArt("bath_wall_lamp", "Đèn tường đôi", 60, "wall_lamp", 52, 38, 0xffd166),
     wallArt("bath_towel_rail", "Thanh treo khăn", 45, "towel_rail", 72, 38, 0xcb6e28),
@@ -372,7 +355,6 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     // The one-view pieces (counter, stove, microwave, stools, open fridges) can't turn, so they stay out.
     viewsDecor("fridge_kitchen", "Tủ lạnh", 180, 30, 24, 66, 0xe5e2dd, "kitchen"),
     viewsDecor("washer_kitchen", "Máy giặt cửa tròn", 150, 28, 24, 46, 0xe5e2dd, "kitchen"),
-    { ...viewsDecor("chair_kitchen", "Ghế gỗ bếp", 45, 22, 20, 42, 0xa9744f, "kitchen"), role: "seat" },
   ]),
   ...inCategory("gadgets", [
     // Drawn head-on by client/assets-src/tools/draw_gadget_props.py from the gadgets-ref references.
