@@ -10,7 +10,7 @@ const UPDATE_MS = 300;
 
 /**
  * Sidebar section while the local player is at the pond: every fish species grouped by
- * rarity (name + price), then every rod (name, price, reel speed) with the one the
+ * rarity (icon + name + price), then every rod (name, price, reel speed) with the one the
  * player owns highlighted. Read-only, all data from shared/src/fishing.ts.
  */
 export class FishGuide {
@@ -34,7 +34,10 @@ export class FishGuide {
       for (const fish of tierFish) {
         const row = el("div", "fish-guide-row");
         row.dataset.fish = fish.id;
-        row.append(el("span", "fish-guide-name", fish.name), el("span", "fish-guide-price", `$${fish.price}`));
+        const icon = el("img", "fish-guide-icon");
+        icon.src = `assets/fish/${fish.id}.png`;
+        icon.alt = "";
+        row.append(icon, el("span", "fish-guide-name", fish.name), el("span", "fish-guide-price", `$${fish.price}`));
         fishSection.append(row);
       }
     }

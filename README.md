@@ -78,21 +78,24 @@ Interaction rules live in `shared/src/interaction.ts` (`planInteraction`), used 
 
 - Outside, walk further left past the restaurant to the **🎣 Khu câu cá** gate; its doormat leads into a pond.
   The wooden dock at the top is where you walk, and fish swim back and forth in the water below (both players
-  see the same fish).
+  see the same fish, drawn as pixel-art sprites). The pond bed is decorated with seaweed, starfish, shells and a
+  crab, while a turtle, jellyfish, octopus and seahorse drift by — decoration only, nothing to interact with.
 - From the yard, the **🎣 Câu cá** card in the **☀️ Sẵn sàng mở quán?** picker walks you into the pond and
   opens a 10-minute fishing session for the room (`FISH_SECONDS` overrides it); once at the pond, **Bắt đầu câu**
   does the same. When the time is up, a summary shows every player's fish count and fishing money.
 - Space drops the hook straight down from where you stand. When a fish bites, **hold** Space to reel it in —
   let go and it pulls back, too long and it escapes. A landed fish is sold straight into your own wallet;
   fishing money is never split.
-- There are 8 fish in 5 rarities and 5 rods. A better rod makes rare fish bite more often and reels faster; buy
+- There are 15 fish in 5 rarities and 5 rods. A better rod makes rare fish bite more often and reels faster; buy
   the next level with your own money in the pond HUD. The rod level is saved per username (like the wallet).
 - While at the pond, the sidebar swaps the orders panel for a read-only fish & rod guide: every species grouped by
-  rarity with its price, every rod with its price and reel speed, the one you own highlighted
+  rarity with its sprite icon, name and price, every rod with its price and reel speed, the one you own highlighted
   (`client/src/ui/FishGuide.ts`). Leaving the pond brings the orders back.
 - Fishing is not a shift: a shift can't start during a session, and a session can't start during a shift.
   The pond has no furniture, so decorate mode is off there. Numbers live in `shared/src/fishing.ts`; rendering
-  and UI in `client/src/scenes/PondView.ts` and `client/src/ui/FishingPanel.ts`.
+  and UI in `client/src/scenes/PondView.ts` and `client/src/ui/FishingPanel.ts`; species and decor sprites are cut
+  from `client/assets-src/sheets/fish-sheet-1.jpg` / `fish-sheet-2.jpg` by `client/assets-src/tools/cut_fish.py`
+  into `client/public/assets/fish/<id>.png` and `client/public/assets/pond/<name>.png`.
 
 ## Mobile
 

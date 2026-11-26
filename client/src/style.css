@@ -719,6 +719,18 @@ h1 {
   font-size: 13px;
 }
 
+.fish-guide-row .fish-guide-name {
+  flex: 1;
+}
+
+.fish-guide-icon {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  image-rendering: pixelated;
+  object-fit: contain;
+}
+
 .fish-guide-row .fish-guide-price {
   flex: none;
   color: #6b5b57;

@@ -270,6 +270,48 @@ test("T4: the sidebar fish/rod guide only lives at the pond, replacing the order
   await expect(orders).toBeVisible();
 });
 
+test("T1: T22 every fish species has a PNG sprite and a FishGuide icon", async ({ page }) => {
+  await joinAsHost(page, uniqueUser());
+
+  for (const f of FISH) {
+    const res = await page.request.get(new URL(`assets/fish/${f.id}.png`, page.url()).href);
+    expect(res.status(), `${f.id} status`).toBe(200);
+    expect(res.headers()["content-type"], `${f.id} content-type`).toContain("image/png");
+  }
+
+  await send(page, "start_fishing");
+  await expect.poll(async () => (await snap(page)).fishPhase, { timeout: 10_000 }).toBe("fishing");
+
+  await expect(page.locator(".fish-guide-row[data-fish]")).toHaveCount(FISH.length);
+  await expect(page.locator(".fish-guide-row[data-fish] img.fish-guide-icon")).toHaveCount(FISH.length);
+});
+
+test("T2: T22 pond fish use valid species and load without errors", async ({ page }) => {
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on("console", (msg) => {
+    if (msg.type() === "error") consoleErrors.push(msg.text());
+  });
+  page.on("pageerror", (err) => pageErrors.push(err.message));
+
+  await joinAsHost(page, uniqueUser());
+
+  await send(page, "start_fishing");
+  await expect.poll(async () => (await snap(page)).fishPhase, { timeout: 10_000 }).toBe("fishing");
+  await expect.poll(async () => (await snap(page)).fishSize, { timeout: 10_000 }).toBe(FISH_COUNT);
+
+  const state = await snap(page);
+  const ids = FISH.map((f) => f.id);
+  expect(state.fish).toHaveLength(FISH_COUNT);
+  for (const fish of state.fish) {
+    expect(ids, `fish ${fish.id} species ${fish.species}`).toContain(fish.species);
+  }
+
+  expect(pageErrors, "pageerror").toEqual([]);
+  const bad = consoleErrors.filter((t) => t.includes("Failed to process file") || t.includes("404"));
+  expect(bad, "console errors").toEqual([]);
+});
+
 test("T4: two players in the pond see the same fish and each other's hook", async ({ browser }) => {
   const hostCtx = await browser.newContext();
   const guestCtx = await browser.newContext();
