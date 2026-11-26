@@ -1043,10 +1043,10 @@ h1 {
   margin-top: 14px;
 }
 
-/* Shift card: one compact card per venue (tea shop / restaurant). */
+/* Shift card: one compact card per place (tea shop / restaurant / fishing pond). */
 .venue-picks {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   width: 100%;
 }
@@ -1113,6 +1113,12 @@ h1 {
 
 .venue-pick.here .venue-go {
   background: #e76f51;
+}
+
+/* Three picks side by side: the "start" pill gets a little narrower on the fishing card. */
+.venue-pick.fish .venue-go {
+  padding: 2px 6px;
+  font-size: 11px;
 }
 
 .link-btn {

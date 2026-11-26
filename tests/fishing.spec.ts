@@ -152,6 +152,26 @@ test("T1: the pond gate's doormat takes the player into the pond, the dock mat t
   await expect(page.locator("#fishing-start")).toBeHidden();
 });
 
+test("T1: the Câu cá card in the shift picker warps the player to the pond and starts a session", async ({
+  page,
+}) => {
+  await joinAsHost(page, uniqueUser());
+  const before = await snap(page);
+  expect(before.fishPhase).not.toBe("fishing");
+  expect(before.me.x).toBeLessThan(POND.x);
+
+  await expect(page.locator("#shift-overlay")).toBeVisible();
+  await expect(page.locator("#shift-fish-pick")).toBeVisible();
+  await page.locator("#shift-fish-pick").click();
+
+  await expect.poll(async () => (await snap(page)).fishPhase, { timeout: 10_000 }).toBe("fishing");
+  const after = await snap(page);
+  expect(after.fish.length).toBe(FISH_COUNT);
+  expect(Math.abs(after.me.x - POND_ENTRY_SPAWN.x)).toBeLessThanOrEqual(40);
+  expect(Math.abs(after.me.y - POND_ENTRY_SPAWN.y)).toBeLessThanOrEqual(40);
+  await expect(page.locator("#shift-overlay")).toBeHidden();
+});
+
 test("T2: cast, bite, hold the reel -> one Cá rô sold into the catcher's wallet", async ({ page }) => {
   test.setTimeout(90_000);
   await joinAsHost(page, uniqueUser());

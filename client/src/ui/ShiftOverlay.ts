@@ -1,6 +1,7 @@
 import { Callbacks, type Room } from "@colyseus/sdk";
 import {
   GamePhase,
+  FISH_SECONDS,
   MISSED_ORDER_PENALTY,
   Messages,
   VENUES,
@@ -162,7 +163,25 @@ export class ShiftOverlay {
       });
       return start;
     });
-    picks.append(...buttons);
+
+    // Fishing is the third pick: the server walks the player to the pond and opens a session.
+    const fish = el("button", "venue-pick fish");
+    fish.id = "shift-fish-pick";
+    fish.type = "button";
+    fish.title = `${startLabel}: câu cá (${FISH_SECONDS / 60} phút)`;
+    fish.append(
+      el("span", "venue-icon", "🎣"),
+      el("span", "venue-name", "Câu cá"),
+      el("span", "venue-meta", `⏱ ${FISH_SECONDS / 60} phút`),
+      el("span", "venue-meta", "🐟 Cá & cần câu"),
+      el("span", "venue-go", "▶ Bắt đầu câu"),
+    );
+    fish.addEventListener("click", () => {
+      fish.blur(); // keep Space from re-clicking the button while playing
+      this.room.send(Messages.StartFishing);
+    });
+
+    picks.append(...buttons, fish);
     row.append(picks);
 
     const hide = el("button", "link-btn", "Ẩn bảng để đi dạo");

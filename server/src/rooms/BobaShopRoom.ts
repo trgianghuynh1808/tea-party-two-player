@@ -18,6 +18,7 @@ import {
   MACHINE_OVERFLOW_SECONDS,
   MISSED_ORDER_PENALTY,
   PICKY_FAST_BONUS,
+  POND_ENTRY_SPAWN,
   REEL_DECAY,
   REEL_START,
   REEL_TIMEOUT,
@@ -991,14 +992,23 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     if (player) player.hookState = "";
   }
 
-  /** Start a fishing session: only from the pond, never during a shift, never twice in a row. */
+  /** Start a fishing session: warps the sender to the pond, never during a shift, never twice in a row. */
   private handleStartFishing(client: Client) {
     const player = this.state.players.get(client.sessionId);
     if (!player) return;
     const fail = (reason: string) => client.send(ServerEvents.InteractFailed, { reason });
-    if (this.state.fishPhase === "fishing") return;
     if (this.state.phase === GamePhase.Playing) return fail("Đang trong ca làm, câu cá sau khi hết ca nhé");
-    if (areaOf(player) !== "pond") return fail("Phải đứng ở ao hồ mới câu được");
+    // Not at the pond yet: step them in (same as going through the gate) instead of refusing.
+    if (areaOf(player) !== "pond") {
+      player.bedId = "";
+      player.x = POND_ENTRY_SPAWN.x;
+      player.y = POND_ENTRY_SPAWN.y;
+      player.direction = "up";
+      player.teleportSeq++;
+      this.resetMoveBudget(client.sessionId);
+    }
+    // A session is already running: being at the pond is all there is to do.
+    if (this.state.fishPhase === "fishing") return;
 
     // A fresh session zeroes everyone's catch counters, then fills the pond.
     this.state.players.forEach((p) => {
