@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
   DOCK,
+  FISH,
   FISH_COUNT,
   HOOK_SPEED,
   PLAYER_RADIUS,
@@ -9,6 +10,7 @@ import {
   POND_ENTER_ZONE,
   POND_ENTRY_SPAWN,
   POND_EXIT_ZONE,
+  RODS,
   WATER,
   YARD,
   getFish,
@@ -216,6 +218,36 @@ test("T3: the 20s session ends with a summary, and money buys the next rod", asy
   await expect(upgrade).toContainText("Cần carbon");
   await expect(upgrade).toContainText("$900");
   await expect(upgrade).toBeDisabled();
+});
+
+test("T4: the sidebar fish/rod guide only lives at the pond, replacing the orders panel", async ({ page }) => {
+  await joinAsHost(page, uniqueUser());
+
+  const guide = page.locator("#fish-guide");
+  const orders = page.locator("#orders-panel");
+
+  // 1. In the yard: no guide, orders panel as usual.
+  await expect(guide).toBeHidden();
+  await expect(orders).toBeVisible();
+
+  // 2. At the pond: every fish by tier (above), every rod below, the owned rod highlighted.
+  await enterPond(page);
+  await expect(guide).toBeVisible();
+  await expect(page.locator("#fish-guide [data-fish]")).toHaveCount(FISH.length);
+  await expect(page.locator("#fish-guide [data-rod]")).toHaveCount(RODS.length);
+  await expect(page.locator('#fish-guide [data-rod="1"]')).toHaveAttribute("data-current", "true");
+  const fishBox = await page.locator('[data-testid="fish-guide-fish"]').boundingBox();
+  const rodsBox = await page.locator('[data-testid="fish-guide-rods"]').boundingBox();
+  expect(fishBox).not.toBeNull();
+  expect(rodsBox).not.toBeNull();
+  if (fishBox && rodsBox) expect(fishBox.y).toBeLessThan(rodsBox.y);
+  await expect(orders).toBeHidden();
+
+  // 3. Back in the yard: the guide hides and the orders panel returns.
+  await exitPond(page);
+  await expect.poll(async () => (await snap(page)).me.y).toBeGreaterThanOrEqual(YARD.y);
+  await expect(guide).toBeHidden();
+  await expect(orders).toBeVisible();
 });
 
 test("T4: two players in the pond see the same fish and each other's hook", async ({ browser }) => {
