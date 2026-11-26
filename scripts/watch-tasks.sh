@@ -64,6 +64,10 @@ while true; do
   echo "🚀 Nhận task từ Claude: $task"
   echo "════════════════════════════════════════════"
 
+  # Several tasks can be in flight: every message names its task ("**T12** · ...")
+  tag=""; tid="$([[ -f .agents/room.env && -f "$OPS" ]] && python3 "$OPS" task-id "$task" 2>/dev/null || true)"
+  [[ -n "$tid" ]] && tag="**$tid** · "
+
   # File plan chỉ có trên nhánh task/<slug>: nếu cây làm việc đang ở nhánh khác (vd staging), chuyển sang nhánh task
   if [[ ! -f "$task" ]]; then
     slug=$(basename "$task" .md | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}-//')
@@ -79,17 +83,17 @@ while true; do
     # Báo cho bên chờ biết ngay, nếu không status kẹt ở 'queued' và wait-task.sh chỉ đoán "watcher không chạy"
     mkdir -p "$STATUS_DIR"
     printf 'stuck %s\n' "$(date +%s)" > "$STATUS_DIR/$(basename "$task" .md).status"
-    say_user dev "Huhu, mình không tìm thấy file task \`$(basename "$task")\` 😭 (đang ở nhánh \`$(git rev-parse --abbrev-ref HEAD)\`). Mình đánh dấu task là kẹt, nhờ Tech Lead xem giúp nha."
+    say_user dev "${tag}Huhu, mình không tìm thấy file task \`$(basename "$task")\` 😭 (đang ở nhánh \`$(git rev-parse --abbrev-ref HEAD)\`). Mình đánh dấu task là kẹt, nhờ Tech Lead xem giúp nha."
   else
     set_status "$task" running
-    say_user dev "Nhận việc rồi! Bắt tay vào code thôi 💪⌨️\n- \`$(basename "$task" .md | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}-//')\`"
+    say_user dev "${tag}Nhận việc rồi! Bắt tay vào code thôi 💪⌨️\n- \`$(basename "$task" .md | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}-//')\`"
     if AUTOPILOT=1 scripts/run-task.sh "$task"; then
       set_status "$task" done
-      say_user dev "Code xong hết rồi nè! 🎉 Mình chuyển cho Tech Lead verify nhé."
+      say_user dev "${tag}Code xong hết rồi nè! 🎉 Mình chuyển cho Tech Lead verify nhé."
       notify "OpenCode đã xong ✅" "$(basename "$task") — Claude tiếp tục"
     else
       set_status "$task" stuck
-      say_user dev "Mình bị kẹt rồi 😵 Nhờ Tech Lead xem giúp nha."
+      say_user dev "${tag}Mình bị kẹt rồi 😵 Nhờ Tech Lead xem giúp nha."
       notify "OpenCode bị kẹt ⛔" "$(basename "$task") — Claude xử lý"
     fi
   fi
