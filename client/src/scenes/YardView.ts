@@ -5,6 +5,9 @@ import {
   BUILD_TILES,
   CONNECT,
   OUTDOOR,
+  POND_BUILDING,
+  POND_DOOR_X,
+  POND_ENTER_ZONE,
   PROP_ART_DROP,
   PROP_SCALE,
   RESTAURANT_BUILDING,
@@ -144,6 +147,7 @@ export class YardView {
     this.drawShopFront();
     this.drawRestaurantLot();
     this.drawRestaurantFront();
+    this.drawPondFront();
 
     // A change also changes how the neighbours connect (walls) or trim their floor: redraw the 3x3 block.
     const $ = Callbacks.get(room);
@@ -400,6 +404,81 @@ export class YardView {
       if (!this.scene.textures.exists(key)) continue;
       const img = this.scene.add.image(x, b.bottom + 6, key).setOrigin(0.5, 1);
       img.setScale(height / img.height).setDepth(b.bottom + 6);
+    }
+  }
+
+  // ---------------------------------------------------------------- The fishing pond's gate, left of the restaurant
+
+  /** A wooden arch gate to the fishing pond (code art; the real artwork arrives later). */
+  private drawPondFront() {
+    const b = POND_BUILDING;
+    const g = this.scene.add.graphics().setDepth(b.bottom);
+    const door = POND_DOOR_X;
+    const w = b.right - b.left;
+
+    // A little pond in front of the gate, so the gate says what's inside.
+    const pondCy = b.bottom + 84;
+    g.fillStyle(0x4fa3d1).fillEllipse(door, pondCy, 300, 64);
+    g.fillStyle(0x1b4965, 0.35).fillEllipse(door, pondCy + 10, 240, 40);
+    g.lineStyle(2, 0x93c56a).strokeEllipse(door, pondCy, 304, 68);
+    g.lineStyle(1, 0xffffff, 0.35).strokeEllipse(door - 60, pondCy - 6, 60, 10).strokeEllipse(door + 70, pondCy + 8, 44, 8);
+
+    // Two wooden posts and a beam on top: an open arch you can see through.
+    const postW = 26;
+    const beamTop = b.top + 34;
+    for (const px of [b.left + 34, b.right - 34 - postW]) {
+      g.fillStyle(0x6d4c41).fillRect(px, beamTop, postW, b.bottom - beamTop);
+      g.fillStyle(0x8d5a3b).fillRect(px, beamTop, postW, 10).fillRect(px, b.bottom - 10, postW, 10);
+      g.lineStyle(2, 0x4a332a, 0.6).strokeRect(px, beamTop, postW, b.bottom - beamTop);
+    }
+    g.fillStyle(0x8d5a3b).fillRect(b.left + 20, b.top + 8, w - 40, beamTop - b.top - 8);
+    g.fillStyle(0x6d4c41);
+    for (let x = b.left + 20; x < b.right - 20; x += 24) g.fillRect(x, b.top + 8, 3, beamTop - b.top - 8);
+    g.lineStyle(2, 0x4a332a, 0.6).strokeRect(b.left + 20, b.top + 8, w - 40, beamTop - b.top - 8);
+
+    // Sign hanging from the beam.
+    g.fillStyle(0x3d2c29).fillRoundedRect(door - 120, b.top + 34, 240, 42, 10);
+    g.lineStyle(3, 0xd4a373).strokeRoundedRect(door - 120, b.top + 34, 240, 42, 10);
+    this.scene.add
+      .text(door, b.top + 55, "🎣 Khu câu cá", { fontFamily: "sans-serif", fontSize: "22px", fontStyle: "bold", color: "#fdf6ec" })
+      .setOrigin(0.5)
+      .setDepth(b.bottom + 1);
+
+    // Doormat in front of the gate.
+    const mat = POND_ENTER_ZONE;
+    this.scene.add
+      .rectangle((mat.left + mat.right) / 2, (mat.top + mat.bottom) / 2 + 2, mat.right - mat.left, mat.bottom - mat.top - 4, 0x457b9d)
+      .setStrokeStyle(2, 0x2c5a77)
+      .setDepth(FLOOR_DEPTH + 2);
+    this.scene.add
+      .text(door, mat.bottom + 14, "Bước lên thảm để vào khu câu cá", {
+        fontFamily: "sans-serif",
+        fontSize: "12px",
+        color: "#3d2c29",
+        backgroundColor: "#fdf6ecd9",
+        padding: { x: 4, y: 1 },
+      })
+      .setOrigin(0.5)
+      .setDepth(FLOOR_DEPTH + 3);
+
+    // Signpost on the restaurant's side pointing to the pond.
+    this.scene.add
+      .text(b.right + 24, b.bottom - 60, "⬅ 🎣 Khu câu cá", {
+        fontFamily: "sans-serif",
+        fontSize: "15px",
+        fontStyle: "bold",
+        color: "#3d2c29",
+        backgroundColor: "#fdf6ecd9",
+        padding: { x: 6, y: 3 },
+      })
+      .setOrigin(0, 0.5)
+      .setDepth(FLOOR_DEPTH + 1);
+
+    // Lanterns hanging from the posts.
+    for (const px of [b.left + 47, b.right - 47] as const) {
+      if (!this.scene.textures.exists("decor-lantern_lit")) continue;
+      const img = this.scene.add.image(px, beamTop + 30, "decor-lantern_lit").setOrigin(0.5, 0);
+      img.setScale(40 / img.height).setDepth(b.bottom + 6);
     }
   }
 

@@ -24,6 +24,8 @@ const el = <K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text 
 export class ShiftOverlay {
   private unsubscribers: (() => void)[] = [];
   private collapsed = false;
+  /** The player is somewhere the shift card doesn't apply (the fishing pond has its own panel). */
+  private forceHidden = false;
   /** Venue suggested first: where the local player is standing (the restaurant, or else the tea shop). */
   private here: Venue = "shop";
 
@@ -52,10 +54,10 @@ export class ShiftOverlay {
     this.root.replaceChildren();
   }
 
-  /** The local player moved to another area: offer to open the place they're in first. */
+  /** The local player moved to another area: offer to open the place they're in first (hidden at the pond). */
   setArea(area: string) {
+    this.forceHidden = area === "pond";
     const here: Venue = area === "restaurant" ? "restaurant" : area === "shop" ? "shop" : this.here;
-    if (here === this.here) return;
     this.here = here;
     this.render();
   }
@@ -70,7 +72,7 @@ export class ShiftOverlay {
   private render() {
     const state = this.room.state;
     const phase = state.phase as GamePhase;
-    this.root.hidden = phase === GamePhase.Playing;
+    this.root.hidden = this.forceHidden || phase === GamePhase.Playing;
     if (this.root.hidden) return;
 
     const card = el("div", "shift-card");

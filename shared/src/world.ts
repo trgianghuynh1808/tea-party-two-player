@@ -43,8 +43,9 @@ export const SHOP_LOT: Rect = { left: 0, top: YARD.y, right: 520, bottom: YARD.y
 // (nobody can build on it, it's outside YARD). Inside, it's a third box next to the tea shop (y above the yard),
 // bigger than the screen so the camera scrolls with the player.
 
-/** Everything outdoors players can walk on: the build grid (YARD) plus the restaurant's street on its left. */
-export const OUTDOOR = { x: -1000, y: YARD.y, width: YARD.width + 1000, height: YARD.height } as const;
+/** Everything outdoors players can walk on: the build grid (YARD) plus the street to its left, which
+ *  reaches the restaurant and, further left, the fishing pond's gate. */
+export const OUTDOOR = { x: -1900, y: YARD.y, width: YARD.width + 1900, height: YARD.height } as const;
 /** The restaurant seen from outside (blocks movement); its door is in the middle of the front wall. */
 export const RESTAURANT_BUILDING: Rect = { left: -900, top: YARD.y + 40, right: -340, bottom: YARD.y + 320 };
 export const RESTAURANT_DOOR_X = (RESTAURANT_BUILDING.left + RESTAURANT_BUILDING.right) / 2;
@@ -79,16 +80,46 @@ export const RESTAURANT_EXIT_ZONE: Rect = {
 /** Where a player walking into the restaurant appears. */
 export const RESTAURANT_ENTRY_SPAWN = { x: RESTAURANT.x + 500, y: RESTAURANT.y + RESTAURANT.height - 70 };
 
-/** Where a position is: inside the tea shop, inside the restaurant, or outdoors. */
-export type Area = "shop" | "restaurant" | "yard";
+// ---------------------------------------------------------------- Fishing pond (a third place, left of the restaurant)
+//
+// The pond's gate stands further left on the same street. Inside, the pond is another box next to the
+// others: a wooden dock to walk on at the top and water below it (fishing, not a work shift).
+
+/** The pond's gate seen from outside (blocks movement), like the two buildings. */
+export const POND_BUILDING: Rect = { left: -1760, top: YARD.y + 40, right: -1240, bottom: YARD.y + 320 };
+export const POND_DOOR_X = (POND_BUILDING.left + POND_BUILDING.right) / 2;
+/** Stepping on the doormat in front of the gate goes to the pond. */
+export const POND_ENTER_ZONE: Rect = {
+  left: POND_DOOR_X - 26,
+  top: POND_BUILDING.bottom,
+  right: POND_DOOR_X + 26,
+  bottom: POND_BUILDING.bottom + 28,
+};
+/** Where a player coming out of the pond appears. */
+export const POND_YARD_SPAWN = { x: POND_DOOR_X, y: POND_BUILDING.bottom + 70 };
+
+/** The pond's interior (world px): a fixed 960×600 view, like the shop's. */
+export const POND = { x: 3000, y: 0, width: 960, height: 600 } as const;
+/** The wooden dock players walk on (they can't step into the water). */
+export const DOCK: Rect = { left: POND.x + 24, right: POND.x + 936, top: 70, bottom: 150 };
+/** The water the fish swim in (below the dock). */
+export const WATER: Rect = { left: POND.x + 16, right: POND.x + 944, top: 160, bottom: 580 };
+/** Inside: the way out is a doormat at the left end of the dock. */
+export const POND_EXIT_ZONE: Rect = { left: POND.x + 24, top: 110, right: POND.x + 90, bottom: 150 };
+/** Where a player walking into the pond appears (far from the exit mat, so it doesn't bounce back). */
+export const POND_ENTRY_SPAWN = { x: POND.x + 480, y: 110 };
+
+/** Where a position is: inside the tea shop, inside the restaurant, at the pond, or outdoors. */
+export type Area = "shop" | "restaurant" | "yard" | "pond";
 export function areaOf(p: { x: number; y: number }): Area {
   if (isInYard(p)) return "yard";
+  if (p.x >= POND.x - 200) return "pond";
   return p.x >= RESTAURANT.x - 200 ? "restaurant" : "shop";
 }
 
 /** A door between outdoors and a building: the doormats on both sides and where you appear. */
 export interface DoorDef {
-  inside: "shop" | "restaurant";
+  inside: "shop" | "restaurant" | "pond";
   enter: Rect;
   exit: Rect;
   insideSpawn: { x: number; y: number };
@@ -102,6 +133,13 @@ export const DOORS: DoorDef[] = [
     exit: RESTAURANT_EXIT_ZONE,
     insideSpawn: RESTAURANT_ENTRY_SPAWN,
     outsideSpawn: RESTAURANT_YARD_SPAWN,
+  },
+  {
+    inside: "pond",
+    enter: POND_ENTER_ZONE,
+    exit: POND_EXIT_ZONE,
+    insideSpawn: POND_ENTRY_SPAWN,
+    outsideSpawn: POND_YARD_SPAWN,
   },
 ];
 

@@ -6,6 +6,7 @@ import {
   GamePhase,
   StationType,
   Messages,
+  POND,
   POSITION_SEND_INTERVAL_MS,
   ALL_STATIONS,
   BURNT_ITEM,
@@ -55,6 +56,7 @@ import { CupView, foodTextureKey, preloadCupTextures } from "./CupView";
 import { DecorController, bedPillowPoint, preloadDecorTextures } from "./DecorController";
 import { CustomerController } from "./CustomerController";
 import { YardView, preloadBuildTextures } from "./YardView";
+import { PondView } from "./PondView";
 import { RestaurantView, ensureTileTexture } from "./RestaurantView";
 import { KITCHEN_ART_RISE, kitchenStationTexture, makeKitchenStationTextures } from "./KitchenArt";
 import { makeTeaStationTextures, teaStationTexture } from "./TeaArt";
@@ -232,6 +234,7 @@ export class ShopScene extends Phaser.Scene {
   private decor?: DecorController;
   private customers?: CustomerController;
   private yard?: YardView;
+  private pond?: PondView;
   private build?: BuildController;
   /** Area the camera currently shows (undefined until the local player exists). */
   private area?: Area;
@@ -254,6 +257,8 @@ export class ShopScene extends Phaser.Scene {
   private touch?: TouchControls;
   private actionHint!: Phaser.GameObjects.Text;
   private lastActionKey = "";
+  /** Last Reel { holding } we sent (the pond sends it only when the hold changes). */
+  private lastReelHeld = false;
   private lastSent = { x: NaN, y: NaN, direction: "", at: 0 };
   private localDirection: Direction = "down";
 
@@ -359,6 +364,7 @@ export class ShopScene extends Phaser.Scene {
       this.decor?.destroy();
       this.customers?.destroy();
       this.yard?.destroy();
+      this.pond?.destroy();
       this.build?.destroy();
     });
 
@@ -374,6 +380,8 @@ export class ShopScene extends Phaser.Scene {
     // The yard outside the shop and building on it.
     this.yard = new YardView(this, room);
     this.build = new BuildController(this, room);
+    // The fishing pond's interior (fish + hook lines), drawn from the synced state.
+    this.pond = new PondView(this, room);
 
     $.onAdd("players", (player, sessionId) => {
       const view = this.createPlayerView(player, sessionId === room.sessionId);
@@ -502,6 +510,7 @@ export class ShopScene extends Phaser.Scene {
       this.animateWalk(view, dt);
     }
     this.customers?.update(dt);
+    this.pond?.update(dt);
     this.updateArea();
 
     this.updateStationHighlight();
@@ -546,9 +555,34 @@ export class ShopScene extends Phaser.Scene {
     // Always consume both so a stale tap doesn't fire later.
     const pressedSpace = k.justPressed("Space");
     const tappedAction = this.touch?.consumeAction() ?? false;
-    if (pressedSpace || tappedAction) {
+    if (this.area === "pond") {
+      // At the pond the action key works the rod (touch reels with the fishing panel's hold button).
+      this.handlePondAction(k.isDown("Space"), pressedSpace || tappedAction);
+    } else if (pressedSpace || tappedAction) {
       this.room.send(Messages.Interact);
     }
+  }
+
+  /**
+   * The rod at the pond: a tap casts (no hook out) or retracts (hook sinking); while a fish is on the
+   * line, holding the key reels and releasing lets it pull back (sent only when the hold changes).
+   */
+  private handlePondAction(held: boolean, pressed: boolean) {
+    const room = this.room!;
+    const player = room.state.players.get(room.sessionId);
+    if (!player) return;
+    if (player.hookState === "reel") {
+      if (held !== this.lastReelHeld) {
+        this.lastReelHeld = held;
+        room.send(Messages.Reel, { holding: held });
+      }
+      return;
+    }
+    // Between fish: forget the old hold so the next bite starts from the current key state.
+    this.lastReelHeld = false;
+    if (!pressed) return;
+    if (player.hookState === "") room.send(Messages.Cast);
+    else if (player.hookState === "drop") room.send(Messages.Retract);
   }
 
   /** Standing on a doormat (outside) or at an exit (inside): ask the server to go through the door. */
@@ -559,7 +593,7 @@ export class ShopScene extends Phaser.Scene {
     this.room!.send(Messages.UseDoor);
   }
 
-  /** Point the camera at the area the local player is in (shop: fixed view; restaurant and yard: scroll with the player). */
+  /** Point the camera at the area the local player is in (shop and pond: fixed view; restaurant and yard: scroll with the player). */
   private updateArea() {
     const local = this.room ? this.players.get(this.room.sessionId) : undefined;
     if (!local) return;
@@ -567,7 +601,14 @@ export class ShopScene extends Phaser.Scene {
     if (area === this.area) return;
     this.area = area;
     const cam = this.cameras.main;
-    const box = area === "yard" ? OUTDOOR : area === "restaurant" ? RESTAURANT : { x: 0, y: 0, width: WORLD_WIDTH, height: WORLD_HEIGHT };
+    const box =
+      area === "yard"
+        ? OUTDOOR
+        : area === "restaurant"
+          ? RESTAURANT
+          : area === "pond"
+            ? POND
+            : { x: 0, y: 0, width: WORLD_WIDTH, height: WORLD_HEIGHT };
     cam.setBounds(box.x, box.y, box.width, box.height);
     cam.centerOn(local.container.x, local.container.y);
     this.lastActionKey = ""; // refresh the action hint
@@ -1042,6 +1083,21 @@ export class ShopScene extends Phaser.Scene {
     const local = room ? this.players.get(room.sessionId) : undefined;
     // The first state patch may not have arrived yet during the first frames.
     const state = room?.state;
+
+    // At the pond there are no stations: the action key works the rod instead.
+    if (this.area === "pond") {
+      const hookState = state?.players?.get(room!.sessionId)?.hookState ?? "";
+      const label = hookState === "" ? "🎣 Thả câu" : hookState === "drop" ? "↩ Thu lưỡi" : "🎣 Giữ để kéo";
+      for (const view of this.stations.values()) view.highlight.setVisible(false);
+      this.tableHighlight.setVisible(false);
+      const key = `pond|${label}`;
+      if (key === this.lastActionKey) return;
+      this.lastActionKey = key;
+      this.touch?.setAction(label);
+      this.actionHint.setText(`[Space] ${label}`).setColor("#2a9d8f").setVisible(!this.touch);
+      return;
+    }
+
     const tables = state?.orders && state.decorations ? tablesWaiting(state.decorations, state.orders) : [];
     const beds = state?.decorations ? bedSpots(state.decorations, state.tiles?.entries()) : [];
     // In bed the action key only gets up: nothing to highlight.

@@ -59,8 +59,16 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 120_000,
       /* The admin API + /portal only exist when ADMIN_TOKEN is set; the admin-portal spec relies on it.
-         Spread process.env (Playwright replaces the whole environment, which would drop PATH). */
-      env: { ...process.env, ADMIN_TOKEN: 'test-admin-token', PORT: String(TEST_SERVER_PORT) },
+         FISH_SECONDS/FISH_TEST/DEBUG_WARP make fishing sessions short, deterministic and warpable for the
+         fishing spec. Spread process.env (Playwright replaces the whole environment, which would drop PATH). */
+      env: {
+        ...process.env,
+        ADMIN_TOKEN: 'test-admin-token',
+        PORT: String(TEST_SERVER_PORT),
+        FISH_SECONDS: '20',
+        FISH_TEST: '1',
+        DEBUG_WARP: '1',
+      },
     },
     {
       command: 'npm run dev:client',

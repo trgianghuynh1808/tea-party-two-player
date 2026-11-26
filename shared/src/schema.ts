@@ -22,6 +22,25 @@ export class Player extends Schema {
   @type("string") bedId: string = "";
   /** Bumped when the server moves the player itself (spawn, shift start, rejected move): the client must snap. */
   @type("number") teleportSeq: number = 0;
+
+  // Fishing (see shared/src/fishing.ts): per-player rod, hook and catch counters.
+  /** Rod level 1..5 (saved with the player's shop, see SharedShop). */
+  @type("number") rodLevel: number = 1;
+  /** "" = no hook out, "drop" = hook sinking, "reel" = a fish is on the line. */
+  @type("string") hookState: string = "";
+  @type("number") hookX: number = 0;
+  @type("number") hookY: number = 0;
+  /** 0..1 while a fish is on the line (see REEL_START / reelRate). */
+  @type("number") reelProgress: number = 0;
+  /** Fish landed during the current fishing session. */
+  @type("number") fishCaught: number = 0;
+  /** Money earned from fishing during the current session. */
+  @type("number") fishEarned: number = 0;
+  /** Species id (see FISH) of the last fish landed; bump catchSeq to announce it. */
+  @type("string") lastCatch: string = "";
+  @type("number") catchSeq: number = 0;
+  /** Bumped every time a hooked fish escapes. */
+  @type("number") escapeSeq: number = 0;
 }
 
 export class Station extends Schema {
@@ -59,6 +78,19 @@ export class Order extends Schema {
   @type("string") looks: string = "";
 }
 
+/** A fish swimming in the pond, synced to every client (see FISH in @boba/shared). */
+export class Fish extends Schema {
+  @type("string") id: string = "";
+  /** Species id (see FISH). */
+  @type("string") species: string = "";
+  @type("number") x: number = 0;
+  @type("number") y: number = 0;
+  /** 1 = swimming right, -1 = left. */
+  @type("number") dir: number = 1;
+  /** A player's hook is in this fish (it stays at the hook). */
+  @type("boolean") hooked: boolean = false;
+}
+
 export class BobaShopState extends Schema {
   /** Room title shown in the lobby and the side panel. */
   @type("string") roomName: string = "";
@@ -84,4 +116,11 @@ export class BobaShopState extends Schema {
   /** Orders completed in a row without a customer walking out. */
   @type("number") combo: number = 0;
   @type("number") bestCombo: number = 0;
+
+  // Fishing session state (independent of shifts, see fishPhase rules in the task file)
+  /** "idle" (never started / over) | "fishing" | "ended" (summary shown until someone starts again). */
+  @type("string") fishPhase: string = "idle";
+  @type("number") fishTimeLeft: number = 0;
+  /** Fish swimming in the pond while fishPhase === "fishing". */
+  @type({ map: Fish }) fish = new MapSchema<Fish>();
 }

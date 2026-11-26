@@ -15,9 +15,9 @@ Guidelines for coding agents working in this repo.
 - Transport: Colyseus WebSocket rooms (client uses `@colyseus/sdk`). HTTP endpoints on the same server: `GET /rooms` (lobby room list, CORS), `GET /health`, `GET /custom-decor` (portal-added furniture catalog) and `GET /custom-decor/<kind>.png` (its cut-out artwork, both CORS `*`), admin API under `/admin/users/...` and `/admin/custom-decor...` (enabled only when `ADMIN_TOKEN` is set). In production the server also serves `client/dist` from the same origin.
 - Ports: server 2567 (`SERVER_PORT` in `shared/src/index.ts`, override with `PORT`); client dev 5173 (`VITE_SERVER_URL` points the client at another server).
 - Server-held state:
-  - `BobaShopRoom` (`server/src/rooms/BobaShopRoom.ts`): Colyseus schema state — players (position, direction, held item, wallet mirror, host flag, bed), stations, decorations, orders, shift phase/hostName — plus room-internal maps (move budgets, delivery timers, seat cooldowns). Max 2 players, 2-minute reconnect grace.
+  - `BobaShopRoom` (`server/src/rooms/BobaShopRoom.ts`): Colyseus schema state — players (position, direction, held item, wallet mirror, host flag, bed, rod level/hook), stations, decorations, orders, shift phase/hostName, fishing (`fishPhase`, `fishTimeLeft`, `fish`) — plus room-internal maps (move budgets, delivery timers, seat cooldowns, fish simulation / hooked fish / reel hold). Max 2 players, 2-minute reconnect grace.
   - `SharedShop` (`server/src/shop/SharedShop.ts`): per-username shop (money + furniture), one instance per username cached in a server-wide map (`openShop`/`shopOf`); persisted via `ShopStore` (Upstash Redis when env vars are set, else JSON files in `server/data/`).
-- Client → server messages (`Messages` in `shared/src/index.ts`): `position` (every 50 ms), `interact`, `buy_decoration`, `move_decoration`, `sell_decoration`, `start_shift`, `use_door`, `build_tiles`, `move_tile`, `sell_tile`, `leave_bed`. The server validates actions with the same `planInteraction` rules the client uses for previews (`shared/src/interaction.ts`), then updates the schema, which syncs to all clients.
+- Client → server messages (`Messages` in `shared/src/index.ts`): `position` (every 50 ms), `interact`, `buy_decoration`, `move_decoration`, `sell_decoration`, `start_shift`, `use_door`, `build_tiles`, `move_tile`, `sell_tile`, `leave_bed`, and the pond's `start_fishing`, `cast`, `reel` (`ReelMessage { holding }`), `retract`, `upgrade_rod`. `debug_warp` is registered only when the server env `DEBUG_WARP=1` (e2e teleport). Fishing is simulated server-side in `updateFishing` (60 Hz): `FISH_SECONDS` overrides the 10-minute session and `FISH_TEST=1` makes every fish a Cá rô that always bites. The server validates actions with the same `planInteraction` rules the client uses for previews (`shared/src/interaction.ts`), then updates the schema, which syncs to all clients.
 
 ## Codebase Map
 
@@ -25,16 +25,16 @@ Guidelines for coding agents working in this repo.
 - `client/src/customCatalog.ts` — fetches the portal-added furniture catalog before the first game boot (turns its image paths into absolute URLs) and exports `decorImageUrl` for the panels.
 - `client/src/updateChecker.ts` — `initUpdateChecker()`: polls the build's `version.json`, compares it with `__BUILD_ID__` and shows the undismissable reload popup when a newer build is deployed; exposes `window.__UPDATE__` under `?test=1`.
 - `client/src/scenes/ShopScene.ts` — main scene: game loop, input handling, sends `Messages.*`, renders world.
-- `client/src/scenes/` — sub-controllers/views: `CustomerController`, `DecorController`, `BuildController`, `RestaurantView`, `YardView`, `CupView`, art modules.
-- `client/src/ui/` — DOM panels: `OrdersPanel`, `DecorPanel`, `BuildPanel`, `ShiftOverlay`, `RecipeGuide`, `rotateUi` (shared ⟳ Xoay button + ⟳ badge used by both the decorate and build panels).
+- `client/src/scenes/` — sub-controllers/views: `CustomerController`, `DecorController`, `BuildController`, `RestaurantView`, `YardView`, `PondView`, `CupView`, art modules.
+- `client/src/ui/` — DOM panels: `OrdersPanel`, `DecorPanel`, `BuildPanel`, `FishingPanel`, `ShiftOverlay`, `RecipeGuide`, `rotateUi` (shared ⟳ Xoay button + ⟳ badge used by both the decorate and build panels).
 - `client/src/input/` — `KeyboardState` (WASD/arrows + Space), `TouchControls` (joystick + action button).
 - `client/src/forceLandscape.ts` — forces landscape on phones (orientation lock or CSS rotation).
 - `client/assets-src/` — source art sheets and the art tools in `tools/` (`cut_food.py`, `cut_bathroom.py` — cuts both `bathroom-sheet-1.png` and `bathroom-sheet-2.png`, one background + cut list per sheet — `draw_bathroom_props.py`, `draw_gadget_props.py` — head-on phone/tablet/TV stand/piano sprites).
 - `server/src/index.ts` — Colyseus + Express setup: room registry, `/rooms`, `/health`, admin API, static client.
 - `server/src/customDecor.ts` — loads the stored custom furniture into the shared catalog at startup and serves the public `GET /custom-decor` list + PNGs; `server/src/admin.ts` has the portal's create/list/delete routes.
-- `server/src/rooms/BobaShopRoom.ts` — room logic: message handlers, shifts, customers, orders, earnings split.
+- `server/src/rooms/BobaShopRoom.ts` — room logic: message handlers, shifts, customers, orders, earnings split, fishing session simulation.
 - `server/src/shop/SharedShop.ts` — shared per-username shop state; `server/src/persistence/ShopStore.ts` — users/shops persistence.
-- `shared/src/` — `index.ts` (constants, `Messages`), `schema.ts` (Colyseus schema), `interaction.ts` (action rules), `menu.ts`, `venues.ts`, `restaurant.ts`, `decor.ts`, `customDecor.ts` (portal-added furniture parsing + catalog sync), `seating.ts`, `placement.ts`, `characters.ts`, `world.ts`, `lobby.ts`.
+- `shared/src/` — `index.ts` (constants, `Messages`), `schema.ts` (Colyseus schema), `interaction.ts` (action rules), `fishing.ts` (fish species, rods, reel maths), `menu.ts`, `venues.ts`, `restaurant.ts`, `decor.ts`, `customDecor.ts` (portal-added furniture parsing + catalog sync), `seating.ts`, `placement.ts`, `characters.ts`, `world.ts` (incl. `POND`/`DOCK`/`WATER`), `lobby.ts`.
 
 Main flow: `client/src/main.ts` (join) → `ShopScene` loop → `room.send(Messages.*)` → `BobaShopRoom` handler → validated via `shared/src/interaction.ts` → schema update broadcast → client scene/panels re-render.
 

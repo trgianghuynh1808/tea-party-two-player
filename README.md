@@ -74,6 +74,22 @@ Menu, ingredients, cooking methods and the kitchen layout live in `shared/src/re
 from `client/assets-src/sheets/food/` by `client/assets-src/tools/cut_food.py` (boxes in `food_cuts.json`).
 Interaction rules live in `shared/src/interaction.ts` (`planInteraction`), used by the server to apply actions and by the client to preview them.
 
+### Fishing pond
+
+- Outside, walk further left past the restaurant to the **🎣 Khu câu cá** gate; its doormat leads into a pond.
+  The wooden dock at the top is where you walk, and fish swim back and forth in the water below (both players
+  see the same fish).
+- **Bắt đầu câu** opens a 10-minute fishing session for the room (`FISH_SECONDS` overrides it). When the time is
+  up, a summary shows every player's fish count and fishing money.
+- Space drops the hook straight down from where you stand. When a fish bites, **hold** Space to reel it in —
+  let go and it pulls back, too long and it escapes. A landed fish is sold straight into your own wallet;
+  fishing money is never split.
+- There are 8 fish in 5 rarities and 5 rods. A better rod makes rare fish bite more often and reels faster; buy
+  the next level with your own money in the pond HUD. The rod level is saved per username (like the wallet).
+- Fishing is not a shift: a shift can't start during a session, and a session can't start during a shift.
+  The pond has no furniture, so decorate mode is off there. Numbers live in `shared/src/fishing.ts`; rendering
+  and UI in `client/src/scenes/PondView.ts` and `client/src/ui/FishingPanel.ts`.
+
 ## Mobile
 
 Phones always play in landscape (`client/src/forceLandscape.ts`):
@@ -86,6 +102,8 @@ Phones always play in landscape (`client/src/forceLandscape.ts`):
 The game area scales to fit the screen; the side panel shows the orders, and cooking guides (**?**) open as pop-ups.
 In build mode one finger either builds or steers: the **🚶 Đi lại / 🔨 Xây tiếp** button (top right of the game)
 switches between dragging to build and the joystick. Picking a material switches back to building.
+At the pond, the action button casts / pulls the hook back; hold the **🤜 GIỮ để kéo** button (or the action
+button) to reel a biting fish.
 
 To test on a phone, open the Vite **Network** URL (e.g. `http://192.168.x.x:5173`) on the same Wi-Fi.
 
@@ -104,6 +122,9 @@ WebSocket from the same origin. Then either:
 ## Dev options
 
 - `SHIFT_SECONDS=20 npm run dev` — shorter shifts for testing (server only).
+- `FISH_SECONDS=20 npm run dev` — shorter fishing sessions for testing (server only; default 600).
+- `FISH_TEST=1 npm run dev` — test fishing mode: every fish is a Cá rô that always bites (server only).
+- `DEBUG_WARP=1 npm run dev` — enables the test-only `debug_warp` message that teleports the player (server only; used by e2e).
 - `VITE_SERVER_URL=http://host:2567` — point the client at another game server.
 - `npx playwright test` — e2e tests run on their own ports (server 2568, client 5174) and never reuse your dev server on 2567/5173.
 - Each build writes a `version.json` (a fresh `BUILD_ID`, or your `BUILD_ID` env). Open pages fetch it at load,
@@ -173,6 +194,7 @@ pieces and can delete them, unless a shop still owns one.
 
 - WASD / arrow keys: move
 - Space: interact with the nearest station (highlighted). The hint at the bottom right shows what Space will do.
+- At the pond: Space casts the hook / pulls it back; hold Space to reel a biting fish (the action button works the same).
 - Decorate / build modes: **R** (or **⟳ Xoay**) turns the piece being placed or selected (only pieces with all four
   side artworks can turn), **Delete** sells the selected yard piece, **Esc** (or a click on an empty cell) deselects.
 - Touch devices: touch anywhere on the left half for a floating joystick (8 directions); the round button on the right is the action button and shows what it will do. Add `?touch=1` to the URL to force touch controls on desktop.

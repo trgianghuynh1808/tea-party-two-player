@@ -272,6 +272,8 @@ export function parseShopSave(data: unknown): ShopSave {
   return {
     version: 1,
     money: Number.isFinite(save.money) ? Math.max(0, Math.floor(save.money!)) : 0,
+    // Old saves have no rod: the starting rod (level 1). Clamped to the levels that exist.
+    rodLevel: Number.isFinite(save.rodLevel) ? Math.min(5, Math.max(1, Math.floor(save.rodLevel!))) : 1,
     decorations: (Array.isArray(save.decorations) ? save.decorations : [])
       .filter((d) => d && getDecorationDef(d.kind) && Number.isFinite(d.x) && Number.isFinite(d.y))
       .map(({ kind, x, y, rotation }) => ({ kind, x, y, rotation: Number.isFinite(rotation) ? rotation : 0 })),

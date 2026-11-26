@@ -14,12 +14,12 @@ import {
   canPlaceDecoration,
   footprintOf,
   getDecorationDef,
+  getRod,
   normalizeRotation,
   piecesOnSurface,
   refundFor,
   snapToGrid,
   tileKey,
-  type Area,
   type PlacedDecoration,
   type ShopSave,
 } from "@boba/shared";
@@ -41,8 +41,11 @@ export interface PieceInfo {
   x: number;
   y: number;
   rotation: number;
-  /** From areaOf: pieces can only be placed inside a room, so this is "shop" or "restaurant" in practice. */
-  venue: Area;
+  /**
+   * Which venue the piece stands in. From areaOf, narrowed: placement rules (canPlaceDecoration)
+   * only accept positions inside a decorable room, so never "yard" or "pond".
+   */
+  venue: "shop" | "restaurant";
 }
 
 /** How much money to give back for removed pieces: the full price, or nothing. */
@@ -60,6 +63,7 @@ export interface TileKindInfo {
 /** What changed in the shop; every open room mirrors these into its synced state. */
 export type ShopEvent =
   | { type: "money"; money: number }
+  | { type: "rodLevel"; level: number }
   | { type: "added"; piece: Piece }
   | { type: "moved"; piece: Piece }
   | { type: "removed"; id: string }
@@ -76,6 +80,8 @@ export type ShopEvent =
  */
 export class SharedShop {
   money = 0;
+  /** Fishing rod level 1..5 (see RODS in @boba/shared), saved with the shop. */
+  rodLevel = 1;
   readonly pieces: Piece[] = [];
   /** Yard buildings: tileKey -> tile kind. */
   readonly tiles = new Map<string, string>();
@@ -133,6 +139,22 @@ export class SharedShop {
     this.emit({ type: "money", money: this.money });
     this.scheduleSave();
     return delta;
+  }
+
+  /**
+   * Buy the next fishing rod level with this wallet's money (see RODS). Returns an error message,
+   * or undefined on success; emits "money" + "rodLevel" so open rooms mirror both.
+   */
+  upgradeRod(): string | undefined {
+    const next = getRod(this.rodLevel + 1);
+    if (!next) return "Bạn đã có cần câu cao cấp nhất rồi";
+    if (this.money < next.price) return `Không đủ tiền (cần $${next.price})`;
+    this.money -= next.price;
+    this.rodLevel = next.level;
+    this.emit({ type: "money", money: this.money });
+    this.emit({ type: "rodLevel", level: this.rodLevel });
+    this.scheduleSave();
+    return undefined;
   }
 
   /** Buy and place a piece. Returns an error message, or undefined on success. */
@@ -222,7 +244,7 @@ export class SharedShop {
         x: piece.x,
         y: piece.y,
         rotation: piece.rotation,
-        venue: areaOf({ x: piece.x, y: piece.y }),
+        venue: areaOf({ x: piece.x, y: piece.y }) as PieceInfo["venue"],
       };
     });
   }
@@ -423,6 +445,7 @@ export class SharedShop {
     return {
       version: 1,
       money: this.money,
+      rodLevel: this.rodLevel,
       decorations: this.pieces.map(({ kind, x, y, rotation }) => ({ kind, x, y, rotation })),
       tiles: Object.fromEntries(this.tiles),
       tileRotations: Object.fromEntries(this.tileRotations),
@@ -486,9 +509,11 @@ export class SharedShop {
     console.log(`[SharedShop] restored ${this.shopId}: $${this.money}, ${this.pieces.length} decorations`);
   }
 
-  /** Load a save's money + furniture into memory (pieces must be empty). Returns how many pieces were dropped. */
+  /** Load a save's money + rod + furniture into memory (pieces must be empty). Returns how many pieces were dropped. */
   private apply(save: ShopSave): number {
     this.money = save.money;
+    // Old saves have no rod level: the starting rod (level 1).
+    this.rodLevel = save.rodLevel ?? 1;
     for (const [key, kind] of Object.entries(save.tiles ?? {})) this.tiles.set(key, kind);
     // Old saves have no facings: props keep facing front (rotation 0).
     for (const [key, rot] of Object.entries(save.tileRotations ?? {})) {
