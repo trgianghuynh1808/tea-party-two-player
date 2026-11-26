@@ -258,6 +258,26 @@ test("bathroom-2 T1: the 6 new items are in the bathroom category, with art on d
   expect(DECORATION_CATALOG.filter((d) => d.category === "bathroom")).toHaveLength(13);
 });
 
+const BATHROOM_WALL_IMAGES = [
+  "bath_mirror",
+  "hook_rack",
+  "mirror_framed",
+  "wall_lamp",
+  "towel_rail",
+  "towel_hook",
+  "towel_shelf_wood",
+  "water_heater",
+];
+
+test("bathroom-images T1: every bathroom item's art lives in assets/decor/bathroom/ and the old wall/ files are gone", () => {
+  for (const def of DECORATION_CATALOG.filter((d) => d.category === "bathroom")) {
+    expect(def.image.startsWith("assets/decor/bathroom/"), `${def.kind}: ${def.image}`).toBe(true);
+    expect(existsSync(`client/public/${def.image}`), def.kind).toBe(true);
+  }
+  for (const name of BATHROOM_WALL_IMAGES)
+    expect(existsSync(`client/public/assets/decor/wall/${name}.png`), name).toBe(false);
+});
+
 // ---------------------------------------------------------------- 🍳 kitchen set
 
 const KITCHEN_KINDS = ["fridge_kitchen", "washer_kitchen"];

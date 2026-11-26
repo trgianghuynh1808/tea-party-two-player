@@ -189,7 +189,8 @@ const wallArt = (kind: string, label: string, price: number, image: string, widt
   height,
   layer: "wall",
   // Cut from the sheets in client/assets-src/sheets/ (slice_sheet.py, names in <sheet>.names.json).
-  image: `assets/decor/wall/${image}.png`,
+  // `image` may include a folder (e.g. "bathroom/mirror"): then it is used as-is under assets/decor/.
+  image: `assets/decor/${image.includes("/") ? image : `wall/${image}`}.png`,
 });
 
 // Kinds are saved in shop files: keep existing ones (plant, lamp, chair, table, rug) when changing the catalog.
@@ -340,14 +341,14 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     decor("bath_toilet_front", "Bồn cầu", 75, "bathroom/toilet_front", 30, 24, 74, 0xf2f2f2),
     decor("bath_cabinet_bottles", "Tủ chai lọ", 110, "bathroom/cabinet_bottles", 44, 24, 100, 0xb26c24),
     decor("bath_trash_can", "Thùng rác", 35, "bathroom/trash_can", 20, 16, 46, 0x52555a),
-    wallArt("bath_hook_rack", "Giá móc", 40, "hook_rack", 46, 48, 0xcb6e28),
-    wallArt("bath_mirror", "Gương", 70, "bath_mirror", 44, 56, 0x60c5f1),
-    wallArt("bath_mirror_framed", "Gương khung gỗ", 70, "mirror_framed", 38, 52, 0xb26c24),
-    wallArt("bath_wall_lamp", "Đèn tường đôi", 60, "wall_lamp", 52, 38, 0xffd166),
-    wallArt("bath_towel_rail", "Thanh treo khăn", 45, "towel_rail", 72, 38, 0xcb6e28),
-    wallArt("bath_towel_hook", "Khăn treo móc", 35, "towel_hook", 38, 34, 0xb7543f),
-    wallArt("bath_towel_shelf_wood", "Kệ khăn & chai", 65, "towel_shelf_wood", 64, 50, 0xcb6e28),
-    wallArt("bath_water_heater", "Bình nước nóng", 110, "water_heater", 38, 68, 0xe5e2dd),
+    wallArt("bath_hook_rack", "Giá móc", 40, "bathroom/hook_rack", 46, 48, 0xcb6e28),
+    wallArt("bath_mirror", "Gương", 70, "bathroom/bath_mirror", 44, 56, 0x60c5f1),
+    wallArt("bath_mirror_framed", "Gương khung gỗ", 70, "bathroom/mirror_framed", 38, 52, 0xb26c24),
+    wallArt("bath_wall_lamp", "Đèn tường đôi", 60, "bathroom/wall_lamp", 52, 38, 0xffd166),
+    wallArt("bath_towel_rail", "Thanh treo khăn", 45, "bathroom/towel_rail", 72, 38, 0xcb6e28),
+    wallArt("bath_towel_hook", "Khăn treo móc", 35, "bathroom/towel_hook", 38, 34, 0xb7543f),
+    wallArt("bath_towel_shelf_wood", "Kệ khăn & chai", 65, "bathroom/towel_shelf_wood", 64, 50, 0xcb6e28),
+    wallArt("bath_water_heater", "Bình nước nóng", 110, "bathroom/water_heater", 38, 68, 0xe5e2dd),
   ]),
   ...inCategory("kitchen", [
     // Kitchen set: the sheet's only pieces drawn with a front, a back and a side view, cut into

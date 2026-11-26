@@ -3,7 +3,7 @@
     .venv-art/bin/python client/assets-src/tools/draw_bathroom_props.py
 
 Writes  client/public/assets/decor/bathroom/bath_{vanity_sink,bathtub}.png
-and     client/public/assets/decor/wall/bath_mirror.png
+and     client/public/assets/decor/bathroom/bath_mirror.png
 plus a  preview client/assets-src/sheets/bathroom-preview.png (all 7 bathroom pieces,
 cut and drawn, on a neutral grey, 3x, labelled).
 
@@ -25,7 +25,7 @@ import pngio  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 OUT_FLOOR = os.path.join(ROOT, "client", "public", "assets", "decor", "bathroom")
-OUT_WALL = os.path.join(ROOT, "client", "public", "assets", "decor", "wall")
+OUT_WALL = OUT_FLOOR
 PREVIEW = os.path.join(ROOT, "client", "assets-src", "sheets", "bathroom-preview.png")
 
 # ---------------------------------------------------------------- palette (dark -> light), sampled from the sheet
@@ -272,7 +272,7 @@ def preview():
     for names, folder, align in ((FLOOR_PNGS, "bathroom", "bottom"), (WALL_PNGS, "wall", "top")):
         imgs = []
         for n in names:
-            im = Image.open(os.path.join(ROOT, "client", "public", "assets", "decor", folder, n + ".png"))
+            im = Image.open(os.path.join(OUT_FLOOR if folder == "bathroom" else OUT_WALL, n + ".png"))
             imgs.append((n, im.resize((im.width // 4, im.height // 4), Image.NEAREST)))
         rows.append((imgs, align, max(im.height for _, im in imgs)))
     W = max(sum(im.width * scale for _, im in imgs) + pad * (len(imgs) + 1) for imgs, _, _ in rows)

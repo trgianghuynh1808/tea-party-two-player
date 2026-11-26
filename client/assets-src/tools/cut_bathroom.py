@@ -9,8 +9,8 @@ under the pieces never make it into the sprites: only the biggest
 colour-distinct blob in each box is kept (like cut_furniture.py), and the
 <=2px shadow remnants below a base average away when the crop is
 downscaled. CUTS maps (sheet, name) -> (box, H, target) where H is the
-on-screen height and target picks the output folder: floor pieces go to
-public/assets/decor/bathroom/, wall pieces to public/assets/decor/wall/.
+on-screen height and target only picks the preview row; every piece goes
+to public/assets/decor/bathroom/.
 The sprite is pixelated to match the existing furniture: downscaled to
 H/2 px tall, palette reduced to 20 colours, 1px dark outline, blown back
 up x4 (saved at 2x display height).
@@ -28,7 +28,7 @@ from scipy import ndimage as ndi
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT_FLOOR = os.path.join(HERE, "../../public/assets/decor/bathroom")
-OUT_WALL = os.path.join(HERE, "../../public/assets/decor/wall")
+OUT_WALL = OUT_FLOOR
 PREVIEW = os.path.join(HERE, "../sheets/bathroom-preview-2.png")
 DIST_MIN = 28
 OUTLINE = (61, 44, 41)
