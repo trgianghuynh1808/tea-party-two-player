@@ -42,7 +42,7 @@ To play from another machine on the same LAN, open the **Network** URL printed b
 - Every drink has its own recipe (ordered steps), shown on its order card; the **?** next to it opens a step-by-step
   cooking guide (`client/src/ui/RecipeGuide.ts`).
 - The back wall holds nine machines: the teas and toppings on the left, the shared **Sữa** in the middle, and the fruit juices
-  (🍊 cam, 🍉 dưa hấu, 🍋 chanh) on the right. The cup shelf now stands on the floor by the left wall.
+  (🍊 cam, 🍉 dưa hấu, 🍋 chanh) on the right. Two cup shelves stand on the floor: one by the left wall and one by the right wall, near the juice machines.
 - Each machine adds one ingredient. Machines marked ⏱ take time: put the cup down, wait for "Xong!", press Space again to pick it up.
 - Machines refuse steps that don't lead to any drink on the menu. Throw a cup in the trash bin to start over.
 - Delivering pays the drink price, plus a $5 tip per drink if served with more than half of the time left.

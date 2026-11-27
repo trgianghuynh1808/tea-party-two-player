@@ -136,6 +136,7 @@ interface PlayerView {
  */
 const STATION_TEXTURES: Partial<Record<string, string>> = {
   cup_shelf: "assets/stations/cup_shelf.png",
+  cup_shelf_2: "assets/stations/cup_shelf.png",
   black_tea: "assets/stations/black_tea.png",
   green_tea: "assets/stations/green_tea.png",
   milk: "assets/stations/milk.png",
@@ -187,6 +188,7 @@ interface StationIcon {
 }
 const STATION_ICONS: Partial<Record<string, StationIcon>> = {
   cup_shelf: { url: "assets/cups/empty.png", height: 40 },
+  cup_shelf_2: { url: "assets/cups/empty.png", height: 40 },
   black_tea: { url: "assets/items/icons/tea_leaves.png", height: 36 },
   milk: { url: "assets/items/icons/milk_carton.png", height: 42 },
   green_tea: { url: "assets/items/icons/tea_leaves.png", height: 36 },
