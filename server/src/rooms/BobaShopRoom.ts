@@ -894,6 +894,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
 
     this.state.players.forEach((player, sessionId) => {
       if (player.hookState === "drop") this.updateHookDrop(sessionId, player, dt);
+      else if (player.hookState === "rise") this.updateHookRise(sessionId, player, dt);
       else if (player.hookState === "reel") this.updateHookReel(sessionId, player, dt);
     });
   }
@@ -932,9 +933,28 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     this.state.fish.delete(id);
   }
 
-  /** A dropped hook sinks; the first fish it touches may take it (one roll per drop each), the floor reels it in. */
+  /** A dropped hook sinks; the first fish it touches may take it (one roll per drop each), the floor sends it back up. */
   private updateHookDrop(sessionId: string, player: Player, dt: number) {
     player.hookY += HOOK_SPEED * dt;
+    if (this.tryHookFish(sessionId, player)) return;
+    if (player.hookY >= WATER.bottom) player.hookState = "rise";
+  }
+
+  /**
+   * A pulled-back (or floor-bounced) hook rises; fish on the way up can still take it. Once it
+   * reaches the surface the line is cleared.
+   */
+  private updateHookRise(sessionId: string, player: Player, dt: number) {
+    player.hookY -= HOOK_SPEED * dt;
+    if (this.tryHookFish(sessionId, player)) return;
+    if (player.hookY <= WATER.top) this.clearHook(sessionId, player);
+  }
+
+  /**
+   * Roll the hook against nearby fish (one roll per fish per cast). Returns true when a fish took
+   * the hook (the player switches to "reel").
+   */
+  private tryHookFish(sessionId: string, player: Player): boolean {
     const rolled = this.biteRolled.get(sessionId) ?? new Set<string>();
     this.biteRolled.set(sessionId, rolled);
     for (const [id, sim] of this.fishSim) {
@@ -958,9 +978,9 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
       player.hookState = "reel";
       player.reelProgress = REEL_START;
       this.startReelZone(sessionId, player, def);
-      return;
+      return true;
     }
-    if (player.hookY >= WATER.bottom) this.clearHook(sessionId, player);
+    return false;
   }
 
   /**
@@ -1121,11 +1141,11 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     this.reelHolding.set(client.sessionId, payload?.holding === true);
   }
 
-  /** Pull the hook back up before any fish took it. */
+  /** Pull the hook back up: it rises instead of vanishing, so fish may still take it on the way. */
   private handleRetract(client: Client) {
     const player = this.state.players.get(client.sessionId);
     if (!player || player.hookState !== "drop") return;
-    this.clearHook(client.sessionId, player);
+    player.hookState = "rise";
   }
 
   /** Buy the next rod level with the sender's own wallet (saved with their shop, mirrors to Player). */

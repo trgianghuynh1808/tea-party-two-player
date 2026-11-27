@@ -335,7 +335,7 @@ export class PondView {
     });
     const angling = new Set<string>();
     this.room.state.players.forEach((player, id) => {
-      if (player.hookState !== "drop" && player.hookState !== "reel") return;
+      if (player.hookState !== "drop" && player.hookState !== "rise" && player.hookState !== "reel") return;
       angling.add(id);
       // The angler's drawn position (their sprite, already interpolated), falling back to the schema.
       const pos = this.playerPos(id) ?? player;
@@ -371,8 +371,8 @@ export class PondView {
     }
   }
 
-  /** The hook y drawn for `id`: while sinking it advances at HOOK_SPEED like the server and is
-   *  pulled towards the schema's value; any other state (or a new cast) follows the schema. */
+  /** The hook y drawn for `id`: while sinking or rising it advances at HOOK_SPEED like the server
+   *  and is pulled towards the schema's value; any other state (or a new cast) follows the schema. */
   private predictHookY(id: string, player: Player, dt: number): number {
     // A state change (bite, retract) or a moved hookX means a new cast: restart from the server's y.
     const cast = this.hookCasts.get(id);
@@ -381,12 +381,14 @@ export class PondView {
       this.hookYs.set(id, player.hookY);
       return player.hookY;
     }
-    if (player.hookState !== "drop") {
+    if (player.hookState !== "drop" && player.hookState !== "rise") {
       this.hookYs.set(id, player.hookY);
       return player.hookY;
     }
-    let y = (this.hookYs.get(id) ?? player.hookY) + HOOK_SPEED * dt;
+    const dir = player.hookState === "rise" ? -1 : 1;
+    let y = (this.hookYs.get(id) ?? player.hookY) + dir * HOOK_SPEED * dt;
     y += (player.hookY - y) * Math.min(1, dt * 8);
+    if (player.hookState === "rise") y = Math.max(WATER.top, y);
     this.hookYs.set(id, y);
     return y;
   }
@@ -443,7 +445,7 @@ export class PondView {
    *  frame by frame. */
   renderInfo(sessionId: string): { hookY: number | null; fish: { id: string; x: number }[]; biteFx: number } {
     const player = this.room.state.players.get(sessionId);
-    const hookOut = !!player && (player.hookState === "drop" || player.hookState === "reel");
+    const hookOut = !!player && (player.hookState === "drop" || player.hookState === "rise" || player.hookState === "reel");
     const hookY = hookOut ? (this.hookYs.get(sessionId) ?? player!.hookY) : null;
     const fish: { id: string; x: number }[] = [];
     this.fishViews.forEach((view) => fish.push({ id: view.state.id, x: view.x }));

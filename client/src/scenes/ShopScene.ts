@@ -569,8 +569,8 @@ export class ShopScene extends Phaser.Scene {
   }
 
   /**
-   * The rod at the pond: a tap casts (no hook out) or retracts (hook sinking); while a fish is on the
-   * line, holding the key reels and releasing lets it pull back (sent only when the hold changes).
+   * The rod at the pond: a tap casts (no hook out) or retracts (hook sinking); while the hook is
+   * rising or a fish is on the line nothing more is sent (holding the key reels a hooked fish).
    */
   private handlePondAction(held: boolean, pressed: boolean) {
     const room = this.room!;
@@ -1104,7 +1104,14 @@ export class ShopScene extends Phaser.Scene {
     // At the pond there are no stations: the action key works the rod instead.
     if (this.area === "pond") {
       const hookState = state?.players?.get(room!.sessionId)?.hookState ?? "";
-      const label = hookState === "" ? "🎣 Thả câu" : hookState === "drop" ? "↩ Thu lưỡi" : "🎣 Giữ để kéo";
+      const label =
+        hookState === ""
+          ? "🎣 Thả câu"
+          : hookState === "drop"
+            ? "↩ Thu lưỡi"
+            : hookState === "rise"
+              ? "↩ Đang thu"
+              : "🎣 Giữ để kéo";
       for (const view of this.stations.values()) view.highlight.setVisible(false);
       this.tableHighlight.setVisible(false);
       const key = `pond|${label}`;

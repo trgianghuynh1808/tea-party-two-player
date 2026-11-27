@@ -85,7 +85,9 @@ Interaction rules live in `shared/src/interaction.ts` (`planInteraction`), used 
   does the same. When the time is up, a summary shows every player's fish count, fishing money and the
   biggest (priciest) fish they landed during the session.
 - Space drops the hook straight down from where you stand. A pixel-art rod appears in your hand with the line
-  running down to the hook. When a fish bites, ripples spread around the float with a ❗ and a **Cá cắn câu!**
+  running down to the hook. Space again pulls it back up (a hook that reaches the pond floor also rises); it
+  climbs back at the same speed, and fish can still take it on the way up. When a fish bites, ripples spread
+  around the float with a ❗ and a **Cá cắn câu!**
   toast; **hold** Space to reel it in, keeping the tension pointer (the dark marker) inside the green safe zone:
   it rises while you hold and falls when you let go, and reel progress only grows while it is inside. The zone
   drifts back and forth and jerks to a new spot every few seconds; rarer fish get a narrower, faster zone with
@@ -211,8 +213,8 @@ pieces and can delete them, unless a shop still owns one.
 
 - WASD / arrow keys: move
 - Space: interact with the nearest station (highlighted). The hint at the bottom right shows what Space will do.
-- At the pond: Space casts the hook / pulls it back; hold Space to reel a biting fish and keep the pointer in
-  the green safe zone (the action button works the same).
+- At the pond: Space casts the hook / pulls it back (the hook then rises, and can still hook a fish on the way up);
+  hold Space to reel a biting fish and keep the pointer in the green safe zone (the action button works the same).
   You can also start a session from the yard with the **🎣 Câu cá** card in the shift picker.
 - Decorate / build modes: **R** (or **⟳ Xoay**) turns the piece being placed or selected (only pieces with all four
   side artworks can turn), **Delete** sells the selected yard piece, **Esc** (or a click on an empty cell) deselects.
