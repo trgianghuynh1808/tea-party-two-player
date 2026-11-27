@@ -8,7 +8,16 @@
 
 // ---------------------------------------------------------------- Ingredients
 
-export type IngredientId = "black_tea" | "green_tea" | "milk" | "pearl" | "cheese_foam" | "passion";
+export type IngredientId =
+  | "black_tea"
+  | "green_tea"
+  | "milk"
+  | "pearl"
+  | "cheese_foam"
+  | "passion"
+  | "orange"
+  | "watermelon"
+  | "lemon";
 
 export interface IngredientDef {
   label: string;
@@ -23,6 +32,9 @@ export const INGREDIENTS: Record<IngredientId, IngredientDef> = {
   pearl: { label: "Trân châu", short: "TC", color: 0x3e2723 },
   cheese_foam: { label: "Kem cheese", short: "Cheese", color: 0xffe082 },
   passion: { label: "Chanh dây", short: "C.dây", color: 0xffb300 },
+  orange: { label: "Cam", short: "Cam", color: 0xff9800 },
+  watermelon: { label: "Dưa hấu", short: "D.hấu", color: 0xf06292 },
+  lemon: { label: "Chanh", short: "Chanh", color: 0xcddc39 },
 };
 
 // ---------------------------------------------------------------- Drinks
@@ -45,6 +57,12 @@ export const DRINKS: DrinkDef[] = [
   { id: "black_tea_cheese", name: "Hồng trà kem cheese", price: 28, steps: ["black_tea", "cheese_foam"], color: 0xb5651d },
   { id: "green_milk_tea", name: "Trà xanh sữa", price: 25, steps: ["green_tea", "milk"], color: 0xaed581 },
   { id: "passion_green_tea", name: "Trà xanh chanh dây", price: 25, steps: ["green_tea", "passion"], color: 0xdce775 },
+  // Fruit juices: id "juice_orange" instead of "orange_juice", which is already a restaurant dish id.
+  { id: "juice_orange", name: "Nước cam", price: 20, steps: ["orange"], color: 0xff9800 },
+  { id: "watermelon_juice", name: "Nước dưa hấu", price: 20, steps: ["watermelon"], color: 0xf06292 },
+  { id: "lemonade", name: "Nước chanh", price: 18, steps: ["lemon"], color: 0xcddc39 },
+  { id: "orange_lemon", name: "Cam chanh", price: 26, steps: ["orange", "lemon"], color: 0xffb74d },
+  { id: "watermelon_milk", name: "Dưa hấu sữa", price: 28, steps: ["watermelon", "milk"], color: 0xf8bbd0 },
 ];
 
 export const getDrink = (id: string) => DRINKS.find((d) => d.id === id);
@@ -112,14 +130,20 @@ const machine = (id: IngredientId, x: number, label: string, processSeconds = 0)
 });
 
 export const STATIONS: StationDef[] = [
-  { id: "cup_shelf", type: StationType.CupShelf, label: "Kệ ly", x: 76, y: MACHINE_Y, width: MACHINE_W, height: MACHINE_H, color: 0x8ecae6 },
+  // The nine machines now fill the whole back wall, so the cup shelf stands on the floor by the left
+  // wall instead: clear of the machines, the trash bin, the counters, the exit path and both spawns.
+  { id: "cup_shelf", type: StationType.CupShelf, label: "Kệ ly", x: 76, y: 290, width: MACHINE_W, height: MACHINE_H, color: 0x8ecae6 },
   // Short labels so they stay readable on phones (the world is rendered at ~0.6× there).
-  machine("black_tea", 206, "Trà đen", 1.5),
-  machine("green_tea", 336, "Trà xanh", 1.5),
-  machine("milk", 466, "Sữa"),
-  machine("pearl", 596, "Trân châu"),
-  machine("cheese_foam", 726, "Kem cheese", 1),
-  machine("passion", 856, "Chanh dây"),
+  // Nine machines 102px apart: teas | shared milk in the middle (i=5) | fruit juices.
+  machine("black_tea", 60, "Trà đen", 1.5),
+  machine("green_tea", 162, "Trà xanh", 1.5),
+  machine("pearl", 264, "Trân châu"),
+  machine("cheese_foam", 366, "Kem cheese", 1),
+  machine("passion", 468, "Chanh dây"),
+  machine("milk", 570, "Sữa"),
+  machine("orange", 672, "Cam", 1.5),
+  machine("watermelon", 774, "Dưa hấu", 1.5),
+  machine("lemon", 876, "Chanh", 1.5),
   // Horizontal market stall in the bottom-right corner (art is ~1.9:1, see client/public/assets/stations/stall_checkered.png).
   { id: "delivery_counter", type: StationType.DeliveryCounter, label: "Giao hàng", x: 850, y: 450, width: 180, height: 95, color: 0x90be6d },
   { id: "trash", type: StationType.Trash, label: "Thùng rác", x: 52, y: 420, width: 56, height: 56, color: 0x9e9e9e },
@@ -234,7 +258,7 @@ export const CUSTOMERS: Record<CustomerKind, CustomerDef> = {
   [CustomerKind.Group]: { label: "Nhóm", icon: "👨‍👩‍👧", rule: "Trả tiền khi đủ món", weight: 2, fromProgress: 0.3 },
 };
 
-export const VIP_DURATION_SECONDS = 25;
+export const VIP_DURATION_SECONDS = 35;
 export const VIP_PRICE_MULTIPLIER = 2;
 export const PICKY_FAST_BONUS = 10;
 /** Group orders: extra waiting time per extra drink, as a share of the base duration. */

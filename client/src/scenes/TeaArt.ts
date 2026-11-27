@@ -68,6 +68,32 @@ function teaBrewer(g: G, l: Layout, color: number) {
   g.fillStyle(color, 0.9).fillCircle(70, 31, 1.5);
 }
 
+/** Glass jar of fruit juice (juice colour inside, steel lid) with a slice of the fruit on the lid. */
+function juiceJar(g: G, l: Layout, color: number, rind: number, flesh: number) {
+  counter(g, l);
+  // Jar with the juice colour, same shape as the passion jar.
+  g.fillStyle(0x9aa7b4).fillRoundedRect(31, 0, 34, 7, 3);
+  g.lineStyle(1, OUTLINE, 0.5).strokeRoundedRect(31, 0, 34, 7, 3);
+  g.fillStyle(color, 0.92).fillRoundedRect(34, 10, 28, 24, 3);
+  g.fillStyle(0xdff3fb, 0.35).fillRoundedRect(32, 6, 32, 28, 4);
+  g.lineStyle(1.5, 0x8fb8c9).strokeRoundedRect(32, 6, 32, 28, 4);
+  g.fillStyle(0xffffff, 0.7).fillRect(35, 9, 3, 20);
+  // Fruit slice propped against the lid: rind ring, lighter flesh and pith spokes.
+  g.lineStyle(2, rind).strokeCircle(22, 8, 6);
+  g.fillStyle(flesh).fillCircle(22, 8, 5);
+  g.lineStyle(1, 0xffffff, 0.8);
+  g.beginPath()
+    .moveTo(22, 3.5)
+    .lineTo(22, 12.5)
+    .moveTo(17.5, 8)
+    .lineTo(26.5, 8)
+    .moveTo(18.7, 4.7)
+    .lineTo(25.3, 11.3)
+    .moveTo(18.7, 11.3)
+    .lineTo(25.3, 4.7)
+    .strokePath();
+}
+
 const DRAW: Record<"cup_shelf" | IngredientId, (g: G, l: Layout) => void> = {
   cup_shelf(g, l) {
     counter(g, l);
@@ -138,6 +164,17 @@ const DRAW: Record<"cup_shelf" | IngredientId, (g: G, l: Layout) => void> = {
     g.fillStyle(0xdff3fb, 0.35).fillRoundedRect(32, 6, 32, 28, 4);
     g.lineStyle(1.5, 0x8fb8c9).strokeRoundedRect(32, 6, 32, 28, 4);
     g.fillStyle(0xffffff, 0.7).fillRect(35, 9, 3, 20);
+  },
+  orange(g, l) {
+    juiceJar(g, l, INGREDIENTS.orange.color, 0xe07b00, 0xffcc80);
+  },
+  watermelon(g, l) {
+    juiceJar(g, l, INGREDIENTS.watermelon.color, 0x2e7d32, 0xf06292);
+    // A few seeds floating in the juice, like the passion jar's seeds.
+    g.fillStyle(0x2b1b16).fillCircle(40, 16, 1.5).fillCircle(52, 22, 1.5).fillCircle(44, 28, 1.5);
+  },
+  lemon(g, l) {
+    juiceJar(g, l, INGREDIENTS.lemon.color, 0x827717, 0xf0f4c3);
   },
 };
 

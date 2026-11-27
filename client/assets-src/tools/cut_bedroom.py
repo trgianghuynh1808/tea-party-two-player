@@ -1,8 +1,17 @@
-"""Cut the furniture out of the bedroom scenes in client/assets-src/sheets/bedroom-*original.png.
+"""Cut the furniture out of the room scenes in client/assets-src/sheets/<key>-original.png.
 
 The pieces stand on a patterned floor / wall, so slice_sheet.py can't separate them: instead each piece has a
 hand-picked box, and the background is the floor + wall palette (sampled from empty areas, see SCENES) flood-filled
 in from the box edges. Drop shadows (floor colours, darker) are background too when a scene sets `shadows`.
+
+Scenes: bedroom* (bedrooms), living (req-1 living room: blue wall, wood floor/skirting; wall has a
+dark trim stripe at y~148-156 and a painting at x~346..380 that the bg boxes avoid), kitchen-scene
+(req-2 kitchen: white subway tiles behind the counter row, a corn basket hanging over the drawer
+cabinet and a kettle on the stove that the boxes cut below, a vase on the fridge, and the dining
+chair between the table legs cleaned up with erase boxes), kitchen-pro (T33 req-1: restaurant steel
+kitchen on white-brick wall/grey floor - full-box cuts, wall around the prep-table crates erased),
+kitchen-pink (T33 req-3: pink kitchen on striped wall/pink wood floor - full-box cuts, the low
+cabinet's cluttered top surface erased).
 
 Needs Pillow, NumPy and SciPy (see slice_sheet.py). From client/assets-src/tools/:
     python cut_bedroom.py ../sheets ../../public/assets/decor            # every scene
@@ -84,6 +93,105 @@ SCENES = {
             "bedroom/nightstand_green_lamp.png": {"box": (123, 163, 177, 230), "h": 108},
         },
     },
+    "living": {
+        # The wall is light blue with jpeg noise, dark blue bands (y~100-156, y~175),
+        # a painting (x~346..380, y~140..190) and a hanging thing (x~415..450, y~205..215)
+        # - all NOT background. The one verified-clean sample window sits between the
+        # painting and the hanging thing; tolerance stays tight (12) so the sofa's own
+        # blues and the noise spots never match. shadows off: a darkened wall matches
+        # the sofa's dark blues.
+        "tolerance": 12,
+        "shadows": False,
+        "bg": [(280, 207, 410, 217)],
+        "items": {
+            # erase = the neighbour furniture poking into the box's top-left corner.
+            "furniture/sofa_blue.png": {"box": (242, 218, 486, 362), "h": 88, "erase": [(242, 218, 250, 226)]},
+            # Full-box cut below the black shadow line at the crown's top.
+            "furniture/cabinet_glass.png": {"box": (485, 178, 620, 368), "h": 180},
+        },
+    },
+    "kitchen-scene": {
+        # The counter row pieces are full-box cuts (nothing to flood: the white tiles
+        # would eat the stove/sink/fridge whites), so no shared bg at all; the dining
+        # chair brings its own floor + shadow palette through extra_bg.
+        "tolerance": 12,
+        "bg": [],
+        "items": {
+            # Corn basket hangs over the drawer fronts down to y~193: cut below it.
+            "kitchen/counter_drawers.png": {"box": (92, 194, 277, 268), "h": 120},
+            # Kettle, backguard and the tile remnants end by y~154; starts at the cooktop.
+            "kitchen/stove_kitchen.png": {"box": (277, 155, 366, 268), "h": 112},
+            # Faucet/plant sit above y~163; starts at the wood front below the rim junk.
+            "kitchen/counter_sink.png": {"box": (368, 164, 552, 268), "h": 120},
+            # Vase on top overlaps the front down to y~124: cut below it.
+            "kitchen/fridge_grey.png": {"box": (554, 125, 645, 268), "h": 140},
+            # Chair between the table legs: erase the table top band and the leg-side gaps.
+            # The shadow sample must stay below the chair legs (y>621) or it eats them.
+            "furniture/dining_chair_blue.png": {
+                "box": (342, 529, 392, 617),
+                "h": 80,
+                "extra_bg": [(310, 505, 420, 524), (345, 628, 390, 640)],
+                "erase": [(342, 529, 392, 543), (342, 594, 348, 617), (376, 594, 392, 617)],
+            },
+        },
+    },
+    "kitchen-pro": {
+        # req-1 restaurant steel kitchen (grey floor / white-brick wall): the steel
+        # pieces have closed dark outlines but their light faces match the background,
+        # so like kitchen-scene every piece is a full-box cut; empty wall that pokes
+        # into a box around the taller prep-table crates is cleared with erase boxes.
+        "tolerance": 12,
+        "bg": [],
+        "items": {
+            "kitchen/grill_range.png": {"box": (26, 93, 118, 178), "h": 112},
+            # Tomato crate on the veg table sticks up above the counter rim (y197): the
+            # wall left/right of it inside the box is erased; the table lip starts at
+            # x80 on y207, so the bare wall corner at the very left goes too.
+            "kitchen/prep_table_veg.png": {
+                "box": (78, 197, 170, 285),
+                "h": 112,
+                "erase": [(78, 197, 140, 207), (164, 197, 170, 207), (78, 207, 80, 209)],
+            },
+            # Same layout on the tomato table: crate from y199, table lip x183.. y207.
+            "kitchen/prep_table_tomato.png": {
+                "box": (181, 199, 242, 285),
+                "h": 112,
+                "erase": [(181, 199, 183, 209), (183, 199, 216, 205), (232, 199, 242, 207)],
+            },
+            "kitchen/dish_washer_steel.png": {"box": (263, 59, 331, 180), "h": 140},
+            # The double-door steel cabinet sits right above the sink: cut starts at
+            # its front y306, the dark plinth under the legs runs to y392.
+            "kitchen/sink_steel.png": {"box": (282, 306, 331, 393), "h": 104},
+        },
+    },
+    "kitchen-pink": {
+        # req-3 pink kitchen (striped wall / pink wood floor): the white pieces sit on
+        # a busy floor, so again full-box cuts with hand-checked edges; the low cabinet
+        # has small clutter on its top which is erased away as the task asks.
+        "tolerance": 12,
+        "bg": [],
+        "items": {
+            "kitchen/fridge_white.png": {"box": (590, 138, 690, 303), "h": 140},
+            "kitchen/range_white.png": {"box": (163, 205, 264, 302), "h": 104},
+            "kitchen/counter_cream.png": {"box": (368, 221, 468, 303), "h": 104},
+            # Wooden dish shelf block: red body x20..133 with the dish tiers on top.
+            "kitchen/dish_shelf.png": {"box": (20, 424, 134, 550), "h": 120},
+            # Island with sink: dark rim y458..461, red body to y532, legs to y559.
+            "kitchen/kitchen_island.png": {"box": (455, 458, 658, 560), "h": 112},
+            # Pink-striped tablecloth table: cloth from y895 (plant pot on top incl.),
+            # dark base rail y982..983, right edge frame x619..622.
+            "furniture/dining_table_pink.png": {"box": (426, 895, 623, 984), "h": 112},
+            # White bench: seat edge y1010.., dark skirting y1047..48, red legs to ~y1079.
+            "furniture/bench_white.png": {"box": (447, 1010, 601, 1080), "h": 60},
+            # Low white cabinet: white body y714..760 in wood frames (x58..61/x206..212),
+            # plinth y762..764; the whole cluttered top surface y690..713 is erased.
+            "furniture/cabinet_low_white.png": {
+                "box": (58, 690, 213, 765),
+                "h": 88,
+                "erase": [(58, 690, 213, 714)],
+            },
+        },
+    },
 }
 
 
@@ -91,7 +199,7 @@ def palette(im, boxes):
     counts = Counter()
     for x0, y0, x1, y1 in boxes:
         counts.update(map(tuple, im[y0:y1, x0:x1].reshape(-1, 3)))
-    return np.array([c for c, n in counts.items() if n >= 3], dtype=np.int32)
+    return np.array([c for c, n in counts.items() if n >= 3], dtype=np.int32).reshape(-1, 3)
 
 
 def distance(c, pal):
@@ -167,6 +275,12 @@ def cut_scene(src, scene, out_dir):
             n = rgba.shape[0] * item["fill_top"] // 100
             rgba[:n] = rgba[::-1][:n]
         out = resize(Image.fromarray(rgba), item["h"])
+        a = np.asarray(out).copy()
+        hh, ww = a.shape[:2]
+        for cy, cx in ((0, 0), (0, ww - 1), (hh - 1, 0), (hh - 1, ww - 1)):
+            if a[cy, cx, 3] < 128:  # LANCZOS smears the opened-away box corner: clear it
+                a[cy, cx, 3] = 0
+        out = Image.fromarray(a)
         path = os.path.join(out_dir, name)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         out.save(path)

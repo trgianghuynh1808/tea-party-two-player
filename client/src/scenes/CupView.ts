@@ -7,6 +7,7 @@ import {
   PROCESSES,
   containerOf,
   containerParts,
+  cupColor,
   cupContents,
   foodKey,
   isCup,
@@ -101,14 +102,17 @@ function makeKitchenTextures(scene: Phaser.Scene) {
   g.destroy();
 }
 
-/** Which art shows a cup item: base cup + optional topping. */
-function cupLook(item: string): { base: CupTexture; topping?: CupTexture } | undefined {
+/** Which art shows a cup item: base cup + optional topping, optionally tinted (fruit juices). */
+function cupLook(item: string): { base: CupTexture; topping?: CupTexture; tint?: number } | undefined {
   if (!isCup(item)) return undefined;
   const contents = cupContents(item);
   const drink = matchDrink(contents);
   if (drink?.id === "milk_tea_pearl" || drink?.id === "green_milk_tea") return { base: drink.id };
 
   const has = (id: string) => contents.includes(id as never);
+  // Fruit juice cups: the plain cup tinted with the juice / drink colour, no topping.
+  if (has("orange") || has("watermelon") || has("lemon")) return { base: "empty", tint: cupColor(item) };
+
   const base: CupTexture = has("black_tea") ? (has("milk") ? "milk_tea" : "black_tea") : has("green_tea") ? "green_tea" : "empty";
   const topping: CupTexture | undefined = has("cheese_foam") ? "cheese_foam" : has("passion") ? "passion" : undefined;
   return { base, topping };
@@ -167,6 +171,8 @@ export class CupView extends Phaser.GameObjects.Container {
     this.setVisible(!!look);
     if (!look) return;
     this.base.setTexture(textureKey(look.base));
+    if (look.tint === undefined) this.base.clearTint();
+    else this.base.setTint(look.tint);
     this.topping.setVisible(!!look.topping);
     if (look.topping) {
       this.topping.setTexture(textureKey(look.topping));

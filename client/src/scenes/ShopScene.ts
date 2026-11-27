@@ -178,7 +178,14 @@ const slicedTextureKey = (type: string) => `station-sliced-${type}`;
 
 
 /** Ingredient icons drawn on top of a station so it reads at a glance (height in screen px). */
-const STATION_ICONS: Partial<Record<string, { url: string; height: number }>> = {
+interface StationIcon {
+  height: number;
+  /** PNG artwork (client/public/assets/). */
+  url?: string;
+  /** Emoji shown as text instead of artwork (nothing to load). */
+  emoji?: string;
+}
+const STATION_ICONS: Partial<Record<string, StationIcon>> = {
   cup_shelf: { url: "assets/cups/empty.png", height: 40 },
   black_tea: { url: "assets/items/icons/tea_leaves.png", height: 36 },
   milk: { url: "assets/items/icons/milk_carton.png", height: 42 },
@@ -186,6 +193,9 @@ const STATION_ICONS: Partial<Record<string, { url: string; height: number }>> = 
   pearl: { url: "assets/items/icons/coffee_beans.png", height: 36 },
   cheese_foam: { url: "assets/items/icons/whipped_cream.png", height: 36 },
   passion: { url: "assets/items/icons/passion_seeds.png", height: 32 },
+  orange: { emoji: "🍊", height: 34 },
+  watermelon: { emoji: "🍉", height: 34 },
+  lemon: { emoji: "🍋", height: 34 },
 };
 const stationIconKey = (id: string) => `station-icon-${id}`;
 
@@ -289,7 +299,7 @@ export class ShopScene extends Phaser.Scene {
       if (slice) this.load.image(slicedTextureKey(type), slice.url);
     }
     for (const [id, icon] of Object.entries(STATION_ICONS)) {
-      if (icon) this.load.image(stationIconKey(id), icon.url);
+      if (icon?.url) this.load.image(stationIconKey(id), icon.url);
     }
     this.load.image(FLOOR_TEXTURE, "assets/floor/wood.jpg");
     preloadCupTextures(this);
@@ -670,8 +680,17 @@ export class ShopScene extends Phaser.Scene {
         // Under any cup placed there (same depth, created earlier). On the new wooden counters the icon
         // moves to the plain front face, capped at 22px so it covers no equipment on top.
         const tea = teaStationTexture(def);
-        const icon = this.add.image(def.x, tea ? def.y + def.height / 2 - 14 : def.y, stationIconKey(def.id));
-        icon.setScale((tea ? Math.min(iconDef.height, 22) : iconDef.height) / icon.height).setDepth(def.y + def.height / 2);
+        const capped = tea ? Math.min(iconDef.height, 22) : iconDef.height;
+        const iconY = tea ? def.y + def.height / 2 - 14 : def.y;
+        if (iconDef.emoji) {
+          this.add
+            .text(def.x, iconY, iconDef.emoji, { fontSize: `${capped}px` })
+            .setOrigin(0.5)
+            .setDepth(def.y + def.height / 2);
+        } else {
+          const icon = this.add.image(def.x, iconY, stationIconKey(def.id));
+          icon.setScale(capped / icon.height).setDepth(def.y + def.height / 2);
+        }
       }
       this.addKitchenIcons(def);
       // Phones: icon only, the seconds would make neighbouring labels overlap at the larger font size.
