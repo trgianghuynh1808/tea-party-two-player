@@ -282,9 +282,9 @@ test("bathroom-images T1: every bathroom item's art lives in assets/decor/bathro
 
 const KITCHEN_KINDS = ["fridge_kitchen", "washer_kitchen"];
 
-test("kitchen T1: the kitchen category has its 2 four-view items with alpha art on disk", () => {
+test("kitchen T1: the kitchen category has its 2 four-view items plus 4 one-view T32 pieces, with alpha art on disk", () => {
   expect(DECORATION_CATEGORIES.some((c) => c.id === "kitchen" && c.title.includes("Nhà bếp"))).toBe(true);
-  expect(DECORATION_CATALOG.filter((d) => d.category === "kitchen")).toHaveLength(2);
+  expect(DECORATION_CATALOG.filter((d) => d.category === "kitchen")).toHaveLength(6);
   for (const kind of KITCHEN_KINDS) {
     const def = getDecorationDef(kind);
     expect(def, kind).toBeDefined();
@@ -327,6 +327,56 @@ test("kitchen T2: turning a kitchen piece swaps its footprint and normalizeRotat
   ]);
   expect(normalizeRotation(fridge, 3)).toBe(3);
   expect(normalizeRotation(fridge, 4)).toBe(0);
+});
+
+// ---------------------------------------------------------------- 🛋️ T32 living / seating / kitchen one-view pieces
+
+const T32_ITEMS: { kind: string; category: string; seat?: true }[] = [
+  { kind: "sofa_blue", category: "living", seat: true },
+  { kind: "cabinet_glass", category: "living" },
+  { kind: "armchair_green", category: "living", seat: true },
+  { kind: "sofa_leather", category: "living", seat: true },
+  { kind: "recliner_green", category: "living", seat: true },
+  { kind: "armchair_black", category: "living", seat: true },
+  { kind: "armchair_orange", category: "living", seat: true },
+  { kind: "sofa_sky", category: "living", seat: true },
+  { kind: "sofa_cream", category: "living", seat: true },
+  { kind: "chair_pink", category: "seating", seat: true },
+  { kind: "chair_ladder", category: "seating", seat: true },
+  { kind: "dining_chair_blue", category: "seating", seat: true },
+  { kind: "counter_drawers", category: "kitchen" },
+  { kind: "stove_kitchen", category: "kitchen" },
+  { kind: "counter_sink", category: "kitchen" },
+  { kind: "fridge_grey", category: "kitchen" },
+];
+
+test("T32 T1: the 16 new pieces are in the catalog with art on disk, right category, seats marked, and no kind duplicated", () => {
+  for (const { kind, category, seat } of T32_ITEMS) {
+    const def = getDecorationDef(kind);
+    expect(def, kind).toBeDefined();
+    expect(def!.category, kind).toBe(category);
+    expect(def!.layer, kind).toBe("object");
+    expect(existsSync(`client/public/${def!.image}`), kind).toBe(true);
+    if (seat) expect(def!.role, kind).toBe("seat");
+  }
+  expect(DECORATION_CATEGORIES.some((c) => c.id === "living" && c.title.includes("Phòng khách"))).toBe(true);
+  const kinds = DECORATION_CATALOG.map((d) => d.kind);
+  expect(new Set(kinds).size).toBe(kinds.length);
+});
+
+test("T32 T2: every new piece's cut-out art has a transparent corner and solid pixels", () => {
+  for (const { kind } of T32_ITEMS) {
+    const def = getDecorationDef(kind)!;
+    const { width, height, alphaAt } = decodePng(`client/public/${def.image}`);
+    // Rectangular full-box cuts (stove, fridge) keep a faint anti-aliased edge, so "transparent" is the tool's alpha < 32 cutoff.
+    expect(
+      [alphaAt(0, 0), alphaAt(width - 1, 0), alphaAt(0, height - 1), alphaAt(width - 1, height - 1)].some((a) => a < 32),
+      `${kind} transparent corner`,
+    ).toBe(true);
+    let solid = false;
+    for (let y = 0; !solid && y < height; y++) for (let x = 0; x < width; x++) if (alphaAt(x, y) === 255) { solid = true; break; }
+    expect(solid, `${kind} solid pixel`).toBe(true);
+  }
 });
 
 // ---------------------------------------------------------------- ⟳ badge on rotatable items

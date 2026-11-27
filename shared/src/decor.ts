@@ -165,6 +165,7 @@ const viewsBed = (def: DecorationDef, pillows: Record<DecorationView, { x: numbe
 export const DECORATION_CATEGORIES = [
   { id: "plants", title: "🌿 Cây cảnh" },
   { id: "seating", title: "🪑 Bàn ghế" },
+  { id: "living", title: "🛋️ Phòng khách" },
   { id: "bedroom", title: "🛏️ Nội thất" },
   { id: "lighting", title: "🏮 Đèn" },
   { id: "rugs", title: "🧶 Thảm" },
@@ -236,6 +237,25 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     // 4-view furniture from client/assets-src/sheets/views/ (build_furniture_views.py).
     viewsDecor("sofa_lilac", "Sofa tím oải hương", 160, 88, 36, 44, 0xb9a3d6),
     table(viewsDecor("dining_table", "Bàn ăn trái cây", 110, 70, 40, 60)),
+    // Cut from the req-5 white sheet (client/assets-src/sheets/seating-sheet-2.jpg) by cut_seating.py.
+    { ...decor("chair_pink", "Ghế hồng", 40, "furniture/chair_pink", 22, 20, 46), role: "seat" },
+    { ...decor("chair_ladder", "Ghế thang trắng", 40, "furniture/chair_ladder", 22, 20, 42), role: "seat" },
+    // Cut from the req-2 kitchen scene by cut_bedroom.py.
+    { ...decor("dining_chair_blue", "Ghế ăn đệm xanh", 45, "furniture/dining_chair_blue", 26, 24, 40), role: "seat" },
+  ]),
+  ...inCategory("living", [
+    // Living room set: sofa_blue + cabinet_glass cut from the req-1 living room scene by
+    // cut_bedroom.py, the rest from the req-5 white sheet by cut_seating.py — one
+    // front-facing artwork each (rotation "none").
+    { ...decor("sofa_blue", "Sofa xanh dương", 150, "furniture/sofa_blue", 68, 28, 44), role: "seat" },
+    decor("cabinet_glass", "Tủ kính hai cánh", 140, "furniture/cabinet_glass", 62, 24, 90),
+    { ...decor("armchair_green", "Ghế bành xanh lá", 80, "furniture/armchair_green", 40, 28, 52), role: "seat" },
+    { ...decor("sofa_leather", "Sofa da ba chỗ", 200, "furniture/sofa_leather", 84, 28, 52), role: "seat" },
+    { ...decor("recliner_green", "Ghế thư giãn xanh lá", 110, "furniture/recliner_green", 36, 28, 60), role: "seat" },
+    { ...decor("armchair_black", "Ghế bành đen", 90, "furniture/armchair_black", 46, 28, 50), role: "seat" },
+    { ...decor("armchair_orange", "Ghế bành cam", 85, "furniture/armchair_orange", 40, 26, 46), role: "seat" },
+    { ...decor("sofa_sky", "Sofa xanh trời", 150, "furniture/sofa_sky", 62, 28, 48), role: "seat" },
+    { ...decor("sofa_cream", "Sofa kem", 160, "furniture/sofa_cream", 66, 28, 48), role: "seat" },
   ]),
   ...inCategory("bedroom", [
     // Cut from client/assets-src/sheets/bedroom-original.png by client/assets-src/tools/cut_bedroom.py.
@@ -356,6 +376,11 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     // The one-view pieces (counter, stove, microwave, stools, open fridges) can't turn, so they stay out.
     viewsDecor("fridge_kitchen", "Tủ lạnh", 180, 30, 24, 66, 0xe5e2dd, "kitchen"),
     viewsDecor("washer_kitchen", "Máy giặt cửa tròn", 150, 28, 24, 46, 0xe5e2dd, "kitchen"),
+    // T32: cut from the req-2 kitchen scene by cut_bedroom.py — one front-facing artwork each.
+    decor("counter_drawers", "Tủ bếp ngăn kéo", 120, "kitchen/counter_drawers", 90, 26, 60),
+    decor("stove_kitchen", "Bếp gas", 130, "kitchen/stove_kitchen", 38, 24, 56),
+    decor("counter_sink", "Bồn rửa + tủ bếp", 140, "kitchen/counter_sink", 94, 26, 60),
+    decor("fridge_grey", "Tủ lạnh xám", 170, "kitchen/fridge_grey", 36, 24, 70),
   ]),
   ...inCategory("gadgets", [
     // Drawn head-on by client/assets-src/tools/draw_gadget_props.py from the gadgets-ref references.

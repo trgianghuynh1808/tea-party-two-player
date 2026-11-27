@@ -1,8 +1,14 @@
-"""Cut the furniture out of the bedroom scenes in client/assets-src/sheets/bedroom-*original.png.
+"""Cut the furniture out of the room scenes in client/assets-src/sheets/<key>-original.png.
 
 The pieces stand on a patterned floor / wall, so slice_sheet.py can't separate them: instead each piece has a
 hand-picked box, and the background is the floor + wall palette (sampled from empty areas, see SCENES) flood-filled
 in from the box edges. Drop shadows (floor colours, darker) are background too when a scene sets `shadows`.
+
+Scenes: bedroom* (bedrooms), living (req-1 living room: blue wall, wood floor/skirting; wall has a
+dark trim stripe at y~148-156 and a painting at x~346..380 that the bg boxes avoid), kitchen-scene
+(req-2 kitchen: white subway tiles behind the counter row, a corn basket hanging over the drawer
+cabinet and a kettle on the stove that the boxes cut below, a vase on the fridge, and the dining
+chair between the table legs cleaned up with erase boxes).
 
 Needs Pillow, NumPy and SciPy (see slice_sheet.py). From client/assets-src/tools/:
     python cut_bedroom.py ../sheets ../../public/assets/decor            # every scene
@@ -84,6 +90,48 @@ SCENES = {
             "bedroom/nightstand_green_lamp.png": {"box": (123, 163, 177, 230), "h": 108},
         },
     },
+    "living": {
+        # The wall is light blue with jpeg noise, dark blue bands (y~100-156, y~175),
+        # a painting (x~346..380, y~140..190) and a hanging thing (x~415..450, y~205..215)
+        # - all NOT background. The one verified-clean sample window sits between the
+        # painting and the hanging thing; tolerance stays tight (12) so the sofa's own
+        # blues and the noise spots never match. shadows off: a darkened wall matches
+        # the sofa's dark blues.
+        "tolerance": 12,
+        "shadows": False,
+        "bg": [(280, 207, 410, 217)],
+        "items": {
+            # erase = the neighbour furniture poking into the box's top-left corner.
+            "furniture/sofa_blue.png": {"box": (242, 218, 486, 362), "h": 88, "erase": [(242, 218, 250, 226)]},
+            # Full-box cut below the black shadow line at the crown's top.
+            "furniture/cabinet_glass.png": {"box": (485, 178, 620, 368), "h": 180},
+        },
+    },
+    "kitchen-scene": {
+        # The counter row pieces are full-box cuts (nothing to flood: the white tiles
+        # would eat the stove/sink/fridge whites), so no shared bg at all; the dining
+        # chair brings its own floor + shadow palette through extra_bg.
+        "tolerance": 12,
+        "bg": [],
+        "items": {
+            # Corn basket hangs over the drawer fronts down to y~193: cut below it.
+            "kitchen/counter_drawers.png": {"box": (92, 194, 277, 268), "h": 120},
+            # Kettle, backguard and the tile remnants end by y~154; starts at the cooktop.
+            "kitchen/stove_kitchen.png": {"box": (277, 155, 366, 268), "h": 112},
+            # Faucet/plant sit above y~163; starts at the wood front below the rim junk.
+            "kitchen/counter_sink.png": {"box": (368, 164, 552, 268), "h": 120},
+            # Vase on top overlaps the front down to y~124: cut below it.
+            "kitchen/fridge_grey.png": {"box": (554, 125, 645, 268), "h": 140},
+            # Chair between the table legs: erase the table top band and the leg-side gaps.
+            # The shadow sample must stay below the chair legs (y>621) or it eats them.
+            "furniture/dining_chair_blue.png": {
+                "box": (342, 529, 392, 617),
+                "h": 80,
+                "extra_bg": [(310, 505, 420, 524), (345, 628, 390, 640)],
+                "erase": [(342, 529, 392, 543), (342, 594, 348, 617), (376, 594, 392, 617)],
+            },
+        },
+    },
 }
 
 
@@ -91,7 +139,7 @@ def palette(im, boxes):
     counts = Counter()
     for x0, y0, x1, y1 in boxes:
         counts.update(map(tuple, im[y0:y1, x0:x1].reshape(-1, 3)))
-    return np.array([c for c, n in counts.items() if n >= 3], dtype=np.int32)
+    return np.array([c for c, n in counts.items() if n >= 3], dtype=np.int32).reshape(-1, 3)
 
 
 def distance(c, pal):
