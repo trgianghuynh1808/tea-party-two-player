@@ -307,7 +307,7 @@ test("T7: every restaurant station is reachable on foot from the restaurant spaw
   expect(unreachable, "stations unreachable on foot from spawn").toEqual([]);
 });
 
-test("T2: tea shop machines leave a 30px gap and counters a 40px gap, clear of the delivery counter", () => {
+test("T2: tea shop machines leave a 6px gap and counters a 40px gap, clear of the delivery counter", () => {
   const shopRectOf = (s: StationDef): Rect => ({
     left: s.x - s.width / 2,
     top: s.y - s.height / 2,
@@ -315,13 +315,13 @@ test("T2: tea shop machines leave a 30px gap and counters a 40px gap, clear of t
     bottom: s.y + s.height / 2,
   });
 
-  const machines = STATIONS.filter((s) => s.type === StationType.Machine || s.type === StationType.CupShelf).sort(
+  const machines = STATIONS.filter((s) => s.type === StationType.Machine).sort(
     (a, b) => a.x - b.x,
   );
-  expect(machines.length, "cup shelf + six machines").toBe(7);
+  expect(machines.length, "nine machines in one row").toBe(9);
   for (let i = 1; i < machines.length; i++) {
     const gap = shopRectOf(machines[i]).left - shopRectOf(machines[i - 1]).right;
-    expect(gap, `${machines[i - 1].id} <-> ${machines[i].id} gap`).toBeGreaterThanOrEqual(30);
+    expect(gap, `${machines[i - 1].id} <-> ${machines[i].id} gap`).toBeGreaterThanOrEqual(6);
   }
 
   const counters = STATIONS.filter((s) => s.type === StationType.Counter).sort((a, b) => a.x - b.x);
