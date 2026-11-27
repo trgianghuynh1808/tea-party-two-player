@@ -595,7 +595,7 @@ test("T2: T28 the session summary shows each player's biggest catch", async ({ p
   await joinAsHost(page, uniqueUser());
   await enterPond(page);
   await send(page, "start_fishing");
-  await expect.poll(async () => (await snap(page)).fishPhase, { timeout: 10_000 }).toBe("fishing");
+  await expect.poll(async () => (await snap(page)).fishPhase).toBe("fishing");
 
   // 1. Land one Cá rô early in the 20s session.
   await castUntilBite(page);
@@ -609,4 +609,75 @@ test("T2: T28 the session summary shows each player's biggest catch", async ({ p
   await expect(summary).toBeVisible();
   await expect(summary).toContainText("Cá to nhất");
   await expect(summary).toContainText("Cá rô");
+});
+
+// ---------------------------------------------------------------- T29: caught-species log ("sổ cá")
+
+/** The local player's caught log, e.g. "ca_ro:3,ca_chep:1" (mirrored from the shop). */
+const caughtLog = (page: Page): Promise<string> =>
+  page.evaluate(() => {
+    const g = (
+      window as unknown as {
+        __GAME__: { room: { sessionId: string }; state: { players: { get(id: string): { caughtLog: string } } } };
+      }
+    ).__GAME__;
+    return g.state.players.get(g.room.sessionId)?.caughtLog ?? "";
+  });
+
+test("T29 T1: a landed fish is saved in the shop's caught log and survives a rejoin", async ({ page }) => {
+  test.setTimeout(90_000);
+  const user = uniqueUser();
+  await joinAsHost(page, user);
+  await enterPond(page);
+  await send(page, "start_fishing");
+  await expect.poll(async () => (await snap(page)).fishPhase).toBe("fishing");
+  await expect.poll(async () => (await snap(page)).fishSize).toBe(FISH_COUNT);
+
+  // 1. Land one Cá rô (FISH_TEST=1 makes every fish a Cá rô): the log mirror gets it.
+  await castUntilBite(page);
+  await send(page, "reel", { holding: true });
+  await expect.poll(async () => (await snap(page)).me.fishCaught, { timeout: 20_000 }).toBe(1);
+  await send(page, "reel", { holding: false });
+  await expect.poll(() => caughtLog(page), { timeout: 10_000 }).toMatch(/^ca_ro:1(,|$)/);
+
+  // 2. Refresh (the client rejoins the same room): the caught species is still remembered.
+  await page.reload();
+  await page.waitForFunction(() => !!(window as { __GAME__?: unknown }).__GAME__);
+  await expect.poll(() => caughtLog(page), { timeout: 20_000 }).toMatch(/^ca_ro:1(,|$)/);
+  await enterPond(page);
+  await expect(page.locator('#fish-guide [data-fish="ca_ro"]')).toHaveAttribute("data-caught", "true");
+});
+
+test("T29 T2: the FishGuide marks caught species with their count and shows the progress", async ({ page, request }) => {
+  const user = uniqueUser();
+  const put = await request.put(`${TEST_SERVER_URL}/admin/users/${encodeURIComponent(user)}/shop`, {
+    headers: { Authorization: `Bearer ${ADMIN_TOKEN}` },
+    data: { money: 0, decorations: [], caught: { ca_ro: 2, ca_chep: 1 } },
+  });
+  expect(put.status()).toBe(200);
+
+  await joinAsHost(page, user);
+  await enterPond(page);
+
+  const guide = page.locator("#fish-guide");
+  await expect(guide).toBeVisible();
+  // Caught species: marked with their catch count.
+  await expect(guide.locator('[data-fish="ca_ro"]')).toHaveAttribute("data-caught", "true");
+  await expect(guide.locator('[data-fish="ca_ro"] .fish-guide-count')).toHaveText("×2");
+  await expect(guide.locator('[data-fish="ca_chep"]')).toHaveAttribute("data-caught", "true");
+  // A species that was never caught stays unmarked (CSS dims its icon).
+  await expect(guide.locator('[data-fish="ca_thu"]')).not.toHaveAttribute("data-caught", "true");
+  await expect(guide.locator('[data-testid="fish-guide-progress"]')).toHaveText(`Đã bắt 2/${FISH.length} loài`);
+});
+
+test("T29 T3: bad caught-log data is filtered when the shop is restored", async ({ page, request }) => {
+  const user = uniqueUser();
+  const put = await request.put(`${TEST_SERVER_URL}/admin/users/${encodeURIComponent(user)}/shop`, {
+    headers: { Authorization: `Bearer ${ADMIN_TOKEN}` },
+    data: { money: 0, decorations: [], caught: { ca_ro: 1, khong_co: 5, ca_chep: -3 } },
+  });
+  expect(put.status()).toBe(200);
+
+  await joinAsHost(page, user);
+  await expect.poll(() => caughtLog(page)).toBe("ca_ro:1");
 });

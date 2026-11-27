@@ -93,7 +93,9 @@ Interaction rules live in `shared/src/interaction.ts` (`planInteraction`), used 
   money in the pond HUD. The rod level is saved per username (like the wallet).
 - While at the pond, the sidebar swaps the orders panel for a read-only fish & rod guide: every species grouped by
   rarity with its sprite icon, name and price, every rod with its price and reel speed, the one you own highlighted
-  (`client/src/ui/FishGuide.ts`). Leaving the pond brings the orders back.
+  (`client/src/ui/FishGuide.ts`). Leaving the pond brings the orders back. Every landed fish is also kept in the
+  per-username fish log ("sổ cá"): the guide lights up species you have caught with their count (×n), dims the ones
+  you have never caught, and shows "Đã bắt X/Y loài"; the log is saved with the shop and survives restarts.
 - Fishing is not a shift: a shift can't start during a session, and a session can't start during a shift.
   The pond has no furniture, so decorate mode is off there. Numbers live in `shared/src/fishing.ts`; rendering
   and UI in `client/src/scenes/PondView.ts` and `client/src/ui/FishingPanel.ts`; species and decor sprites are cut

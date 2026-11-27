@@ -20,6 +20,9 @@ import {
   refundFor,
   snapToGrid,
   tileKey,
+  encodeCaught,
+  getFish,
+  parseCaught,
   type PlacedDecoration,
   type ShopSave,
 } from "@boba/shared";
@@ -70,7 +73,9 @@ export type ShopEvent =
   /** Yard tiles changed: [tileKey, kind] pairs, kind "" = removed. */
   | { type: "tiles"; changes: [string, string][] }
   /** Prop facings changed: [tileKey, rotation] pairs, null = no prop on the key anymore. */
-  | { type: "tileRotations"; changes: [string, number | null][] };
+  | { type: "tileRotations"; changes: [string, number | null][] }
+  /** The caught-species log changed (see encodeCaught / parseCaught). */
+  | { type: "caught"; log: string };
 
 /**
  * One player's shop (money + furniture), shared by every room that uses it: the room the player
@@ -82,6 +87,8 @@ export class SharedShop {
   money = 0;
   /** Fishing rod level 1..5 (see RODS in @boba/shared), saved with the shop. */
   rodLevel = 1;
+  /** Caught-species log ("sổ cá"): species id -> times landed (see encodeCaught / parseCaught), saved with the shop. */
+  caught: Record<string, number> = {};
   readonly pieces: Piece[] = [];
   /** Yard buildings: tileKey -> tile kind. */
   readonly tiles = new Map<string, string>();
@@ -155,6 +162,17 @@ export class SharedShop {
     this.emit({ type: "rodLevel", level: this.rodLevel });
     this.scheduleSave();
     return undefined;
+  }
+
+  /**
+   * Count a landed fish in the caught-species log ("sổ cá"); emits "caught" so open rooms mirror it
+   * into their players' caughtLog. Unknown species ids are ignored.
+   */
+  recordCatch(id: string): void {
+    if (!getFish(id)) return;
+    this.caught[id] = (this.caught[id] ?? 0) + 1;
+    this.emit({ type: "caught", log: encodeCaught(this.caught) });
+    this.scheduleSave();
   }
 
   /** Buy and place a piece. Returns an error message, or undefined on success. */
@@ -449,6 +467,7 @@ export class SharedShop {
       decorations: this.pieces.map(({ kind, x, y, rotation }) => ({ kind, x, y, rotation })),
       tiles: Object.fromEntries(this.tiles),
       tileRotations: Object.fromEntries(this.tileRotations),
+      caught: { ...this.caught },
     };
   }
 
@@ -520,6 +539,9 @@ export class SharedShop {
       const def = getBuildTile(this.tiles.get(key));
       if (def?.shape === "prop") this.tileRotations.set(key, normalizeTileRotation(def, rot));
     }
+    // Old saves have no caught log: starts empty. Unknown ids and counts that are not integers >= 1
+    // are dropped (parseShopSave already filters saves from storage; this guards the rest).
+    this.caught = parseCaught(encodeCaught(save.caught ?? {}));
     let dropped = 0;
     // Standing pieces (tables included) are placed first and tabletop gadgets after, so each gadget
     // is validated against its table's restored position; a gadget whose table is gone gets nudged

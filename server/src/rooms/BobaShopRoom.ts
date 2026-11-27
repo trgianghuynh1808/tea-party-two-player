@@ -5,6 +5,7 @@ import {
   BURNT_ITEM,
   EMPTY_CUP,
   EMPTY_HAND,
+  encodeCaught,
   FAST_SERVICE_TIP,
   FISH_COUNT,
   FISH_SECONDS,
@@ -344,8 +345,10 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     player.name = name;
     player.online = true;
     player.host = key === this.hostKey;
-    player.money = shopOf(key).money;
-    player.rodLevel = shopOf(key).rodLevel;
+    const shop = shopOf(key);
+    player.money = shop.money;
+    player.rodLevel = shop.rodLevel;
+    player.caughtLog = encodeCaught(shop.caught);
     this.state.players.set(client.sessionId, player);
     this.sessionNames.set(client.sessionId, key);
     this.watchWallet(key);
@@ -489,8 +492,9 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
   }
 
   /**
-   * Keep Player.money / Player.rodLevel in sync with the player's shop (both may also change from
-   * another room: shifts pay into the wallet, fishing rod upgrades change the saved rod).
+   * Keep Player.money / Player.rodLevel / Player.caughtLog in sync with the player's shop (both may
+   * also change from another room: shifts pay into the wallet, fishing rod upgrades change the saved
+   * rod, landed fish grow the saved caught-species log).
    */
   private watchWallet(key: string) {
     if (this.walletSubs.has(key)) return;
@@ -503,6 +507,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
         if (!player) continue;
         if (event.type === "money") player.money = event.money;
         else if (event.type === "rodLevel") player.rodLevel = event.level;
+        else if (event.type === "caught") player.caughtLog = event.log;
       }
     });
     this.walletSubs.set(key, off);
@@ -963,7 +968,10 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
   /** Landed: the fish sells straight into the catcher's own wallet (never split), and a new one spawns. */
   private landFish(sessionId: string, player: Player, fish: Fish, def: FishDef) {
     const key = this.sessionNames.get(sessionId);
-    const earned = key ? shopOf(key).earn(def.price) : 0;
+    const shop = key ? shopOf(key) : undefined;
+    const earned = shop?.earn(def.price) ?? 0;
+    // The species goes into the player's saved caught log ("sổ cá"), mirrored to clients via "caught".
+    shop?.recordCatch(def.id);
     player.fishCaught++;
     player.fishEarned += earned;
     player.lastCatch = def.id;

@@ -51,6 +51,28 @@ export const FISH: readonly FishDef[] = [
 
 export const getFish = (id: string): FishDef | undefined => FISH.find((f) => f.id === id);
 
+// Caught-species log ("sổ cá"): species id -> times landed, kept per username in SharedShop and
+// mirrored to clients as a compact string (see Player.caughtLog).
+
+/** Serialise a caught-species record as "id:count,id:count" (FISH order; only integer counts >= 1). */
+export function encodeCaught(rec: Record<string, number>): string {
+  return FISH.filter((f) => Number.isInteger(rec[f.id]) && rec[f.id] >= 1)
+    .map((f) => `${f.id}:${rec[f.id]}`)
+    .join(",");
+}
+
+/** Parse a caught-species string; unknown ids and counts that are not integers >= 1 are dropped. */
+export function parseCaught(s: string): Record<string, number> {
+  const rec: Record<string, number> = {};
+  if (typeof s !== "string" || !s) return rec;
+  for (const part of s.split(",")) {
+    const [id, count] = part.split(":");
+    const n = Number(count);
+    if (getFish(id) && Number.isInteger(n) && n >= 1) rec[id] = n;
+  }
+  return rec;
+}
+
 export interface RodDef {
   /** 1..5. */
   level: number;

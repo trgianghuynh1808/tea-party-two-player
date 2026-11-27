@@ -26,6 +26,8 @@ export class Player extends Schema {
   // Fishing (see shared/src/fishing.ts): per-player rod, hook and catch counters.
   /** Rod level 1..5 (saved with the player's shop, see SharedShop). */
   @type("number") rodLevel: number = 1;
+  /** Caught-species log "id:count,..." (see encodeCaught / parseCaught), mirrored from the player's shop. */
+  @type("string") caughtLog: string = "";
   /** "" = no hook out, "drop" = hook sinking, "reel" = a fish is on the line. */
   @type("string") hookState: string = "";
   @type("number") hookX: number = 0;
