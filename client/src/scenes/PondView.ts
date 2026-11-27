@@ -95,6 +95,10 @@ export class PondView {
   private readonly hookYs = new Map<string, number>();
   /** Last hookState/hookX seen per angler: a change means a new cast, so the prediction restarts. */
   private readonly hookCasts = new Map<string, { state: string; x: number }>();
+  /** Last hookState seen per player: a switch to "reel" means a fish bit, which fires the splash effect. */
+  private readonly lastHookState = new Map<string, string>();
+  /** How many bite effects have fired since the view was created (read by the e2e hook). */
+  private biteFxCount = 0;
   private readonly ripples: Phaser.GameObjects.Ellipse[] = [];
   private readonly decor: Phaser.GameObjects.Image[] = [];
   private readonly unsubscribers: (() => void)[] = [];
@@ -323,6 +327,12 @@ export class PondView {
   private drawLines(dt: number) {
     const g = this.lines;
     g.clear();
+    // A bite: any hook switching to "reel" fires expanding rings + a "❗" at the float.
+    this.room.state.players.forEach((player, id) => {
+      if (player.hookState === this.lastHookState.get(id)) return;
+      this.lastHookState.set(id, player.hookState);
+      if (player.hookState === "reel") this.spawnBiteFx(player.hookX, player.hookY);
+    });
     const angling = new Set<string>();
     this.room.state.players.forEach((player, id) => {
       if (player.hookState !== "drop" && player.hookState !== "reel") return;
@@ -357,6 +367,7 @@ export class PondView {
       this.rods.delete(id);
       this.hookYs.delete(id);
       this.hookCasts.delete(id);
+      this.lastHookState.delete(id);
     }
   }
 
@@ -380,6 +391,46 @@ export class PondView {
     return y;
   }
 
+  /** A fish took the bait: white-blue rings spread out from the float and a "❗" pops above it,
+   *  both tweened away and destroyed (short-lived, they die with the scene if cut short). */
+  private spawnBiteFx(x: number, y: number) {
+    this.biteFxCount++;
+    for (let i = 0; i < 3; i++) {
+      const ring = this.scene.add
+        .circle(x, y, 6 + i * 3, 0xffffff, 0)
+        .setStrokeStyle(2, i === 0 ? 0xffffff : 0x9bd4f5, 0.9)
+        .setDepth(LINE_DEPTH);
+      this.scene.tweens.add({
+        targets: ring,
+        radius: 24 + i * 8,
+        alpha: { from: 0.9, to: 0 },
+        duration: 500,
+        delay: i * 80,
+        ease: "Sine.easeOut",
+        onComplete: () => ring.destroy(),
+      });
+    }
+    const mark = this.scene.add
+      .text(x, y - 14, "❗", {
+        fontFamily: "sans-serif",
+        fontSize: "18px",
+        fontStyle: "bold",
+        color: "#e63946",
+        stroke: "#ffffff",
+        strokeThickness: 3,
+      })
+      .setOrigin(0.5)
+      .setDepth(LINE_DEPTH);
+    this.scene.tweens.add({
+      targets: mark,
+      y: y - 34,
+      alpha: { from: 1, to: 0 },
+      duration: 700,
+      ease: "Sine.easeOut",
+      onComplete: () => mark.destroy(),
+    });
+  }
+
   /** What the e2e hook asks about a player's rod: whether it is held out and its line colour. */
   rodInfo(sessionId: string): { visible: boolean; lineColor: number } | null {
     const player = this.room.state.players.get(sessionId);
@@ -387,14 +438,15 @@ export class PondView {
     return { visible: this.rods.has(sessionId), lineColor: rodLineColor(player.rodLevel) };
   }
 
-  /** What the e2e hook asks about the pond's render: the hook's drawn y (null with no hook out)
-   *  and every fish's drawn x, so tests can assert smooth motion frame by frame. */
-  renderInfo(sessionId: string): { hookY: number | null; fish: { id: string; x: number }[] } {
+  /** What the e2e hook asks about the pond's render: the hook's drawn y (null with no hook out),
+   *  every fish's drawn x and how many bite effects have fired, so tests can assert smooth motion
+   *  frame by frame. */
+  renderInfo(sessionId: string): { hookY: number | null; fish: { id: string; x: number }[]; biteFx: number } {
     const player = this.room.state.players.get(sessionId);
     const hookOut = !!player && (player.hookState === "drop" || player.hookState === "reel");
     const hookY = hookOut ? (this.hookYs.get(sessionId) ?? player!.hookY) : null;
     const fish: { id: string; x: number }[] = [];
     this.fishViews.forEach((view) => fish.push({ id: view.state.id, x: view.x }));
-    return { hookY, fish };
+    return { hookY, fish, biteFx: this.biteFxCount };
   }
 }

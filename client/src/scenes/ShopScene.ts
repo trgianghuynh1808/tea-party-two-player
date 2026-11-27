@@ -745,8 +745,9 @@ export class ShopScene extends Phaser.Scene {
   }
 
   /** The pond's rendered state for the player `sessionId`: the hook's drawn y (null with no hook
-   *  out) and every fish's drawn x, so tests can assert smooth motion frame by frame. */
-  pondRenderInfo(sessionId: string): { hookY: number | null; fish: { id: string; x: number }[] } | null {
+   *  out), every fish's drawn x and how many bite effects have fired, so tests can assert smooth
+   *  motion frame by frame. */
+  pondRenderInfo(sessionId: string): { hookY: number | null; fish: { id: string; x: number }[]; biteFx: number } | null {
     return this.pond?.renderInfo(sessionId) ?? null;
   }
 

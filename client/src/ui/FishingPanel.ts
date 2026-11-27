@@ -20,7 +20,7 @@ const formatClock = (seconds: number) => {
  * - HUD (#fishing-hud): session clock, own catch count and earnings, rod name + the upgrade button.
  * - #fishing-start / #fishing-summary: start the session, or its results once it ended.
  * - #fishing-reel: the reel bar while a fish is on the line, with a hold button (Space works too).
- * - #fishing-toast: "caught one!" / "it got away" flashes.
+ * - #fishing-toast: "a fish bit!" / "caught one!" / "it got away" flashes.
  * The panel itself sends StartFishing / UpgradeRod / Reel; the scene handles Cast / Retract.
  */
 export class FishingPanel {
@@ -29,6 +29,8 @@ export class FishingPanel {
   private holding = false;
   private lastCatchSeq = 0;
   private lastEscapeSeq = 0;
+  /** Last hookState seen for the local player: a switch to "reel" means a fish bit. */
+  private lastHookState = "";
   private summaryKey = "";
   private toastTimer?: ReturnType<typeof setTimeout>;
   private readonly timer: ReturnType<typeof setInterval>;
@@ -147,6 +149,7 @@ export class FishingPanel {
     const me = this.room.state.players.get(this.room.sessionId);
     this.lastCatchSeq = me?.catchSeq ?? 0;
     this.lastEscapeSeq = me?.escapeSeq ?? 0;
+    this.lastHookState = me?.hookState ?? "";
     this.update();
   }
 
@@ -190,14 +193,21 @@ export class FishingPanel {
       this.lastEscapeSeq = me.escapeSeq;
       this.toast("💦 Cá kéo thoát mất rồi!");
     }
+    if (me.hookState !== this.lastHookState) {
+      this.lastHookState = me.hookState;
+      if (me.hookState === "reel") this.toast("❗ Cá cắn câu! Giữ để kéo");
+    }
   }
 
-  /** Everyone's catch + earnings (rebuilt only when the numbers change). */
+  /** Everyone's catch + earnings and each one's priciest fish (rebuilt only when the numbers change). */
   private updateSummary(state: BobaShopState) {
-    const rows = [...state.players.entries()].map(([sessionId, player]) => {
+    const rows: string[] = [];
+    for (const [sessionId, player] of state.players.entries()) {
       const me = sessionId === this.room.sessionId;
-      return `${me ? "🫵 Bạn" : `👤 ${player.name}`}: ${player.fishCaught} con · $${player.fishEarned}`;
-    });
+      rows.push(`${me ? "🫵 Bạn" : `👤 ${player.name}`}: ${player.fishCaught} con · $${player.fishEarned}`);
+      const best = getFish(player.bestCatch);
+      rows.push(`🏆 Cá to nhất: ${best ? `${best.name} ($${best.price})` : "chưa bắt được con nào"}`);
+    }
     const key = rows.join("|");
     if (key === this.summaryKey) return;
     this.summaryKey = key;

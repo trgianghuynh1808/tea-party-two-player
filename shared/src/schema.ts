@@ -39,6 +39,8 @@ export class Player extends Schema {
   /** Species id (see FISH) of the last fish landed; bump catchSeq to announce it. */
   @type("string") lastCatch: string = "";
   @type("number") catchSeq: number = 0;
+  /** Species id of the priciest fish landed this session ("" = none yet); shown in the session summary. */
+  @type("string") bestCatch: string = "";
   /** Bumped every time a hooked fish escapes. */
   @type("number") escapeSeq: number = 0;
 }

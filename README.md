@@ -82,9 +82,11 @@ Interaction rules live in `shared/src/interaction.ts` (`planInteraction`), used 
   crab. Every fish shows its name in a small label above it (rare and better add their rarity).
 - From the yard, the **🎣 Câu cá** card in the **☀️ Sẵn sàng mở quán?** picker walks you into the pond and
   opens a 10-minute fishing session for the room (`FISH_SECONDS` overrides it); once at the pond, **Bắt đầu câu**
-  does the same. When the time is up, a summary shows every player's fish count and fishing money.
+  does the same. When the time is up, a summary shows every player's fish count, fishing money and the
+  biggest (priciest) fish they landed during the session.
 - Space drops the hook straight down from where you stand. A pixel-art rod appears in your hand with the line
-  running down to the hook. When a fish bites, **hold** Space to reel it in — let go and it pulls back, too long
+  running down to the hook. When a fish bites, ripples spread around the float with a ❗ and a **Cá cắn câu!**
+  toast; **hold** Space to reel it in — let go and it pulls back, too long
   and it escapes. A landed fish is sold straight into your own wallet; fishing money is never split.
 - There are 15 fish in 5 rarities and 5 rods. A better rod makes rare fish bite more often and reels faster, and
   its line has its own colour (brown, green, blue, purple, gold for levels 1–5); buy the next level with your own

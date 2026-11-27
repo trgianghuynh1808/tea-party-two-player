@@ -968,6 +968,8 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     player.fishEarned += earned;
     player.lastCatch = def.id;
     player.catchSeq++;
+    // Track the priciest species of the session for the end-of-session summary.
+    if (!player.bestCatch || def.price > (getFish(player.bestCatch)?.price ?? 0)) player.bestCatch = def.id;
     this.removeFish(fish.id);
     this.spawnFish();
     this.clearHook(sessionId, player);
@@ -1015,6 +1017,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     this.state.players.forEach((p) => {
       p.fishCaught = 0;
       p.fishEarned = 0;
+      p.bestCatch = "";
     });
     this.state.fish.clear();
     this.fishSim.clear();

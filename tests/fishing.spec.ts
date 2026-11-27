@@ -109,6 +109,19 @@ const pondRod = (page: Page): Promise<{ visible: boolean; lineColor: number } | 
       ).__GAME__.pondRod(),
   );
 
+/** What the pond view drew this frame: the local hook, the fish and the running bite-effect count. */
+const pondRender = (page: Page): Promise<{ hookY: number | null; fish: { id: string; x: number }[]; biteFx: number } | null> =>
+  page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          __GAME__: {
+            pondRender(): { hookY: number | null; fish: { id: string; x: number }[]; biteFx: number } | null;
+          };
+        }
+      ).__GAME__.pondRender(),
+  );
+
 const enterPond = async (page: Page): Promise<void> => {
   await warp(page, POND_DOOR_X, (POND_ENTER_ZONE.top + POND_ENTER_ZONE.bottom) / 2);
   await expect.poll(async () => (await snap(page)).me.x, { timeout: 10_000 }).toBeGreaterThanOrEqual(POND.x);
@@ -146,6 +159,21 @@ function aimAt(fish: FishSnap[]): number | undefined {
     return Math.min(HOOK_SAFE_RIGHT, Math.max(HOOK_SAFE_LEFT, x));
   });
   return any[0];
+}
+
+/** Cast again and again (aiming at a fish) until one takes the hook; a missed hook reels itself in. */
+async function castUntilBite(page: Page, deadlineMs = 40_000): Promise<void> {
+  const deadline = Date.now() + deadlineMs;
+  while (Date.now() < deadline) {
+    const state = await snap(page);
+    if (state.me.hookState === "reel") return;
+    if (state.me.hookState === "") {
+      const targetX = aimAt(state.fish);
+      if (targetX !== undefined) await warp(page, targetX, DOCK_CAST_Y);
+      await send(page, "cast");
+    }
+    await page.waitForTimeout(120);
+  }
 }
 
 test("T1: the pond gate's doormat takes the player into the pond, the dock mat takes them back to the yard", async ({
@@ -538,4 +566,47 @@ test("T1: T27 the sinking hook moves smoothly every frame (no stalls, no jumps)"
   }
   expect(still, `frames where the hook did not move (${still}/${samples.length})`).toBeLessThanOrEqual(samples.length * 0.1);
   expect(maxJump, "biggest hook move between two frames").toBeLessThanOrEqual(6);
+});
+
+test("T1: T28 a bite spawns the ripple effect and shows the Cá cắn câu toast", async ({ page }) => {
+  test.setTimeout(90_000);
+  await joinAsHost(page, uniqueUser());
+  await enterPond(page);
+  await send(page, "start_fishing");
+  await expect.poll(async () => (await snap(page)).fishPhase, { timeout: 10_000 }).toBe("fishing");
+
+  // 1. No bite effect yet.
+  const b0 = (await pondRender(page))?.biteFx ?? 0;
+  expect(b0).toBe(0);
+
+  // 2. Cast until a fish takes the hook.
+  await castUntilBite(page);
+  await expect.poll(async () => (await snap(page)).me.hookState, { timeout: 10_000 }).toBe("reel");
+
+  // 3. The pond view spawned a ripple and the panel toasted the bite.
+  await expect
+    .poll(async () => (await pondRender(page))?.biteFx ?? 0, { timeout: 10_000 })
+    .toBeGreaterThanOrEqual(b0 + 1);
+  await expect(page.locator("#fishing-toast")).toContainText("Cá cắn câu");
+});
+
+test("T2: T28 the session summary shows each player's biggest catch", async ({ page }) => {
+  test.setTimeout(90_000);
+  await joinAsHost(page, uniqueUser());
+  await enterPond(page);
+  await send(page, "start_fishing");
+  await expect.poll(async () => (await snap(page)).fishPhase, { timeout: 10_000 }).toBe("fishing");
+
+  // 1. Land one Cá rô early in the 20s session.
+  await castUntilBite(page);
+  await send(page, "reel", { holding: true });
+  await expect.poll(async () => (await snap(page)).me.fishCaught, { timeout: 20_000 }).toBe(1);
+  await send(page, "reel", { holding: false });
+
+  // 2. Let the session end, then read the summary.
+  await expect.poll(async () => (await snap(page)).fishPhase, { timeout: 40_000 }).toBe("ended");
+  const summary = page.locator("#fishing-summary");
+  await expect(summary).toBeVisible();
+  await expect(summary).toContainText("Cá to nhất");
+  await expect(summary).toContainText("Cá rô");
 });
