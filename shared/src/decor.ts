@@ -242,6 +242,13 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     { ...decor("chair_ladder", "Ghế thang trắng", 40, "furniture/chair_ladder", 22, 20, 42), role: "seat" },
     // Cut from the req-2 kitchen scene by cut_bedroom.py.
     { ...decor("dining_chair_blue", "Ghế ăn đệm xanh", 45, "furniture/dining_chair_blue", 26, 24, 40), role: "seat" },
+    // T33: dining_table_pink + bench_white from the req-3 pink kitchen scene (cut_bedroom.py),
+    // table_gingham + chair_farm + bench_farm from the req-2 farm sheet (cut_farm.py).
+    decor("dining_table_pink", "Bàn ăn khăn sọc hồng", 120, "furniture/dining_table_pink", 60, 30, 56),
+    { ...decor("bench_white", "Ghế dài trắng", 60, "furniture/bench_white", 56, 20, 30), role: "seat" },
+    decor("table_gingham", "Bàn khăn caro", 90, "furniture/table_gingham", 44, 26, 62),
+    { ...decor("chair_farm", "Ghế gỗ nông trại", 40, "furniture/chair_farm", 22, 20, 46), role: "seat" },
+    { ...decor("bench_farm", "Ghế băng gỗ", 50, "furniture/bench_farm", 40, 20, 30), role: "seat" },
   ]),
   ...inCategory("living", [
     // Living room set: sofa_blue + cabinet_glass cut from the req-1 living room scene by
@@ -256,6 +263,12 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     { ...decor("armchair_orange", "Ghế bành cam", 85, "furniture/armchair_orange", 40, 26, 46), role: "seat" },
     { ...decor("sofa_sky", "Sofa xanh trời", 150, "furniture/sofa_sky", 62, 28, 48), role: "seat" },
     { ...decor("sofa_cream", "Sofa kem", 160, "furniture/sofa_cream", 66, 28, 48), role: "seat" },
+    // T33: cabinet_low_white from the req-3 pink kitchen scene (cut_bedroom.py), the cowhide
+    // set + hutch from the req-2 farm sheet (cut_farm.py).
+    decor("cabinet_low_white", "Tủ thấp trắng", 100, "furniture/cabinet_low_white", 52, 24, 44),
+    { ...decor("sofa_cow", "Sofa da bò", 200, "furniture/sofa_cow", 84, 28, 60), role: "seat" },
+    { ...decor("armchair_cow", "Ghế bành da bò", 90, "furniture/armchair_cow", 40, 28, 56), role: "seat" },
+    decor("hutch_farm", "Tủ trưng bày gỗ", 130, "furniture/hutch_farm", 48, 24, 80),
   ]),
   ...inCategory("bedroom", [
     // Cut from client/assets-src/sheets/bedroom-original.png by client/assets-src/tools/cut_bedroom.py.
@@ -296,6 +309,10 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     // Drawn head-on by client/assets-src/tools/draw_gadget_props.py (gadgets/ art, rotation "none").
     decor("piano_grand", "Piano cơ", 380, "gadgets/piano_grand", 64, 44, 56, 0x7a4222),
     { ...decor("vanity_piano_gold", "Bàn trang điểm piano vàng", 260, "gadgets/vanity_piano_gold", 44, 24, 70, 0xcc9c54), surface: { height: 22 } },
+    // T33: cut from the req-2 farm sheet by cut_farm.py — one front-facing artwork each.
+    decor("wardrobe_farm", "Tủ quần áo gỗ", 140, "furniture/wardrobe_farm", 54, 24, 86),
+    decor("dresser_farm", "Tủ ngăn kéo gỗ", 120, "furniture/dresser_farm", 54, 26, 74),
+    bed(decor("bed_gingham", "Giường caro đỏ", 150, "furniture/bed_gingham", 44, 56, 88, 0xb4202a), 0.5, 0.3),
   ]),
   ...inCategory("lighting", [
     decor("lamp", "Lồng đèn đỏ", 75, "red_lantern_lit", 30, 26, 56, 0xf4a261),
@@ -381,6 +398,18 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     decor("stove_kitchen", "Bếp gas", 130, "kitchen/stove_kitchen", 38, 24, 56),
     decor("counter_sink", "Bồn rửa + tủ bếp", 140, "kitchen/counter_sink", 94, 26, 60),
     decor("fridge_grey", "Tủ lạnh xám", 170, "kitchen/fridge_grey", 36, 24, 70),
+    // T33: cut from the req-1 restaurant steel scene and the req-3 pink kitchen scene
+    // by cut_bedroom.py — one front-facing artwork each.
+    decor("grill_range", "Bếp nướng nhà hàng", 150, "kitchen/grill_range", 56, 24, 56),
+    decor("prep_table_veg", "Bàn sơ chế rau", 110, "kitchen/prep_table_veg", 52, 24, 56),
+    decor("prep_table_tomato", "Bàn sơ chế cà chua", 110, "kitchen/prep_table_tomato", 52, 24, 56),
+    decor("dish_washer_steel", "Máy rửa chén inox", 160, "kitchen/dish_washer_steel", 36, 24, 70),
+    decor("sink_steel", "Bồn rửa inox", 120, "kitchen/sink_steel", 30, 22, 52),
+    decor("fridge_white", "Tủ lạnh trắng hai cánh", 170, "kitchen/fridge_white", 40, 24, 70),
+    decor("range_white", "Bếp lò trắng", 130, "kitchen/range_white", 44, 24, 52),
+    decor("counter_cream", "Tủ bếp kem", 100, "kitchen/counter_cream", 56, 24, 52),
+    decor("dish_shelf", "Kệ chén gỗ", 110, "kitchen/dish_shelf", 56, 26, 60),
+    decor("kitchen_island", "Đảo bếp có bồn", 160, "kitchen/kitchen_island", 80, 28, 56),
   ]),
   ...inCategory("gadgets", [
     // Drawn head-on by client/assets-src/tools/draw_gadget_props.py from the gadgets-ref references.
