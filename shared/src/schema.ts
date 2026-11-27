@@ -26,12 +26,22 @@ export class Player extends Schema {
   // Fishing (see shared/src/fishing.ts): per-player rod, hook and catch counters.
   /** Rod level 1..5 (saved with the player's shop, see SharedShop). */
   @type("number") rodLevel: number = 1;
+  /** Caught-species log "id:count,..." (see encodeCaught / parseCaught), mirrored from the player's shop. */
+  @type("string") caughtLog: string = "";
   /** "" = no hook out, "drop" = hook sinking, "reel" = a fish is on the line. */
   @type("string") hookState: string = "";
   @type("number") hookX: number = 0;
   @type("number") hookY: number = 0;
   /** 0..1 while a fish is on the line (see REEL_START / reelRate). */
   @type("number") reelProgress: number = 0;
+  /** Reel-minigame pointer 0..1: rises while holding, falls while released (see REEL_POS_RISE / REEL_POS_FALL). */
+  @type("number") reelPos: number = 0.5;
+  /** Centre of the moving safe zone 0..1 (see REEL_DIFFICULTY / reelDifficulty). */
+  @type("number") zoneCenter: number = 0.5;
+  /** Width of the safe zone (share of the reel bar, see reelDifficulty). */
+  @type("number") zoneWidth: number = 1;
+  /** Bumped every time the zone jerks to a new spot; the client shakes the reel bar. */
+  @type("number") jerkSeq: number = 0;
   /** Fish landed during the current fishing session. */
   @type("number") fishCaught: number = 0;
   /** Money earned from fishing during the current session. */
@@ -39,6 +49,8 @@ export class Player extends Schema {
   /** Species id (see FISH) of the last fish landed; bump catchSeq to announce it. */
   @type("string") lastCatch: string = "";
   @type("number") catchSeq: number = 0;
+  /** Species id of the priciest fish landed this session ("" = none yet); shown in the session summary. */
+  @type("string") bestCatch: string = "";
   /** Bumped every time a hooked fish escapes. */
   @type("number") escapeSeq: number = 0;
 }

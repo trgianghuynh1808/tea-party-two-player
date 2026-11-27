@@ -743,6 +743,25 @@ h1 {
   font-weight: 700;
 }
 
+/* Caught log ("sổ cá"): uncaught species are dimmed, caught ones show their catch count. */
+.fish-guide-row[data-fish]:not([data-caught="true"]) .fish-guide-icon {
+  filter: grayscale(1) brightness(.5);
+}
+
+.fish-guide-row .fish-guide-count {
+  flex: none;
+  min-width: 26px;
+  text-align: right;
+  color: #2a9d8f;
+  font-weight: 700;
+}
+
+.fish-guide h2 .fish-guide-progress {
+  font-size: 11px;
+  font-weight: 400;
+  color: #8a7a76;
+}
+
 /* ---------------------------------------------------------------- Cooking guide (modal) */
 
 .guide {
@@ -1200,6 +1219,7 @@ h1 {
 }
 
 .reel-track {
+  position: relative;
   width: 100%;
   height: 14px;
   border: 2px solid #3d2c29;
@@ -1213,6 +1233,44 @@ h1 {
   height: 100%;
   background: #2a9d8f;
   transition: width 0.1s linear;
+}
+
+/* The safe zone: the green window the pointer must stay inside (left/width set from state). */
+#reel-zone {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: rgba(46, 158, 68, 0.5);
+  box-shadow: inset 0 0 0 1px rgba(46, 158, 68, 0.8);
+}
+
+/* The tension pointer: rises while holding, sinks while released (left set from state). */
+#reel-marker {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  width: 4px;
+  background: #3d2c29;
+  border-radius: 2px;
+  transform: translateX(-2px);
+}
+
+/* The fish jerked the zone elsewhere: a quick shake of the whole bar. */
+.reel-jerk {
+  animation: reel-jerk-shake 0.25s linear;
+}
+
+@keyframes reel-jerk-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-3px);
+  }
+  75% {
+    transform: translateX(3px);
+  }
 }
 
 .fishing-reel button {

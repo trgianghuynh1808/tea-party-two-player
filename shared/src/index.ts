@@ -76,6 +76,8 @@ export const Messages = {
   UpgradeRod: "upgrade_rod",
   /** Test-only teleport (registered just when the server env DEBUG_WARP=1): DebugWarpMessage. */
   DebugWarp: "debug_warp",
+  /** Test-only (DEBUG_WARP=1): switch the sender's reel to the real moving safe zone: DebugReelModeMessage. */
+  DebugReelMode: "debug_reel_mode",
 } as const;
 
 export interface StartShiftMessage {
@@ -118,6 +120,11 @@ export interface ReelMessage {
 export interface DebugWarpMessage {
   x: number;
   y: number;
+}
+
+/** Test-only reel mode: true = the real moving safe zone, false = the FISH_TEST easy bar (see Messages.DebugReelMode). */
+export interface DebugReelModeMessage {
+  real: boolean;
 }
 
 // Server -> client events

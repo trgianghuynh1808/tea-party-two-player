@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { canBuildCell, getBuildTile, getDecorationDef, isValidShopId, layerOf, parseTileKey, tileKey, type DecorationDef, type ShopSave } from "@boba/shared";
+import { canBuildCell, getBuildTile, getDecorationDef, getFish, isValidShopId, layerOf, parseTileKey, tileKey, type DecorationDef, type ShopSave } from "@boba/shared";
 
 /**
  * The game's database: three collections.
@@ -279,7 +279,20 @@ export function parseShopSave(data: unknown): ShopSave {
       .map(({ kind, x, y, rotation }) => ({ kind, x, y, rotation: Number.isFinite(rotation) ? rotation : 0 })),
     tiles: parseTiles(save.tiles),
     tileRotations: parseTileRotations(save.tileRotations),
+    // Old saves have no caught log: starts empty. Only species in FISH with integer counts >= 1 are kept.
+    caught: parseCaughtLog(save.caught),
   };
+}
+
+/** Caught-species log ("sổ cá") from a save: unknown ids and non-integer / < 1 counts are dropped. */
+function parseCaughtLog(data: unknown): Record<string, number> {
+  const caught: Record<string, number> = {};
+  if (!data || typeof data !== "object") return caught;
+  for (const [id, count] of Object.entries(data)) {
+    if (!getFish(id) || !Number.isInteger(count) || (count as number) < 1) continue;
+    caught[id] = count;
+  }
+  return caught;
 }
 
 /** Prop facings from a save: only structure keys with an integer index are kept (missing in old saves). */

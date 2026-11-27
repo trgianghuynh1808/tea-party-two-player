@@ -3,6 +3,7 @@ import {
   DOCK,
   FISH,
   FISH_COUNT,
+  HOOK_RADIUS,
   HOOK_SPEED,
   PLAYER_RADIUS,
   POND,
@@ -39,7 +40,13 @@ type PlayerSnap = {
   money: number;
   rodLevel: number;
   hookState: string;
+  hookX: number;
+  hookY: number;
   reelProgress: number;
+  reelPos: number;
+  zoneCenter: number;
+  zoneWidth: number;
+  jerkSeq: number;
   fishCaught: number;
   fishEarned: number;
   lastCatch: string;
@@ -79,7 +86,13 @@ const snap = (page: Page): Promise<Snap> =>
         money: me.money,
         rodLevel: me.rodLevel,
         hookState: me.hookState,
+        hookX: me.hookX,
+        hookY: me.hookY,
         reelProgress: me.reelProgress,
+        reelPos: me.reelPos,
+        zoneCenter: me.zoneCenter,
+        zoneWidth: me.zoneWidth,
+        jerkSeq: me.jerkSeq,
         fishCaught: me.fishCaught,
         fishEarned: me.fishEarned,
         lastCatch: me.lastCatch,
@@ -107,6 +120,19 @@ const pondRod = (page: Page): Promise<{ visible: boolean; lineColor: number } | 
           __GAME__: { pondRod(): { visible: boolean; lineColor: number } | null };
         }
       ).__GAME__.pondRod(),
+  );
+
+/** What the pond view drew this frame: the local hook, the fish and the running bite-effect count. */
+const pondRender = (page: Page): Promise<{ hookY: number | null; fish: { id: string; x: number }[]; biteFx: number } | null> =>
+  page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          __GAME__: {
+            pondRender(): { hookY: number | null; fish: { id: string; x: number }[]; biteFx: number } | null;
+          };
+        }
+      ).__GAME__.pondRender(),
   );
 
 const enterPond = async (page: Page): Promise<void> => {
@@ -146,6 +172,21 @@ function aimAt(fish: FishSnap[]): number | undefined {
     return Math.min(HOOK_SAFE_RIGHT, Math.max(HOOK_SAFE_LEFT, x));
   });
   return any[0];
+}
+
+/** Cast again and again (aiming at a fish) until one takes the hook; a missed hook reels itself in. */
+async function castUntilBite(page: Page, deadlineMs = 40_000): Promise<void> {
+  const deadline = Date.now() + deadlineMs;
+  while (Date.now() < deadline) {
+    const state = await snap(page);
+    if (state.me.hookState === "reel") return;
+    if (state.me.hookState === "") {
+      const targetX = aimAt(state.fish);
+      if (targetX !== undefined) await warp(page, targetX, DOCK_CAST_Y);
+      await send(page, "cast");
+    }
+    await page.waitForTimeout(120);
+  }
 }
 
 test("T1: the pond gate's doormat takes the player into the pond, the dock mat takes them back to the yard", async ({
@@ -538,4 +579,320 @@ test("T1: T27 the sinking hook moves smoothly every frame (no stalls, no jumps)"
   }
   expect(still, `frames where the hook did not move (${still}/${samples.length})`).toBeLessThanOrEqual(samples.length * 0.1);
   expect(maxJump, "biggest hook move between two frames").toBeLessThanOrEqual(6);
+});
+
+test("T1: T28 a bite spawns the ripple effect and shows the Cá cắn câu toast", async ({ page }) => {
+  test.setTimeout(90_000);
+  await joinAsHost(page, uniqueUser());
+  await enterPond(page);
+  await send(page, "start_fishing");
+  await expect.poll(async () => (await snap(page)).fishPhase, { timeout: 10_000 }).toBe("fishing");
+
+  // 1. No bite effect yet.
+  const b0 = (await pondRender(page))?.biteFx ?? 0;
+  expect(b0).toBe(0);
+
+  // 2. Cast until a fish takes the hook.
+  await castUntilBite(page);
+  await expect.poll(async () => (await snap(page)).me.hookState, { timeout: 10_000 }).toBe("reel");
+
+  // 3. The pond view spawned a ripple and the panel toasted the bite.
+  await expect
+    .poll(async () => (await pondRender(page))?.biteFx ?? 0, { timeout: 10_000 })
+    .toBeGreaterThanOrEqual(b0 + 1);
+  await expect(page.locator("#fishing-toast")).toContainText("Cá cắn câu");
+});
+
+test("T2: T28 the session summary shows each player's biggest catch", async ({ page }) => {
+  test.setTimeout(90_000);
+  await joinAsHost(page, uniqueUser());
+  await enterPond(page);
+  await send(page, "start_fishing");
+  await expect.poll(async () => (await snap(page)).fishPhase).toBe("fishing");
+
+  // 1. Land one Cá rô early in the 20s session.
+  await castUntilBite(page);
+  await send(page, "reel", { holding: true });
+  await expect.poll(async () => (await snap(page)).me.fishCaught, { timeout: 20_000 }).toBe(1);
+  await send(page, "reel", { holding: false });
+
+  // 2. Let the session end, then read the summary.
+  await expect.poll(async () => (await snap(page)).fishPhase, { timeout: 40_000 }).toBe("ended");
+  const summary = page.locator("#fishing-summary");
+  await expect(summary).toBeVisible();
+  await expect(summary).toContainText("Cá to nhất");
+  await expect(summary).toContainText("Cá rô");
+});
+
+// ------------------------------------------------- T30: reel minigame (safe zone + jerks)
+
+test("T30 T1: real reel safe zone only gains progress while the pointer is inside", async ({ page }) => {
+  test.setTimeout(90_000);
+  await joinAsHost(page, uniqueUser());
+  await enterPond(page);
+  await send(page, "start_fishing");
+  await expect.poll(async () => (await snap(page)).fishPhase).toBe("fishing");
+  // Real minigame for the next bite: a fixed 0..0.3 zone, no drift, no jerks (server debug_reel_mode).
+  await send(page, "debug_reel_mode", { real: true });
+
+  await castUntilBite(page);
+  await expect.poll(async () => (await snap(page)).me.hookState, { timeout: 10_000 }).toBe("reel");
+
+  // 1. The zone is the debug one (0.3 wide), not the FISH_TEST full bar; the pointer starts at 0.5.
+  const bite = await snap(page);
+  expect(bite.me.zoneWidth).toBeCloseTo(0.3, 5);
+  expect(bite.me.zoneWidth).not.toBe(1);
+  expect(bite.me.reelPos).toBeGreaterThan(0.3);
+
+  // 2. The panel shows the safe zone and the tension pointer while a fish is on the line.
+  await expect(page.locator("#fishing-reel")).toBeVisible();
+  await expect(page.locator("#reel-zone")).toBeVisible();
+  await expect(page.locator("#reel-marker")).toBeVisible();
+
+  // 3. Hold for 2s: the pointer rises away from the zone, so progress only ever decays.
+  await send(page, "reel", { holding: true });
+  let maximum = bite.me.reelProgress;
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const s = await snap(page);
+    if (s.me.reelProgress > maximum) maximum = s.me.reelProgress;
+    await page.waitForTimeout(100);
+  }
+  const held = await snap(page);
+  await send(page, "reel", { holding: false });
+
+  // 4. Outside the zone the pointer did not earn progress: it never reached 1 and ended lower.
+  expect(held.me.reelPos).toBeGreaterThan(0.3);
+  expect(maximum).toBeLessThan(1);
+  expect(held.me.reelProgress).toBeLessThan(maximum);
+  expect(held.me.fishCaught).toBe(0);
+});
+
+test("T30 T2: no real-zone flag keeps the FISH_TEST easy bar (full width, no jerks)", async ({ page }) => {
+  test.setTimeout(90_000);
+  await joinAsHost(page, uniqueUser());
+  await enterPond(page);
+  await send(page, "start_fishing");
+  await expect.poll(async () => (await snap(page)).fishPhase).toBe("fishing");
+
+  await castUntilBite(page);
+  await expect.poll(async () => (await snap(page)).me.hookState, { timeout: 10_000 }).toBe("reel");
+
+  // 1. The easy bar covers the whole track and never jerks.
+  const bite = await snap(page);
+  expect(bite.me.zoneWidth).toBe(1);
+  expect(bite.me.jerkSeq).toBe(0);
+
+  // 2. A Cá rô is still catchable by simply holding the reel (legacy hold-to-catch behaviour).
+  await send(page, "reel", { holding: true });
+  await expect.poll(async () => (await snap(page)).me.fishCaught, { timeout: 20_000 }).toBe(1);
+  await send(page, "reel", { holding: false });
+});
+
+// ---------------------------------------------------------------- T29: caught-species log ("sổ cá")
+
+/** The local player's caught log, e.g. "ca_ro:3,ca_chep:1" (mirrored from the shop). */
+const caughtLog = (page: Page): Promise<string> =>
+  page.evaluate(() => {
+    const g = (
+      window as unknown as {
+        __GAME__: { room: { sessionId: string }; state: { players: { get(id: string): { caughtLog: string } } } };
+      }
+    ).__GAME__;
+    return g.state.players.get(g.room.sessionId)?.caughtLog ?? "";
+  });
+
+test("T29 T1: a landed fish is saved in the shop's caught log and survives a rejoin", async ({ page }) => {
+  test.setTimeout(90_000);
+  const user = uniqueUser();
+  await joinAsHost(page, user);
+  await enterPond(page);
+  await send(page, "start_fishing");
+  await expect.poll(async () => (await snap(page)).fishPhase).toBe("fishing");
+  await expect.poll(async () => (await snap(page)).fishSize).toBe(FISH_COUNT);
+
+  // 1. Land one Cá rô (FISH_TEST=1 makes every fish a Cá rô): the log mirror gets it.
+  await castUntilBite(page);
+  await send(page, "reel", { holding: true });
+  await expect.poll(async () => (await snap(page)).me.fishCaught, { timeout: 20_000 }).toBe(1);
+  await send(page, "reel", { holding: false });
+  await expect.poll(() => caughtLog(page), { timeout: 10_000 }).toMatch(/^ca_ro:1(,|$)/);
+
+  // 2. Refresh (the client rejoins the same room): the caught species is still remembered.
+  await page.reload();
+  await page.waitForFunction(() => !!(window as { __GAME__?: unknown }).__GAME__);
+  await expect.poll(() => caughtLog(page), { timeout: 20_000 }).toMatch(/^ca_ro:1(,|$)/);
+  await enterPond(page);
+  await expect(page.locator('#fish-guide [data-fish="ca_ro"]')).toHaveAttribute("data-caught", "true");
+});
+
+test("T29 T2: the FishGuide marks caught species with their count and shows the progress", async ({ page, request }) => {
+  const user = uniqueUser();
+  const put = await request.put(`${TEST_SERVER_URL}/admin/users/${encodeURIComponent(user)}/shop`, {
+    headers: { Authorization: `Bearer ${ADMIN_TOKEN}` },
+    data: { money: 0, decorations: [], caught: { ca_ro: 2, ca_chep: 1 } },
+  });
+  expect(put.status()).toBe(200);
+
+  await joinAsHost(page, user);
+  await enterPond(page);
+
+  const guide = page.locator("#fish-guide");
+  await expect(guide).toBeVisible();
+  // Caught species: marked with their catch count.
+  await expect(guide.locator('[data-fish="ca_ro"]')).toHaveAttribute("data-caught", "true");
+  await expect(guide.locator('[data-fish="ca_ro"] .fish-guide-count')).toHaveText("×2");
+  await expect(guide.locator('[data-fish="ca_chep"]')).toHaveAttribute("data-caught", "true");
+  // A species that was never caught stays unmarked (CSS dims its icon).
+  await expect(guide.locator('[data-fish="ca_thu"]')).not.toHaveAttribute("data-caught", "true");
+  await expect(guide.locator('[data-testid="fish-guide-progress"]')).toHaveText(`Đã bắt 2/${FISH.length} loài`);
+});
+
+test("T29 T3: bad caught-log data is filtered when the shop is restored", async ({ page, request }) => {
+  const user = uniqueUser();
+  const put = await request.put(`${TEST_SERVER_URL}/admin/users/${encodeURIComponent(user)}/shop`, {
+    headers: { Authorization: `Bearer ${ADMIN_TOKEN}` },
+    data: { money: 0, decorations: [], caught: { ca_ro: 1, khong_co: 5, ca_chep: -3 } },
+  });
+  expect(put.status()).toBe(200);
+
+  await joinAsHost(page, user);
+  await expect.poll(() => caughtLog(page)).toBe("ca_ro:1");
+});
+
+// ------------------------------------------------- T31: a rising (retracted) hook can still hook fish
+
+/** Clear a fish that took the hook early so the next attempt starts from an empty rod. */
+async function quickCatch(page: Page): Promise<void> {
+  await send(page, "reel", { holding: true });
+  await expect.poll(async () => (await snap(page)).me.hookState, { timeout: 25_000 }).not.toBe("reel");
+  await send(page, "reel", { holding: false });
+}
+
+test("T31 T1: retracting the hook sends it rising and it clears at the surface", async ({ page }) => {
+  test.setTimeout(90_000);
+  await joinAsHost(page, uniqueUser());
+  await enterPond(page);
+  await send(page, "start_fishing");
+  await expect.poll(async () => (await snap(page)).fishPhase).toBe("fishing");
+
+  let sawRise = false;
+  let risingY = 0;
+  let laterY = 0;
+  for (let attempt = 0; attempt < 6 && !sawRise; attempt++) {
+    // Wait for an empty rod (an earlier attempt may have hooked a fish on the way up).
+    let state = await snap(page);
+    if (state.me.hookState === "reel") {
+      await quickCatch(page);
+    } else if (state.me.hookState !== "") {
+      await expect.poll(async () => (await snap(page)).me.hookState, { timeout: 10_000 }).toBe("");
+    }
+
+    await warp(page, HOOK_SAFE_LEFT, DOCK_CAST_Y);
+    await send(page, "cast");
+    // Let it sink a little (but not to the floor) so the rise lasts long enough to sample. Stop
+    // early if a fish takes the hook on the way down; that attempt is skipped.
+    const sinkDeadline = Date.now() + 5_000;
+    let before = await snap(page);
+    while (Date.now() < sinkDeadline && before.me.hookState === "drop" && before.me.hookY <= WATER.top + 60) {
+      await page.waitForTimeout(15);
+      before = await snap(page);
+    }
+    if (before.me.hookState !== "drop") continue;
+
+    await send(page, "retract");
+    // A fish may still take the hook at the last moment; then this attempt is not a clean rise.
+    await expect.poll(async () => (await snap(page)).me.hookState, { timeout: 5_000 }).not.toBe("drop");
+    const a = await snap(page);
+    if (a.me.hookState !== "rise") continue;
+    await page.waitForTimeout(200);
+    const b = await snap(page);
+    if (b.me.hookState === "reel") continue;
+    expect(b.me.hookY).toBeLessThan(a.me.hookY);
+    sawRise = true;
+    risingY = a.me.hookY;
+    laterY = b.me.hookY;
+  }
+
+  expect(sawRise, `never observed a rising hook (y ${risingY} -> ${laterY})`).toBe(true);
+  // The line finishes rising back in — or a fish took it before the surface.
+  await expect.poll(async () => (await snap(page)).me.hookState, { timeout: 10_000 }).not.toBe("rise");
+  expect(["", "reel"]).toContain((await snap(page)).me.hookState);
+});
+
+test("T31 T2: a fish that touches the rising hook still bites", async ({ page }) => {
+  test.setTimeout(120_000);
+  await joinAsHost(page, uniqueUser());
+  await enterPond(page);
+  await send(page, "start_fishing");
+  await expect.poll(async () => (await snap(page)).fishPhase).toBe("fishing");
+
+  // Wait by the line instead of predicting from far away: cast straight down from a fixed spot, then
+  // pull back only when a fish is about to swim onto that line exactly as the hook rises past it.
+  let sequence: string[] = [];
+  let won = false;
+  const attempts: string[] = [];
+
+  for (let attempt = 0; attempt < 12 && !won; attempt++) {
+    let state = await snap(page);
+    // The test session is short (FISH_SECONDS=20): start a fresh one if it ran out.
+    if (state.fishPhase !== "fishing") {
+      await send(page, "start_fishing");
+      await expect.poll(async () => (await snap(page)).fishPhase, { timeout: 10_000 }).toBe("fishing");
+      state = await snap(page);
+    }
+    if (state.me.hookState === "reel") {
+      await quickCatch(page);
+      continue;
+    }
+    if (state.me.hookState !== "") {
+      await expect.poll(async () => (await snap(page)).me.hookState, { timeout: 10_000 }).toBe("");
+    }
+
+    await warp(page, (HOOK_SAFE_LEFT + HOOK_SAFE_RIGHT) / 2, DOCK_CAST_Y);
+    await send(page, "cast");
+
+    let retracted = false;
+    const sinkDeadline = Date.now() + 5_000;
+    while (!retracted && Date.now() < sinkDeadline) {
+      const cur = await snap(page);
+      if (cur.me.hookState !== "drop") break;
+      const h = cur.me.hookY;
+      const plan = cur.fish
+        .filter((f) => f.y <= h - 45 && f.y >= h - 170)
+        .map((f) => {
+          const speed = getFish(f.species)?.speed ?? 40;
+          const lead = (h - f.y) / HOOK_SPEED;
+          return { f, lead, x: f.x + f.dir * speed * lead, now: Math.hypot(f.x - cur.me.hookX, f.y - h) };
+        })
+        // The fish must be clear now (no bite on the way down) and still inside the water at the crossing.
+        .filter((o) => o.now > HOOK_RADIUS + 8 && o.x >= WATER.left + 15 && o.x <= WATER.right - 15)
+        .filter((o) => Math.abs(o.x - cur.me.hookX) <= 10)
+        .sort((a, b) => Math.abs(a.x - cur.me.hookX) - Math.abs(b.x - cur.me.hookX));
+      if (plan[0]) {
+        await send(page, "retract");
+        retracted = true;
+      } else {
+        await page.waitForTimeout(15);
+      }
+    }
+    if (!retracted) continue;
+
+    // Record the hook states until the line stops rising (landed or cleared).
+    sequence = [];
+    const riseDeadline = Date.now() + 6_000;
+    while (Date.now() < riseDeadline) {
+      const cur = await snap(page);
+      if (cur.me.hookState !== sequence[sequence.length - 1]) sequence.push(cur.me.hookState);
+      if (cur.me.hookState === "" || cur.me.hookState === "reel") break;
+      await page.waitForTimeout(15);
+    }
+    attempts.push(`#${attempt} seq=${sequence.join(">")}`);
+    for (let i = 1; i < sequence.length; i++) {
+      if (sequence[i - 1] === "rise" && sequence[i] === "reel") won = true;
+    }
+  }
+
+  expect(won, `never saw rise -> reel (last: ${sequence.join(" -> ")}; attempts: ${attempts.join(", ")})`).toBe(true);
+  await expect(page.locator("#fishing-reel")).toBeVisible();
 });
