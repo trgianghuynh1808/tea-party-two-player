@@ -86,8 +86,11 @@ Interaction rules live in `shared/src/interaction.ts` (`planInteraction`), used 
   biggest (priciest) fish they landed during the session.
 - Space drops the hook straight down from where you stand. A pixel-art rod appears in your hand with the line
   running down to the hook. When a fish bites, ripples spread around the float with a ❗ and a **Cá cắn câu!**
-  toast; **hold** Space to reel it in — let go and it pulls back, too long
-  and it escapes. A landed fish is sold straight into your own wallet; fishing money is never split.
+  toast; **hold** Space to reel it in, keeping the tension pointer (the dark marker) inside the green safe zone:
+  it rises while you hold and falls when you let go, and reel progress only grows while it is inside. The zone
+  drifts back and forth and jerks to a new spot every few seconds; rarer fish get a narrower, faster zone with
+  more jerks, while a better rod widens it a little. Stay outside too long and the fish escapes. A landed fish
+  is sold straight into your own wallet; fishing money is never split.
 - There are 15 fish in 5 rarities and 5 rods. A better rod makes rare fish bite more often and reels faster, and
   its line has its own colour (brown, green, blue, purple, gold for levels 1–5); buy the next level with your own
   money in the pond HUD. The rod level is saved per username (like the wallet).
@@ -117,7 +120,7 @@ The game area scales to fit the screen; the side panel shows the orders, and coo
 In build mode one finger either builds or steers: the **🚶 Đi lại / 🔨 Xây tiếp** button (top right of the game)
 switches between dragging to build and the joystick. Picking a material switches back to building.
 At the pond, the action button casts / pulls the hook back; hold the **🤜 GIỮ để kéo** button (or the action
-button) to reel a biting fish.
+button) and keep the pointer in the green safe zone to reel a biting fish.
 
 To test on a phone, open the Vite **Network** URL (e.g. `http://192.168.x.x:5173`) on the same Wi-Fi.
 
@@ -208,7 +211,8 @@ pieces and can delete them, unless a shop still owns one.
 
 - WASD / arrow keys: move
 - Space: interact with the nearest station (highlighted). The hint at the bottom right shows what Space will do.
-- At the pond: Space casts the hook / pulls it back; hold Space to reel a biting fish (the action button works the same).
+- At the pond: Space casts the hook / pulls it back; hold Space to reel a biting fish and keep the pointer in
+  the green safe zone (the action button works the same).
   You can also start a session from the yard with the **🎣 Câu cá** card in the shift picker.
 - Decorate / build modes: **R** (or **⟳ Xoay**) turns the piece being placed or selected (only pieces with all four
   side artworks can turn), **Delete** sells the selected yard piece, **Esc** (or a click on an empty cell) deselects.

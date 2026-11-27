@@ -125,6 +125,37 @@ export const REEL_DECAY = 0.15;
 /** A bite not landed within this many seconds escapes. */
 export const REEL_TIMEOUT = 25;
 
+// Reel minigame (simulated server-side in updateHookReel, drawn by the fishing panel):
+// a pointer rises while holding / falls while released, and only counts while inside a safe
+// zone that drifts back and forth and jerks to a new spot every now and then.
+
+/** Safe-zone tuning per tier: zoneWidth = share of the reel bar, zoneSpeed = drift (bar/s), jerkEvery = seconds between jerks. */
+export interface ReelDifficulty {
+  zoneWidth: number;
+  zoneSpeed: number;
+  jerkEvery: number;
+}
+
+/** Rarer fish: narrower zone, faster drift, more frequent jerks. */
+export const REEL_DIFFICULTY: Record<FishTier, ReelDifficulty> = {
+  common: { zoneWidth: 0.5, zoneSpeed: 0.15, jerkEvery: 6 },
+  uncommon: { zoneWidth: 0.42, zoneSpeed: 0.2, jerkEvery: 5 },
+  rare: { zoneWidth: 0.35, zoneSpeed: 0.25, jerkEvery: 4 },
+  epic: { zoneWidth: 0.28, zoneSpeed: 0.3, jerkEvery: 3 },
+  mythic: { zoneWidth: 0.2, zoneSpeed: 0.35, jerkEvery: 2 },
+};
+
+/** Difficulty for `tier` with `rodLevel`; higher rods widen the zone a little (5% per level above 1). */
+export const reelDifficulty = (tier: FishTier, rodLevel: number): ReelDifficulty => {
+  const base = REEL_DIFFICULTY[tier];
+  return { ...base, zoneWidth: base.zoneWidth * (1 + 0.05 * (rodLevel - 1)) };
+};
+
+/** Reel pointer rise per second while holding. */
+export const REEL_POS_RISE = 0.6;
+/** Reel pointer fall per second while released. */
+export const REEL_POS_FALL = 0.6;
+
 /** Pick a species for a new fish, weighted (common 40/30/30, uncommon 12/8/8/8, rare 4/3/3, epic 2/2/2, mythic 1/1). */
 export function pickFishSpecies(rng: () => number = Math.random): FishDef {
   const total = FISH.reduce((sum, f) => sum + f.weight, 0);

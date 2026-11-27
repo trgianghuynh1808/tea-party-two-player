@@ -34,6 +34,14 @@ export class Player extends Schema {
   @type("number") hookY: number = 0;
   /** 0..1 while a fish is on the line (see REEL_START / reelRate). */
   @type("number") reelProgress: number = 0;
+  /** Reel-minigame pointer 0..1: rises while holding, falls while released (see REEL_POS_RISE / REEL_POS_FALL). */
+  @type("number") reelPos: number = 0.5;
+  /** Centre of the moving safe zone 0..1 (see REEL_DIFFICULTY / reelDifficulty). */
+  @type("number") zoneCenter: number = 0.5;
+  /** Width of the safe zone (share of the reel bar, see reelDifficulty). */
+  @type("number") zoneWidth: number = 1;
+  /** Bumped every time the zone jerks to a new spot; the client shakes the reel bar. */
+  @type("number") jerkSeq: number = 0;
   /** Fish landed during the current fishing session. */
   @type("number") fishCaught: number = 0;
   /** Money earned from fishing during the current session. */

@@ -40,6 +40,10 @@ type PlayerSnap = {
   rodLevel: number;
   hookState: string;
   reelProgress: number;
+  reelPos: number;
+  zoneCenter: number;
+  zoneWidth: number;
+  jerkSeq: number;
   fishCaught: number;
   fishEarned: number;
   lastCatch: string;
@@ -80,6 +84,10 @@ const snap = (page: Page): Promise<Snap> =>
         rodLevel: me.rodLevel,
         hookState: me.hookState,
         reelProgress: me.reelProgress,
+        reelPos: me.reelPos,
+        zoneCenter: me.zoneCenter,
+        zoneWidth: me.zoneWidth,
+        jerkSeq: me.jerkSeq,
         fishCaught: me.fishCaught,
         fishEarned: me.fishEarned,
         lastCatch: me.lastCatch,
@@ -609,6 +617,71 @@ test("T2: T28 the session summary shows each player's biggest catch", async ({ p
   await expect(summary).toBeVisible();
   await expect(summary).toContainText("Cá to nhất");
   await expect(summary).toContainText("Cá rô");
+});
+
+// ------------------------------------------------- T30: reel minigame (safe zone + jerks)
+
+test("T30 T1: real reel safe zone only gains progress while the pointer is inside", async ({ page }) => {
+  test.setTimeout(90_000);
+  await joinAsHost(page, uniqueUser());
+  await enterPond(page);
+  await send(page, "start_fishing");
+  await expect.poll(async () => (await snap(page)).fishPhase).toBe("fishing");
+  // Real minigame for the next bite: a fixed 0..0.3 zone, no drift, no jerks (server debug_reel_mode).
+  await send(page, "debug_reel_mode", { real: true });
+
+  await castUntilBite(page);
+  await expect.poll(async () => (await snap(page)).me.hookState, { timeout: 10_000 }).toBe("reel");
+
+  // 1. The zone is the debug one (0.3 wide), not the FISH_TEST full bar; the pointer starts at 0.5.
+  const bite = await snap(page);
+  expect(bite.me.zoneWidth).toBeCloseTo(0.3, 5);
+  expect(bite.me.zoneWidth).not.toBe(1);
+  expect(bite.me.reelPos).toBeGreaterThan(0.3);
+
+  // 2. The panel shows the safe zone and the tension pointer while a fish is on the line.
+  await expect(page.locator("#fishing-reel")).toBeVisible();
+  await expect(page.locator("#reel-zone")).toBeVisible();
+  await expect(page.locator("#reel-marker")).toBeVisible();
+
+  // 3. Hold for 2s: the pointer rises away from the zone, so progress only ever decays.
+  await send(page, "reel", { holding: true });
+  let maximum = bite.me.reelProgress;
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const s = await snap(page);
+    if (s.me.reelProgress > maximum) maximum = s.me.reelProgress;
+    await page.waitForTimeout(100);
+  }
+  const held = await snap(page);
+  await send(page, "reel", { holding: false });
+
+  // 4. Outside the zone the pointer did not earn progress: it never reached 1 and ended lower.
+  expect(held.me.reelPos).toBeGreaterThan(0.3);
+  expect(maximum).toBeLessThan(1);
+  expect(held.me.reelProgress).toBeLessThan(maximum);
+  expect(held.me.fishCaught).toBe(0);
+});
+
+test("T30 T2: no real-zone flag keeps the FISH_TEST easy bar (full width, no jerks)", async ({ page }) => {
+  test.setTimeout(90_000);
+  await joinAsHost(page, uniqueUser());
+  await enterPond(page);
+  await send(page, "start_fishing");
+  await expect.poll(async () => (await snap(page)).fishPhase).toBe("fishing");
+
+  await castUntilBite(page);
+  await expect.poll(async () => (await snap(page)).me.hookState, { timeout: 10_000 }).toBe("reel");
+
+  // 1. The easy bar covers the whole track and never jerks.
+  const bite = await snap(page);
+  expect(bite.me.zoneWidth).toBe(1);
+  expect(bite.me.jerkSeq).toBe(0);
+
+  // 2. A Cá rô is still catchable by simply holding the reel (legacy hold-to-catch behaviour).
+  await send(page, "reel", { holding: true });
+  await expect.poll(async () => (await snap(page)).me.fishCaught, { timeout: 20_000 }).toBe(1);
+  await send(page, "reel", { holding: false });
 });
 
 // ---------------------------------------------------------------- T29: caught-species log ("sổ cá")

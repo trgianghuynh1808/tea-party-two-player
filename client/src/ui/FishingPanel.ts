@@ -19,7 +19,8 @@ const formatClock = (seconds: number) => {
  * Overlay on top of the game canvas while the local player is at the pond:
  * - HUD (#fishing-hud): session clock, own catch count and earnings, rod name + the upgrade button.
  * - #fishing-start / #fishing-summary: start the session, or its results once it ended.
- * - #fishing-reel: the reel bar while a fish is on the line, with a hold button (Space works too).
+ * - #fishing-reel: the reel bar while a fish is on the line — the progress fill, the moving safe
+ *   zone (#reel-zone) and the tension pointer (#reel-marker) — with a hold button (Space works too).
  * - #fishing-toast: "a fish bit!" / "caught one!" / "it got away" flashes.
  * The panel itself sends StartFishing / UpgradeRod / Reel; the scene handles Cast / Retract.
  */
@@ -31,6 +32,8 @@ export class FishingPanel {
   private lastEscapeSeq = 0;
   /** Last hookState seen for the local player: a switch to "reel" means a fish bit. */
   private lastHookState = "";
+  /** Last jerkSeq shown on the bar: a higher one means the fish just jerked the zone. */
+  private lastJerkSeq = 0;
   private summaryKey = "";
   private toastTimer?: ReturnType<typeof setTimeout>;
   private readonly timer: ReturnType<typeof setInterval>;
@@ -42,7 +45,10 @@ export class FishingPanel {
   private readonly upgradeBtn: HTMLButtonElement;
   private readonly startBtn: HTMLButtonElement;
   private readonly reelEl: HTMLElement;
+  private readonly trackEl: HTMLElement;
   private readonly reelFill: HTMLElement;
+  private readonly zoneEl: HTMLElement;
+  private readonly markerEl: HTMLElement;
   private readonly holdBtn: HTMLButtonElement;
   private readonly summaryEl: HTMLElement;
   private readonly summaryList: HTMLElement;
@@ -83,10 +89,14 @@ export class FishingPanel {
       this.startBtn.blur();
     });
 
-    // The reel bar + hold button (touch-friendly; Space works too, see ShopScene).
+    // The reel bar + hold button (touch-friendly; Space works too, see ShopScene). The track holds
+    // the progress fill plus the safe-zone minigame: the green window (#reel-zone) and the tension
+    // pointer (#reel-marker), both driven by the server's reel sim (see updateHookReel).
     this.reelFill = el("div", "reel-fill");
-    const track = el("div", "reel-track");
-    track.append(this.reelFill);
+    this.zoneEl = $("reel-zone");
+    this.markerEl = $("reel-marker");
+    this.trackEl = el("div", "reel-track");
+    this.trackEl.append(this.reelFill, this.zoneEl, this.markerEl);
     this.holdBtn = el("button", "btn small", "🤜 GIỮ để kéo") as HTMLButtonElement;
     this.holdBtn.id = "fishing-hold";
     this.holdBtn.type = "button";
@@ -107,7 +117,7 @@ export class FishingPanel {
     this.holdBtn.addEventListener("lostpointercapture", release);
     this.reelEl = $("fishing-reel");
     this.reelEl.className = "fishing-reel";
-    this.reelEl.append(track, this.holdBtn);
+    this.reelEl.append(this.trackEl, this.holdBtn);
 
     // Session summary (fishPhase "ended"): everyone's catch, then fish again.
     this.summaryList = el("ul", "stats");
@@ -150,6 +160,7 @@ export class FishingPanel {
     this.lastCatchSeq = me?.catchSeq ?? 0;
     this.lastEscapeSeq = me?.escapeSeq ?? 0;
     this.lastHookState = me?.hookState ?? "";
+    this.lastJerkSeq = me?.jerkSeq ?? 0;
     this.update();
   }
 
@@ -180,7 +191,19 @@ export class FishingPanel {
     if (!this.summaryEl.hidden) this.updateSummary(state);
 
     this.reelEl.hidden = me.hookState !== "reel";
-    if (!this.reelEl.hidden) this.reelFill.style.width = `${Math.round(Math.min(1, Math.max(0, me.reelProgress)) * 100)}%`;
+    if (this.reelEl.hidden) {
+      this.trackEl.classList.remove("reel-jerk");
+    } else {
+      this.reelFill.style.width = `${Math.round(Math.min(1, Math.max(0, me.reelProgress)) * 100)}%`;
+      // Safe-zone minigame: the green window and the pointer, placed as % of the track.
+      const width = Math.min(1, Math.max(0, me.zoneWidth));
+      const center = Math.min(1 - width / 2, Math.max(width / 2, me.zoneCenter));
+      this.zoneEl.style.left = `${Math.round((center - width / 2) * 100)}%`;
+      this.zoneEl.style.width = `${Math.round(width * 100)}%`;
+      this.markerEl.style.left = `${Math.round(Math.min(1, Math.max(0, me.reelPos)) * 100)}%`;
+      if (me.jerkSeq > this.lastJerkSeq) this.jerk();
+      this.lastJerkSeq = me.jerkSeq;
+    }
     // The fish got away / was landed: the hold button releases with it.
     if (me.hookState !== "reel") this.holding = false;
 
@@ -195,8 +218,15 @@ export class FishingPanel {
     }
     if (me.hookState !== this.lastHookState) {
       this.lastHookState = me.hookState;
-      if (me.hookState === "reel") this.toast("❗ Cá cắn câu! Giữ để kéo");
+      if (me.hookState === "reel") this.toast("❗ Cá cắn câu! Giữ để kéo, giữ con trỏ trong vùng xanh");
     }
+  }
+
+  /** The fish just jerked the safe zone elsewhere: shake the bar briefly (see jerkSeq). */
+  private jerk() {
+    this.trackEl.classList.remove("reel-jerk");
+    void this.trackEl.offsetWidth; // reflow so a running shake restarts right away
+    this.trackEl.classList.add("reel-jerk");
   }
 
   /** Everyone's catch + earnings and each one's priciest fish (rebuilt only when the numbers change). */

@@ -21,6 +21,8 @@ import {
   PICKY_FAST_BONUS,
   POND_ENTRY_SPAWN,
   REEL_DECAY,
+  REEL_POS_FALL,
+  REEL_POS_RISE,
   REEL_START,
   REEL_TIMEOUT,
   VIP_DURATION_SECONDS,
@@ -40,6 +42,7 @@ import {
   pendingOrderDrinkIds,
   pickCustomerKind,
   pickFishSpecies,
+  reelDifficulty,
   seatTableMap,
   tablesWaiting,
   SEAT_COOLDOWN_SECONDS,
@@ -74,6 +77,7 @@ import {
   venueOrderDuration,
   venueSpawnInterval,
   type BedSpot,
+  type DebugReelModeMessage,
   type DebugWarpMessage,
   type FishDef,
   PLAYER_SPEED,
@@ -212,6 +216,10 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
   private hookTimer = new Map<string, number>();
   /** sessionId -> fish that already rolled on this player's current drop (one roll per drop each). */
   private biteRolled = new Map<string, Set<string>>();
+  /** sessionId -> safe-zone drift direction and seconds since the last jerk (see updateHookReel). */
+  private reelZone = new Map<string, { dir: 1 | -1; jerkTimer: number }>();
+  /** Test-only (debug_reel_mode, DEBUG_WARP=1): sessions whose reel uses the real safe zone. */
+  private reelReal = new Set<string>();
 
   messages = {
     position: (client: Client, payload: PositionMessage) => {
@@ -272,6 +280,9 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
       ? {
           debug_warp: (client: Client, payload: DebugWarpMessage) => {
             this.handleDebugWarp(client, payload);
+          },
+          debug_reel_mode: (client: Client, payload: DebugReelModeMessage) => {
+            this.handleDebugReelMode(client, payload);
           },
         }
       : {}),
@@ -394,6 +405,8 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     const name = player?.name;
     this.state.players.delete(sessionId);
     this.moveBudgets.delete(sessionId);
+    // The debug reel flag outlives clearHook (it must survive hook resets between casts); drop it here.
+    this.reelReal.delete(sessionId);
     if (key) this.unwatchWallet(key);
     this.updateListing();
     console.log(`[BobaShopRoom] ${name ?? sessionId} left ${this.roomId}`);
@@ -944,12 +957,35 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
       this.hookTimer.set(sessionId, 0);
       player.hookState = "reel";
       player.reelProgress = REEL_START;
+      this.startReelZone(sessionId, player, def);
       return;
     }
     if (player.hookY >= WATER.bottom) this.clearHook(sessionId, player);
   }
 
-  /** A fish on the line: holding gains reel progress, releasing loses it; not landed in time, it escapes. */
+  /**
+   * A fish took the hook: reset the reel pointer to the middle and place the safe zone for this
+   * fight. Real minigame: difficulty-sized zone in the middle; FISH_TEST without debug_reel_mode
+   * keeps the easy full-bar zone so legacy hold-to-catch tests still pass; debug_reel_mode forces
+   * a deterministic fixed zone (the bottom 0..0.3 of the bar, no drift, no jerks).
+   */
+  private startReelZone(sessionId: string, player: Player, def: FishDef) {
+    player.reelPos = 0.5;
+    player.jerkSeq = 0;
+    if (this.reelReal.has(sessionId)) {
+      player.zoneWidth = 0.3;
+      player.zoneCenter = 0.15;
+    } else if (FISH_TEST) {
+      player.zoneWidth = 1;
+      player.zoneCenter = 0.5;
+    } else {
+      player.zoneWidth = reelDifficulty(def.tier, player.rodLevel).zoneWidth;
+      player.zoneCenter = 0.5;
+    }
+    this.reelZone.set(sessionId, { dir: Math.random() < 0.5 ? -1 : 1, jerkTimer: 0 });
+  }
+
+  /** A fish on the line: progress grows only while the pointer sits inside the moving safe zone. */
   private updateHookReel(sessionId: string, player: Player, dt: number) {
     const timer = (this.hookTimer.get(sessionId) ?? 0) + dt;
     this.hookTimer.set(sessionId, timer);
@@ -960,9 +996,41 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
 
     const rod = getRod(player.rodLevel);
     const holding = this.reelHolding.get(sessionId) === true;
-    player.reelProgress += holding ? dt * ((rod?.reel ?? 1) / def.hold) : -dt * REEL_DECAY;
+    // The pointer rises while holding and sinks back while released, clamped to the bar.
+    player.reelPos = Math.min(1, Math.max(0, player.reelPos + (holding ? REEL_POS_RISE : -REEL_POS_FALL) * dt));
+    this.updateReelZone(sessionId, player, def, dt);
+    const inZone = Math.abs(player.reelPos - player.zoneCenter) <= player.zoneWidth / 2;
+    player.reelProgress += inZone ? dt * ((rod?.reel ?? 1) / def.hold) : -dt * REEL_DECAY;
     if (player.reelProgress >= 1) return this.landFish(sessionId, player, fish, def);
     if (player.reelProgress <= 0 || timer >= REEL_TIMEOUT) return this.loseHook(sessionId, player);
+  }
+
+  /**
+   * Move the safe zone: it drifts back and forth and every jerkEvery seconds jerks to a random
+   * new spot (jerkSeq++ tells clients to shake the bar). Fixed zones (the FISH_TEST easy bar and
+   * the debug_reel_mode zone) neither drift nor jerk.
+   */
+  private updateReelZone(sessionId: string, player: Player, def: FishDef, dt: number) {
+    if (this.reelReal.has(sessionId) || FISH_TEST) return;
+    const zone = this.reelZone.get(sessionId);
+    if (!zone) return;
+    const diff = reelDifficulty(def.tier, player.rodLevel);
+    const half = player.zoneWidth / 2;
+    player.zoneCenter += zone.dir * diff.zoneSpeed * dt;
+    if (player.zoneCenter <= half) {
+      player.zoneCenter = half;
+      zone.dir = 1;
+    } else if (player.zoneCenter >= 1 - half) {
+      player.zoneCenter = 1 - half;
+      zone.dir = -1;
+    }
+    zone.jerkTimer += dt;
+    if (zone.jerkTimer >= diff.jerkEvery) {
+      zone.jerkTimer = 0;
+      zone.dir = Math.random() < 0.5 ? -1 : 1;
+      player.zoneCenter = half + Math.random() * (1 - player.zoneWidth);
+      player.jerkSeq++;
+    }
   }
 
   /** Landed: the fish sells straight into the catcher's own wallet (never split), and a new one spawns. */
@@ -1000,6 +1068,7 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     this.hookTimer.delete(sessionId);
     this.reelHolding.delete(sessionId);
     this.biteRolled.delete(sessionId);
+    this.reelZone.delete(sessionId);
     if (player) player.hookState = "";
   }
 
@@ -1077,6 +1146,17 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     player.y = y;
     player.teleportSeq++;
     this.resetMoveBudget(client.sessionId);
+  }
+
+  /**
+   * Test-only (DEBUG_WARP=1): real=true switches the sender's next bite to the real safe-zone
+   * minigame (a fixed 0..0.3 zone); real=false returns to the FISH_TEST easy bar. The flag lives
+   * until they leave, so it survives the hook resets between casts.
+   */
+  private handleDebugReelMode(client: Client, payload: DebugReelModeMessage) {
+    if (!this.state.players.has(client.sessionId)) return;
+    if (payload?.real === true) this.reelReal.add(client.sessionId);
+    else this.reelReal.delete(client.sessionId);
   }
 
   // ---------------------------------------------------------------- Movement
