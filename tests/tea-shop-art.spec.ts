@@ -76,3 +76,22 @@ test("T2: milk splits the machine row (teas left, juices right) and tea/juice in
   expect(shop.shiftSeconds).toBeGreaterThan(180);
   expect(shop.durationStart).toBeGreaterThan(60);
 });
+
+/** Station x/y are the centre of its width x height rectangle (top-down 3/4 view). */
+const rectsOverlap = (a: StationDef, b: StationDef) =>
+  Math.abs(a.x - b.x) * 2 < a.width + b.width && Math.abs(a.y - b.y) * 2 < a.height + b.height;
+
+test("T1: hai kệ ly — đúng 2 kệ, kệ mới (cup_shelf_2) ở bên phải, không chồng station nào", () => {
+  const shelves = STATIONS.filter((s) => s.type === StationType.CupShelf);
+  expect(shelves, "exactly two cup shelves").toHaveLength(2);
+
+  const rightmost = shelves.slice().sort((a, b) => a.x - b.x).at(-1)!;
+  expect(rightmost.id, "the new shelf is cup_shelf_2").toBe("cup_shelf_2");
+  expect(rightmost.x, "the new shelf is on the right half of the shop").toBeGreaterThan(480);
+
+  // No station's rectangle overlaps either shelf (stations are axis-aligned rectangles centred on x/y).
+  for (const shelf of shelves) {
+    const collisions = STATIONS.filter((s) => s.id !== shelf.id && rectsOverlap(shelf, s));
+    expect(collisions, `${shelf.id} overlaps: ${collisions.map((s) => s.id).join(", ")}`).toEqual([]);
+  }
+});

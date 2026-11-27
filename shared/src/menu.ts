@@ -130,9 +130,11 @@ const machine = (id: IngredientId, x: number, label: string, processSeconds = 0)
 });
 
 export const STATIONS: StationDef[] = [
-  // The nine machines now fill the whole back wall, so the cup shelf stands on the floor by the left
-  // wall instead: clear of the machines, the trash bin, the counters, the exit path and both spawns.
+  // The nine machines fill the whole back wall, so both cup shelves stand on the floor instead, one by
+  // the left wall and one by the right wall near the juice machines: clear of the machines, the trash
+  // bin, the counters, the delivery stall, the exit path and both spawns.
   { id: "cup_shelf", type: StationType.CupShelf, label: "Kệ ly", x: 76, y: 290, width: MACHINE_W, height: MACHINE_H, color: 0x8ecae6 },
+  { id: "cup_shelf_2", type: StationType.CupShelf, label: "Kệ ly", x: 884, y: 290, width: MACHINE_W, height: MACHINE_H, color: 0x8ecae6 },
   // Short labels so they stay readable on phones (the world is rendered at ~0.6× there).
   // Nine machines 102px apart: teas | shared milk in the middle (i=5) | fruit juices.
   machine("black_tea", 60, "Trà đen", 1.5),
