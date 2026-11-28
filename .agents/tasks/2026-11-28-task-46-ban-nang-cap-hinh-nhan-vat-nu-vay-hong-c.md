@@ -27,7 +27,7 @@ Verify mode: light
 ## Plan
 - [x] 1. [vừa] `client/assets-src/characters/build_turnaround_sheet.py` → sau `shrink`, thêm hàm `walk_frames(fig, direction)` trả về (step_a, stand, step_b) theo mục Ngữ cảnh; ghi sheet 3 cột (rộng FRAME_W*3, cao FRAME_H*4); cập nhật docstring đầu file (3 cột thay vì 1 cột, bỏ câu "no walk animation"). Chạy script để sinh lại `client/public/assets/characters/pink_girl.png`, rồi tự mở ảnh kiểm tra bằng Read: 3 cột x 4 hàng, chân khác nhau giữa frame 0 và 2, không bị cắt, cột 1 giống tư thế cũ.
 - [x] 2. [dễ] `shared/src/characters.ts` → mục `pink_girl`: `columns: 3`, `standColumn: 1`, `frameWidth` khớp FRAME_W script in ra, sửa comment. Chạy `npm run typecheck`.
-- [ ] 3. [dễ] `README.md` / `AGENTS.md`: kiểm tra có chỗ nào nói pink_girl là sheet 1 tư thế / không có animation đi bộ (grep `pink`, `turnaround`) và sửa; nếu không có thì ghi "Docs checked: no change needed" vào Trạng thái hiện tại.
+- [x] 3. [dễ] `README.md` / `AGENTS.md`: kiểm tra có chỗ nào nói pink_girl là sheet 1 tư thế / không có animation đi bộ (grep `pink`, `turnaround`) và sửa; nếu không có thì ghi "Docs checked: no change needed" vào Trạng thái hiện tại.
 
 ## Test cases
 - [x] T1. Sheet bé váy hồng có đủ 3 cột — kích thước PNG khớp `frameWidth*3` x `72*4` và `columns: 3` — kiểm tra bằng lệnh, không cần spec e2e
@@ -38,12 +38,13 @@ Verify mode: light
 ## Trạng thái hiện tại
 - Bước 1 xong: `build_turnaround_sheet.py` giờ sinh sheet 3 cột (step, stand, step). `walk_frames(fig, direction)` sau `shrink`: down/up nhấc một nửa chân 2 px (nửa trái ở cột 0, nửa phải ở cột 2, nửa kia giữ nguyên), left/right tách hai nửa ±2 px theo hướng nhìn và nhấc cả hai 1 px (cột 2 đảo vai), thân trên paste sau để váy đè chân nhấc. Sheet mới `pink_girl.png` 120x288, FRAME_W=40 (khớp `frameWidth` hiện tại trong shared). Docstring đã đổi sang "3-column walk sprite sheet", bỏ câu "no walk animation".
 - Kiểm PNG bằng script Python (model không đọc được ảnh, thay cho việc Read ảnh): cột 1 identical pixel-khớp sheet cũ; không pixel nào vượt cell 40x72 hay dưới FEET_ROW=70; stepA ≠ stepB ở cả 4 hướng; side step đáy ở hàng 69 (nhấc 1 px), down/up một chân trụ còn chạm hàng 70. `npm run typecheck` pass.
-- Bước 2 xong: `pink_girl` trong `shared/src/characters.ts` đổi `columns: 3`, `standColumn: 1` (frameWidth giữ 40 = FRAME_W script in ra), comment "built by" ghi rõ "3-column walk frames", docstring `CHARACTERS` bỏ câu single-pose 1 cột (giờ mọi sheet 3 cột). `npm run typecheck` pass. Chưa làm bước 3 trong lần commit này.
+- Bước 2 xong: `pink_girl` trong `shared/src/characters.ts` đổi `columns: 3`, `standColumn: 1` (frameWidth giữ 40 = FRAME_W script in ra), comment "built by" ghi rõ "3-column walk frames", docstring `CHARACTERS` bỏ câu single-pose 1 cột (giờ mọi sheet 3 cột). `npm run typecheck` pass.
+- Bước 3 xong: grep `pink`/`turnaround` trong `README.md`, `AGENTS.md` và mọi `*.md` (trừ `.agents/`) — không có chỗ nào mô tả pink_girl là sheet 1 tư thế / không có animation đi bộ. Docs checked: no change needed. `npm run typecheck` pass.
 Lưu ý: không có art bước chân thật cho bé váy hồng, frame bước được sinh bằng code từ tư thế đứng nên chuyển động chỉ ở mức đơn giản; muốn đẹp hơn cần user cung cấp sheet đi bộ 4x4 (dùng `build_walk_sheet.py`).
 Lưu ý: side-view frame "khép" (cột 2) có hai nửa chân chồng ±2 px, vài pixel da/váy lẫn nhau ở vùng chồng — chỉ thấy rõ khi phóng to, chấp nhận cho mức đơn giản.
 
 ## Test status
-- Lần chạy cuối: `npm run typecheck` PASS; T1 kiểm bằng `file` + grep `frameWidth` — PNG 120x288, frameWidth 40, columns: 3.
+- Lần chạy cuối: `npm run typecheck` PASS (sau bước 2 và bước 3); T1 kiểm bằng `file` + grep `frameWidth` — PNG 120x288, frameWidth 40, columns: 3.
 - Kết quả từng test:
   - T1: PASS — PNG `pink_girl.png` 120x288 = frameWidth(40)*3 x 72*4, `columns: 3`, `npm run typecheck` PASS.
 - Fail chi tiết: không có.
