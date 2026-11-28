@@ -1,5 +1,7 @@
 # Task: Sửa sprite "Bé váy hồng" bị mất một phần (hướng trái)
 
+APPROVED_BY_MANAGER
+
 Verify mode: light
 
 ## Mục tiêu
