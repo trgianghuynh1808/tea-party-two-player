@@ -56,6 +56,11 @@ export interface JoinOptions {
   gender?: string;
   /** create() only. */
   roomName?: string;
+  /**
+   * One-time invite token (see ServerEvents.Invite): required to join someone else's room,
+   * skipped for the host or a player who still has a seat in the room.
+   */
+  inviteToken?: string;
 }
 
 /** Matchmaking errors (thrown by the room, shown in the lobby). */
@@ -64,7 +69,28 @@ export const JoinError = {
   NAME_TAKEN: 4212,
   ROOM_FULL: 4213,
   SHOP_UNAVAILABLE: 4214,
+  /** Joining a private room without a valid invite token. */
+  NOT_INVITED: 4215,
 } as const;
+
+/** Who is online right now (broadcast by the presence room, see ServerEvents.Online). */
+export interface OnlinePlayer {
+  name: string;
+  /** Room id the player is currently playing in, if any. */
+  roomId?: string;
+}
+
+/** ServerEvents.Invite: an invite pushed to the target player through the presence room. */
+export interface InvitePayload {
+  /** Inviter's name (the host). */
+  from: string;
+  /** Room to join when the invite is accepted. */
+  roomId: string;
+  /** Room title shown in the invite popup. */
+  roomName: string;
+  /** One-time token to pass back as JoinOptions.inviteToken. */
+  token: string;
+}
 
 /** Close code sent to a tab whose player was taken over (same name joined again elsewhere). */
 export const REPLACED_CLOSE_CODE = 4220;

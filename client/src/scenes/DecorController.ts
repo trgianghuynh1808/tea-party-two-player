@@ -169,6 +169,8 @@ interface Ghost {
  * - drag placed furniture to move it, or onto the 🗑 zone to sell it,
  * - turn pieces with R / the ⟳ button (the piece being dragged, or the last one touched).
  * Placement is previewed with shared rules (canPlaceDecoration); the server re-validates.
+ * Guests may only drag new items in (paid from their own wallet): placed furniture stays put
+ * (no moving, turning or selling) — only the host manages it, like the server enforces.
  */
 export class DecorController {
   private views = new Map<string, DecorView>();
@@ -355,8 +357,13 @@ export class DecorController {
 
   // ---------------------------------------------------------------- Dragging placed furniture (Phaser input)
 
+  /** Guests (not the host) may only add new pieces: placed furniture isn't draggable for them. */
+  private isHost(): boolean {
+    return !!this.room.state.players?.get(this.room.sessionId)?.host;
+  }
+
   private setDraggable(view: DecorView, draggable: boolean) {
-    if (draggable) {
+    if (draggable && this.isHost()) {
       view.container.setInteractive({ draggable: true, useHandCursor: true });
     } else {
       view.container.disableInteractive();
@@ -371,7 +378,7 @@ export class DecorController {
 
   private onDragStart(pointer: Phaser.Input.Pointer, obj: Phaser.GameObjects.GameObject) {
     const hit = this.viewOf(obj);
-    if (!hit || !this.enabled) return;
+    if (!hit || !this.enabled || !this.isHost()) return;
     this.select(hit.id);
     this.draggingId = hit.id;
     this.dragStart = { x: hit.view.container.x, y: hit.view.container.y, rotation: hit.view.rotation };

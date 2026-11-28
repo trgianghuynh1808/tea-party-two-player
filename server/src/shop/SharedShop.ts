@@ -174,21 +174,26 @@ export class SharedShop {
     this.scheduleSave();
   }
 
-  /** Buy and place a piece. Returns an error message, or undefined on success. */
-  buy(kind: unknown, x: unknown, y: unknown, rotation: unknown): string | undefined {
+  /**
+   * Buy and place a piece. `payer` is whose wallet pays (default: this shop's owner); another player's
+   * wallet = a guest helping decorate this shop. Returns an error message, or undefined on success.
+   */
+  buy(kind: unknown, x: unknown, y: unknown, rotation: unknown, payer: SharedShop = this): string | undefined {
     const def = getDecorationDef(String(kind));
     if (!def) return "Món này không có";
     const px = snapToGrid(Number(x));
     const py = snapToGrid(Number(y));
     const rot = normalizeRotation(def, rotation);
-    if (this.money < def.price) return `Không đủ tiền (cần $${def.price})`;
+    if (payer.money < def.price) return `Không đủ tiền (cần $${def.price})`;
     if (!canPlaceDecoration(def.kind, px, py, this.pieces, undefined, rot)) return "Không đặt được ở đây";
 
-    this.money -= def.price;
+    const guest = payer !== this;
+    payer.money -= def.price;
     const piece = this.place(def.kind, px, py, rot);
-    this.emit({ type: "money", money: this.money });
     this.emit({ type: "added", piece });
+    payer.emit({ type: "money", money: payer.money });
     this.scheduleSave();
+    if (guest) payer.scheduleSave();
     return undefined;
   }
 

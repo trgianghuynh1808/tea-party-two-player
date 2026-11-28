@@ -6,6 +6,7 @@ import { Encoder } from "@colyseus/schema";
 import { defineRoom, defineServer, matchMaker } from "colyseus";
 import {
   MAX_PLAYERS,
+  PRESENCE_ROOM_NAME,
   ROOMS_PATH,
   ROOM_NAME,
   SERVER_PORT,
@@ -13,6 +14,7 @@ import {
   type RoomsResponse,
 } from "@boba/shared";
 import { BobaShopRoom } from "./rooms/BobaShopRoom.js";
+import { PresenceRoom } from "./rooms/PresenceRoom.js";
 import { registerAdminRoutes } from "./admin.js";
 import { loadCustomCatalog, registerCustomDecorRoutes } from "./customDecor.js";
 import { storageName } from "./persistence/ShopStore.js";
@@ -33,6 +35,8 @@ const ADMIN_TOKEN = process.env.ADMIN_TOKEN ?? "";
 const server = defineServer({
   rooms: {
     [ROOM_NAME]: defineRoom(BobaShopRoom),
+    // Who is online right now (invites); excluded from the /rooms lobby list, which queries ROOM_NAME only.
+    [PRESENCE_ROOM_NAME]: defineRoom(PresenceRoom),
   },
   express: (app) => {
     // Liveness probe for Render (healthCheckPath in render.yaml); deployed via the GitHub Action deploy hook.

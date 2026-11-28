@@ -66,7 +66,7 @@
         <header class="panel-header">
           <div class="room-code"><span id="room-title">Tiệm Trà Bé Ngọc Giang</span> <strong id="player-count"></strong></div>
           <div class="tool-row">
-            <button id="copy-link-btn" class="tool" type="button" title="Sao chép link mời vào phòng này">🔗<span>Mời</span></button>
+            <button id="invite-btn" class="tool" type="button" title="Mời bạn bè đang online vào phòng" disabled>🤝<span>Mời</span></button>
             <button id="decorate-btn" class="tool" type="button" title="Trang trí quán (ngoài giờ ca)">🪑<span>Trang trí</span></button>
             <button id="build-btn" class="tool" type="button" title="Xây nhà trên đất trống ngoài quán">🔨<span>Xây</span></button>
             <button id="fullscreen-btn" class="tool" type="button" title="Toàn màn hình" hidden>⛶<span>Full</span></button>
@@ -90,6 +90,9 @@
         <div id="modal-body"></div>
       </div>
     </div>
+
+    <!-- Invite pushed by the server: fixed overlay over both the lobby and the game -->
+    <div id="invite-popup" class="invite-popup" hidden></div>
 
     <!-- Shown on phones held in portrait while in game -->
     <div id="rotate-hint" class="rotate-hint">

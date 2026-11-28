@@ -1,6 +1,11 @@
 // Shared constants between server and client.
 
 export const ROOM_NAME = "boba_shop";
+/**
+ * Lightweight room every named client joins (lobby or in-game) so the server knows who is online
+ * and can push invites to the right player (see ServerEvents.Online / ServerEvents.Invite).
+ */
+export const PRESENCE_ROOM_NAME = "presence";
 export const SERVER_PORT = 2567;
 
 
@@ -74,6 +79,10 @@ export const Messages = {
   Retract: "retract",
   /** Buy the next rod level with the sender's own wallet. */
   UpgradeRod: "upgrade_rod",
+  /** Invite an online player into this room (host only): { target } = invitee's name. */
+  InvitePlayer: "invite_player",
+  /** Presence room: ask for the current online list (replied with ServerEvents.Online). */
+  ListOnline: "list_online",
   /** Test-only teleport (registered just when the server env DEBUG_WARP=1): DebugWarpMessage. */
   DebugWarp: "debug_warp",
   /** Test-only (DEBUG_WARP=1): switch the sender's reel to the real moving safe zone: DebugReelModeMessage. */
@@ -127,12 +136,24 @@ export interface DebugReelModeMessage {
   real: boolean;
 }
 
+/** Invite a player into the sender's room (host only, see Messages.InvitePlayer). */
+export interface InvitePlayerMessage {
+  /** Name of the player to invite. */
+  target: string;
+}
+
 // Server -> client events
 export const ServerEvents = {
   Delivered: "delivered",
   InteractFailed: "interact_failed",
   OrderExpired: "order_expired",
   MachineOverflow: "machine_overflow",
+  /** Presence room: the online list changed (or was requested), payload OnlinePlayer[]. */
+  Online: "online",
+  /** Presence room: an invite pushed to the target player, payload InvitePayload. */
+  Invite: "invite",
+  /** Result of Messages.InvitePlayer, sent to the inviting host: InviteResultEvent. */
+  InviteResult: "invite_result",
 } as const;
 
 export interface DeliveredEvent {
@@ -157,6 +178,15 @@ export interface MachineOverflowEvent {
   machine: string;
   /** Restaurant: the food burnt (it stays on the cooker as burnt food) instead of a cup spilling. */
   burnt?: boolean;
+}
+
+/** ServerEvents.InviteResult: whether the invite reached the target player (sent to the host). */
+export interface InviteResultEvent {
+  /** Name of the invited player. */
+  target: string;
+  ok: boolean;
+  /** Why it failed, e.g. "không online", "phòng đã đầy". */
+  reason?: string;
 }
 
 export * from "./decor";

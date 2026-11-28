@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Room, ServerError, type Client, type Deferred } from "colyseus";
 import {
   ALL_STATIONS,
@@ -91,6 +92,8 @@ import {
   isInYard,
   type BuildTilesMessage,
   type DeliveredEvent,
+  type InvitePlayerMessage,
+  type InviteResultEvent,
   type MenuItem,
   type MoveTileMessage,
   type ReelMessage,
@@ -105,6 +108,7 @@ import {
 } from "@boba/shared";
 import { BobaShopState, Decoration, Fish, Order, Player, Station } from "@boba/shared/schema";
 import { openShop, shopOf, type Piece, type SharedShop, type ShopEvent } from "../shop/SharedShop.js";
+import { registerSeatLookup, sendInvite } from "./PresenceRoom.js";
 
 const FIRST_ORDER_DELAY_SECONDS = 2;
 /** Override shift length for quick testing, e.g. SHIFT_SECONDS=20 npm run dev. */
@@ -119,6 +123,8 @@ const FISH_TEST = process.env.FISH_TEST === "1";
 /** Fish positions go to the schema at most this often (the sim runs at 60 Hz; patches cost bandwidth). */
 const FISH_SYNC_SECONDS = 0.1;
 const DELIVERY_CLEAR_SECONDS = 0.8;
+/** One-time invite tokens expire after this long (see handleInvitePlayer). */
+const INVITE_EXPIRES_MS = 2 * 60 * 1000;
 const SPAWN_POINTS = [
   { x: 300, y: 400 },
   { x: 500, y: 400 },
@@ -172,6 +178,9 @@ interface Seat {
   online: boolean;
 }
 const seats = new Map<string, Seat>();
+// The presence room reports which game room each online player is in: it asks the seats map owned
+// here through this callback (so PresenceRoom doesn't have to import this module back).
+registerSeatLookup((key) => seats.get(key)?.room.roomId);
 
 export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMetadata }> {
   /**
@@ -191,6 +200,8 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
   private hostKey = "";
   private hostShop?: SharedShop;
   private unsubscribeShop?: () => void;
+  /** One-time invite tokens by target username key (see handleInvitePlayer / onAuth). */
+  private invites = new Map<string, { token: string; expires: number }>();
   /** Username key -> stop mirroring that player's wallet into their Player.money. */
   private walletSubs = new Map<string, () => void>();
   /** Every shop this room changed (flushed when the room closes). */
@@ -275,6 +286,9 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     upgrade_rod: (client: Client) => {
       this.handleUpgradeRod(client);
     },
+    invite_player: (client: Client, payload: InvitePlayerMessage) => {
+      this.handleInvitePlayer(client, payload);
+    },
     // Registered only for e2e runs (server env DEBUG_WARP=1): teleports the player anywhere.
     ...(process.env.DEBUG_WARP === "1"
       ? {
@@ -335,6 +349,16 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     const returning = seat?.room === this;
     if (this.state.players.size - (returning ? 1 : 0) >= MAX_PLAYERS) {
       throw new ServerError(JoinError.ROOM_FULL, "Phòng đã đủ người");
+    }
+    // Private room: joining needs a one-time invite token — unless the joiner is the host or is coming
+    // back to their own seat, or the e2e server (DEBUG_WARP=1) lets old specs join by room id.
+    if (
+      key !== this.hostKey &&
+      seat?.room !== this &&
+      process.env.DEBUG_WARP !== "1" &&
+      !this.consumeInviteToken(key, options.inviteToken)
+    ) {
+      throw new ServerError(JoinError.NOT_INVITED, "Phòng riêng tư, cần được mời");
     }
     // The player's own wallet: their share of each shift goes there.
     await this.openShop(name, key);
@@ -433,6 +457,44 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     }
     this.unwatchWallet(key);
     this.updateListing();
+  }
+
+  // ---------------------------------------------------------------- Invites (private rooms)
+
+  /** The host invites an online player: a one-time token is pushed to them through the presence room. */
+  private handleInvitePlayer(client: Client, payload: InvitePlayerMessage) {
+    const rawName = typeof payload?.target === "string" ? payload.target : "";
+    const name = normalizeUsername(rawName);
+    const fail = (reason: string) => {
+      const result: InviteResultEvent = { target: name ?? rawName, ok: false, reason };
+      client.send(ServerEvents.InviteResult, result);
+    };
+    if (this.sessionNames.get(client.sessionId) !== this.hostKey) {
+      return fail(`Chỉ chủ phòng (${this.state.hostName}) mới mời được`);
+    }
+    if (!name) return fail("Tên không hợp lệ");
+    const key = usernameKey(name);
+    if (key === this.hostKey) return fail("Không thể mời chính mình");
+    if (seats.get(key)?.room === this) return fail(`${name} đã ở trong phòng`);
+    if (this.state.players.size >= MAX_PLAYERS) return fail("Phòng đã đủ người");
+    const token = randomUUID();
+    this.invites.set(key, { token, expires: Date.now() + INVITE_EXPIRES_MS });
+    // sendInvite reports the target isn't online: the token isn't left waiting for them.
+    if (!sendInvite(key, { from: this.state.hostName, roomId: this.roomId, roomName: this.state.roomName, token })) {
+      this.invites.delete(key);
+      return fail(`${name} không online`);
+    }
+    const result: InviteResultEvent = { target: name, ok: true };
+    client.send(ServerEvents.InviteResult, result);
+  }
+
+  /** One-time invite token for this player: consumed (deleted) when it matches and hasn't expired. */
+  private consumeInviteToken(key: string, raw: unknown): boolean {
+    const invite = this.invites.get(key);
+    const token = typeof raw === "string" ? raw : "";
+    if (!invite || !token || invite.token !== token || invite.expires < Date.now()) return false;
+    this.invites.delete(key);
+    return true;
   }
 
   private createPlayer(options: Partial<JoinOptions>): Player {
@@ -1489,29 +1551,37 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     return { amount, notes };
   }
 
-  // ---------------------------------------------------------------- Decorations (the host's furniture, paid from the host's wallet)
+  // ---------------------------------------------------------------- Decorations (the host's furniture, paid from the acting player's wallet)
 
-  /** Only the host decorates, and only between shifts. Returns an error message, or undefined if allowed. */
-  private decorateBlockedReason(client: Client): string | undefined {
-    if (!this.hostShop || this.sessionNames.get(client.sessionId) !== this.hostKey) {
+  /**
+   * Decorating only happens between shifts. Buying new pieces is open to everyone in the room (each pays
+   * from their own wallet); moving/selling placed pieces is host only. Returns an error message, or
+   * undefined if allowed.
+   */
+  private decorateBlockedReason(client: Client, hostOnly: boolean): string | undefined {
+    if (!this.hostShop || (hostOnly && this.sessionNames.get(client.sessionId) !== this.hostKey)) {
       return `Chỉ chủ phòng (${this.state.hostName}) mới trang trí được`;
     }
     return this.state.phase === GamePhase.Playing ? "Đang trong ca, trang trí sau khi hết ca nhé" : undefined;
   }
 
   private handleBuyDecoration(client: Client, payload: { kind: string; x: number; y: number; rotation?: number }) {
-    const error = this.decorateBlockedReason(client) ?? this.hostShop!.buy(payload?.kind, payload?.x, payload?.y, payload?.rotation);
+    const blocked = this.decorateBlockedReason(client, false);
+    if (blocked) return client.send(ServerEvents.InteractFailed, { reason: blocked });
+    const key = this.sessionNames.get(client.sessionId);
+    if (!key) return;
+    const error = this.hostShop!.buy(payload?.kind, payload?.x, payload?.y, payload?.rotation, shopOf(key));
     if (error) client.send(ServerEvents.InteractFailed, { reason: error });
   }
 
-  /** Move and/or turn a placed piece (rotation omitted = keep the current one). */
+  /** Move and/or turn a placed piece (rotation omitted = keep the current one). Host only. */
   private handleMoveDecoration(client: Client, payload: { id: string; x: number; y: number; rotation?: number }) {
-    const error = this.decorateBlockedReason(client) ?? this.hostShop!.move(payload?.id, payload?.x, payload?.y, payload?.rotation);
+    const error = this.decorateBlockedReason(client, true) ?? this.hostShop!.move(payload?.id, payload?.x, payload?.y, payload?.rotation);
     if (error) client.send(ServerEvents.InteractFailed, { reason: error });
   }
 
   private handleSellDecoration(client: Client, payload: { id: string }) {
-    const blocked = this.decorateBlockedReason(client);
+    const blocked = this.decorateBlockedReason(client, true);
     if (blocked) return client.send(ServerEvents.InteractFailed, { reason: blocked });
     this.hostShop!.sell(payload?.id);
   }

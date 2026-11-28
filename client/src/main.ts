@@ -5,12 +5,15 @@ import {
   GamePhase,
   JoinError,
   MAX_PLAYERS,
+  Messages,
+  PRESENCE_ROOM_NAME,
   REPLACED_CLOSE_CODE,
   ROOMS_PATH,
   ROOMS_POLL_MS,
   ROOM_NAME,
   ROOM_TITLE_MAX,
   SERVER_PORT,
+  ServerEvents,
   USERNAME_MAX,
   USERNAME_MIN,
   WORLD_HEIGHT,
@@ -23,7 +26,9 @@ import {
   usernameKey,
   type CharacterDef,
   type Gender,
+  type InvitePayload,
   type JoinOptions,
+  type OnlinePlayer,
   type Area,
   type RoomInfo,
   type RoomsResponse,
@@ -42,6 +47,8 @@ import { TEST_MODE_PARAM, installTestHook, isTestMode } from "./testHook";
 import { initUpdateChecker } from "./updateChecker";
 import { FishingPanel } from "./ui/FishingPanel";
 import { FishGuide } from "./ui/FishGuide";
+import { InvitePanel } from "./ui/InvitePanel";
+import { InvitePopup } from "./ui/InvitePopup";
 
 initUpdateChecker();
 
@@ -62,7 +69,8 @@ const lobbyStatus = $<HTMLParagraphElement>("lobby-status");
 const lobbyError = $<HTMLParagraphElement>("lobby-error");
 const roomTitle = $<HTMLElement>("room-title");
 const playerCountLabel = $<HTMLElement>("player-count");
-const copyLinkBtn = $<HTMLButtonElement>("copy-link-btn");
+const inviteBtn = $<HTMLButtonElement>("invite-btn");
+const invitePopupRoot = $<HTMLElement>("invite-popup");
 const leaveBtn = $<HTMLButtonElement>("leave-btn");
 const decorateBtn = $<HTMLButtonElement>("decorate-btn");
 const fullscreenBtn = $<HTMLButtonElement>("fullscreen-btn");
@@ -99,15 +107,25 @@ let buildPanel: BuildPanel | undefined;
 let building = false;
 /** Last build tool picked ("" = none; the panel is rebuilt for every room). */
 let buildTool = "";
+/** The host's invite panel while its modal is open. */
+let invitePanel: InvitePanel | undefined;
+
+// Presence room (who is online + invite push). Kept in step with the username: joined after picking
+// a name (lobby or in-game), rejoined when the name changes or the connection drops.
+let onlinePlayers: OnlinePlayer[] = [];
+let presenceRoom: Room | undefined;
+/** Username key the presence connection speaks for; undefined = signed out (name form open). */
+let presenceKey: string | undefined;
+let presenceRetry: ReturnType<typeof setTimeout> | undefined;
 
 
 // Keep the ?touch=1 debug flag across URL rewrites so a refresh still forces touch controls.
 const forceTouch = new URLSearchParams(location.search).get(FORCE_TOUCH_PARAM) === "1";
-/** Invite links open a room directly: ?room=<roomId> (joined once the player has a name). */
+/** ?room=<roomId>: kept while playing so a refresh comes straight back (see tryRejoinFromUrl). */
 const ROOM_PARAM = "room";
 let invitedRoomId = new URLSearchParams(location.search).get(ROOM_PARAM) ?? undefined;
 
-/** Rewrite the URL: ?room=<id> while in a room (a refresh/share lands back in it), plus ?touch=1 / ?test=1 if set. */
+/** Rewrite the URL: ?room=<id> while in a room (a refresh lands back in it), plus ?touch=1 / ?test=1 if set. */
 function setUrl(roomId?: string) {
   const params = new URLSearchParams();
   if (roomId) params.set(ROOM_PARAM, roomId);
@@ -203,7 +221,6 @@ function renderRooms() {
       const li = document.createElement("li");
       li.className = "room-item";
       const mine = room.players.some(isMine);
-      const full = !mine && room.players.length >= room.maxPlayers;
 
       const info = document.createElement("div");
       info.className = "room-info";
@@ -226,9 +243,11 @@ function renderRooms() {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "btn small" + (mine ? " primary" : "");
-      btn.textContent = mine ? "Vào lại" : full ? "Đầy" : "Vào";
-      btn.disabled = busy || full;
-      btn.addEventListener("click", () => void enter(() => client.joinById<BobaShopState>(room.id, joinOptions())));
+      // Rooms are private: only your own room can be (re-)joined from the list.
+      btn.textContent = mine ? "Vào lại" : "Riêng tư";
+      btn.disabled = busy || !mine;
+      btn.title = mine ? "Vào lại phòng của bạn" : "Phòng riêng tư, chỉ vào được khi chủ phòng mời";
+      if (mine) btn.addEventListener("click", () => void enter(() => client.joinById<BobaShopState>(room.id, joinOptions())));
 
       li.classList.toggle("mine", mine);
       li.append(info, count, btn);
@@ -253,6 +272,7 @@ async function pollLobby() {
   }
   if (lobby.hidden || !username) return;
   renderRooms();
+  tryRejoinFromUrl();
   lobbyPollTimer = setTimeout(() => void pollLobby(), ROOMS_POLL_MS);
 }
 
@@ -268,15 +288,32 @@ function showLobby(error = "") {
   if (username) helloName.textContent = username;
   setBusy(false);
   setUrl(invitedRoomId);
+  void syncPresence();
   if (!username) {
     clearTimeout(lobbyPollTimer);
     return;
   }
   void pollLobby();
-  // Opened from an invite link (or refreshed while in a room): join that room once.
+}
+
+/**
+ * Refreshed while in a room (?room=): once the room list is in, rejoin if we still have a seat there.
+ * Anyone else opening the link just stays in the lobby — rooms are invite-only now. E2e (?test=1,
+ * server runs DEBUG_WARP=1) joins any room id straight away so the old specs keep working.
+ */
+function tryRejoinFromUrl() {
+  if (!invitedRoomId || !username) return;
   const roomId = invitedRoomId;
+  if (isTestMode) {
+    invitedRoomId = undefined;
+    return void enter(() => client.joinById<BobaShopState>(roomId, joinOptions()));
+  }
+  if (!rooms) return;
+  const room = rooms.find((r) => r.id === roomId);
+  if (!room) return; // not in the list (yet): decide on a later poll
   invitedRoomId = undefined;
-  if (roomId) void enter(() => client.joinById<BobaShopState>(roomId, joinOptions()));
+  if (room.players.some(isMine)) void enter(() => client.joinById<BobaShopState>(roomId, joinOptions()));
+  else setUrl(); // someone else's room (or our seat is gone): drop the stale link param
 }
 
 function joinOptions(roomName?: string): JoinOptions {
@@ -291,6 +328,7 @@ function describeError(err: unknown): string {
     case JoinError.NAME_TAKEN:
     case JoinError.ROOM_FULL:
     case JoinError.SHOP_UNAVAILABLE:
+    case JoinError.NOT_INVITED:
       return e.message ?? "Không vào được phòng.";
     case ErrorCode.MATCHMAKE_INVALID_ROOM_ID:
       return "Phòng này không còn nữa.";
@@ -503,19 +541,28 @@ function startGame(room: Room<BobaShopState>) {
     () => game?.events.emit(BUILD_ROTATE),
   );
 
-  // Only the host decorates (the room shows their furniture), and only between shifts, inside a building.
-  // Building is on the host's land outside the shop: anyone (paying from their own wallet), any time.
+  // Decorating happens between shifts, inside a building: the host manages all furniture, guests may only
+  // add new pieces (paid from their own wallet). Building is on the host's land outside the shop: anyone
+  // (paying from their own wallet), any time.
   let amHost = false;
   let area: Area = "shop";
+  /** Private rooms: only the host can invite, so the button stays disabled for guests. */
+  const updateInviteBtn = () => {
+    inviteBtn.disabled = !amHost;
+    inviteBtn.title = amHost
+      ? "Mời bạn bè đang online vào phòng"
+      : `Chỉ chủ phòng (${room.state.hostName || "chủ phòng"}) mới mời được`;
+  };
+  updateInviteBtn();
   const updateDecorateBtn = () => {
     const playing = room.state.phase === GamePhase.Playing;
     const host = room.state.hostName || "chủ phòng";
     const inYard = area === "yard";
     // The pond is a place to fish, not to decorate.
     const inPond = area === "pond";
-    decorateBtn.disabled = playing || !amHost || inYard || inPond;
+    decorateBtn.disabled = playing || inYard || inPond;
     decorateBtn.title = !amHost
-      ? `Quán này dùng nội thất của ${host}, chỉ chủ phòng mới trang trí được`
+      ? `Trang trí giúp ${host} (ngoài giờ ca), tiền trừ ví của bạn, chỉ thêm đồ mới`
       : inYard
         ? "Vào trong tiệm trà hoặc nhà hàng để trang trí"
         : inPond
@@ -549,6 +596,7 @@ function startGame(room: Room<BobaShopState>) {
     $state.listen(player, "host", (host) => {
       amHost = host;
       updateDecorateBtn();
+      updateInviteBtn();
     });
   });
 
@@ -593,18 +641,13 @@ leaveBtn.addEventListener("click", () => {
   void room?.leave().catch(() => {});
 });
 
-copyLinkBtn.addEventListener("click", async () => {
-  if (!currentRoom) return;
-  const link = `${location.origin}${location.pathname}?${ROOM_PARAM}=${encodeURIComponent(currentRoom.roomId)}`;
-  const label = copyLinkBtn.querySelector("span")!;
-  try {
-    await navigator.clipboard.writeText(link);
-    label.textContent = "Đã chép!";
-  } catch {
-    // Clipboard API needs a secure context (localhost/https); fall back to a prompt over LAN http.
-    window.prompt("Sao chép link mời:", link);
-  }
-  setTimeout(() => (label.textContent = "Mời"), 1500);
+inviteBtn.addEventListener("click", () => {
+  if (!currentRoom || inviteBtn.disabled) return;
+  // Ask for the freshest list; presence broadcasts keep the panel up to date while it is open.
+  presenceRoom?.send(Messages.ListOnline);
+  invitePanel = new InvitePanel(currentRoom, username!, onlinePlayers);
+  openModal("🤝 Mời bạn vào phòng", invitePanel.root);
+  inviteBtn.blur(); // keep Space / WASD for the game
 });
 
 // ---------------------------------------------------------------- Modal (menu on phones, decoration shop)
@@ -618,6 +661,8 @@ function openModal(title: string, content: HTMLElement) {
 function closeModal() {
   modal.hidden = true;
   modalBody.replaceChildren();
+  invitePanel?.destroy();
+  invitePanel = undefined;
 }
 
 modalClose.addEventListener("click", closeModal);
@@ -627,6 +672,67 @@ modal.addEventListener("click", (e) => {
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !modal.hidden) closeModal();
 });
+
+// ---------------------------------------------------------------- Presence room (online list + invites)
+
+/** Popup for an invite pushed through presence: fixed overlay over both the lobby and the game. */
+const invitePopup = new InvitePopup(invitePopupRoot, acceptInvite, () => {});
+
+/** The invited player agreed: leave whatever room they're in, then join with the one-time token. */
+function acceptInvite(payload: InvitePayload) {
+  const old = currentRoom;
+  if (old) {
+    stopGame();
+    showLobby();
+    void old.leave().catch(() => {});
+  }
+  void enter(() => client.joinById<BobaShopState>(payload.roomId, { ...joinOptions(), inviteToken: payload.token }));
+}
+
+/**
+ * Keep the presence room in step with the username: every named client joins it (lobby or in-game)
+ * so the server knows who is online and can push invites to the right player. Rejoined when the name
+ * changes or the connection drops; left entirely while the name form is open.
+ */
+async function syncPresence() {
+  clearTimeout(presenceRetry);
+  const nameKey = username ? usernameKey(username) : undefined;
+  if (!nameKey) {
+    presenceKey = undefined;
+    const old = presenceRoom;
+    presenceRoom = undefined;
+    void old?.leave().catch(() => {});
+    return;
+  }
+  if (presenceRoom && nameKey === presenceKey) return; // already connected as this name
+  const stale = presenceRoom; // renamed: the old connection speaks for the old name
+  presenceRoom = undefined;
+  void stale?.leave().catch(() => {});
+  try {
+    const room = await client.joinOrCreate(PRESENCE_ROOM_NAME, { username: username!, deviceId });
+    // Renamed (or signed out) while joining: this connection is nobody's now, drop it.
+    if (!username || usernameKey(username) !== nameKey) return void room.leave().catch(() => {});
+    presenceRoom = room;
+    presenceKey = nameKey;
+    room.onMessage(ServerEvents.Online, (players: OnlinePlayer[]) => {
+      onlinePlayers = players;
+      invitePanel?.update(players);
+    });
+    room.onMessage(ServerEvents.Invite, (payload: InvitePayload) => invitePopup.show(payload));
+    room.onLeave(() => {
+      if (presenceRoom !== room) return; // replaced by a newer connection of ours
+      presenceRoom = undefined;
+      presenceKey = undefined;
+      // Dropped (network, server restart): try again while we still have a name.
+      presenceRetry = setTimeout(() => void syncPresence(), 5000);
+    });
+    // Our own join broadcast may have arrived before the handlers above were registered: ask for the list.
+    room.send(Messages.ListOnline);
+  } catch {
+    // Server asleep or unreachable: keep trying while we have a name.
+    presenceRetry = setTimeout(() => void syncPresence(), 5000);
+  }
+}
 
 
 // ---------------------------------------------------------------- Decorate mode (between shifts only)
