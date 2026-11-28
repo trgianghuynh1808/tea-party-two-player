@@ -2,7 +2,7 @@
 
 2-player online co-op boba tea shop game (npm workspaces monorepo).
 
-- `server/` — Node.js + TypeScript + Colyseus 0.18 (`BobaShopRoom`: 2 players per room; `SharedShop`: money + furniture shared by all rooms)
+- `server/` — Node.js + TypeScript + Colyseus 0.18 (`BobaShopRoom`: 2 players per room; `PresenceRoom`: who is online, used for invites; `SharedShop`: money + furniture shared by all rooms)
 - `client/` — Vite + TypeScript + Phaser 3.90 (placeholder shapes, no assets yet)
 - `shared/` — constants, station layout, movement code and Colyseus Schema used by both sides
 
@@ -16,13 +16,21 @@ npm run dev   # server: ws://localhost:2567, client: http://localhost:5173
 Open http://localhost:5173:
 
 1. Pick a username (no password; remembered by the browser).
-2. The lobby lists open rooms (title, who's inside, players/2). Click **Vào** to join one, or **Tạo phòng** to open a new one.
-3. In a room, **🔗 Mời** copies an invite link (`?room=<id>`) that opens that room directly.
+2. Press **Tạo phòng** to open your own room. The lobby also lists other open rooms (title, who's inside,
+   players/2), but they are private: you can look, only an invite gets you in.
+3. To bring a friend in, the host presses **Mời** in-game: it lists everyone online in the system, each with a
+   **Mời** button. The invited player sees a popup with the inviter and room name — in the lobby or while
+   playing elsewhere — and **Đồng ý** joins that room (leaving whatever room they were in); **Từ chối** closes it.
 
-Rooms & usernames (`shared/src/lobby.ts`, `server/src/rooms/BobaShopRoom.ts`):
+Rooms & usernames (`shared/src/lobby.ts`, `server/src/rooms/BobaShopRoom.ts`, `server/src/rooms/PresenceRoom.ts`):
 
 - A room holds at most 2 players. Each username has its own shop save (wallet + furniture). A room shows the
   furniture of whoever opened it (the host); only the host can decorate it, paid from the host's wallet.
+- Rooms are private: joining needs a one-time invite token (valid 2 minutes) that only the host can send.
+  A player coming back to their own seat (dropped, or refreshing the page) doesn't need one. The e2e server
+  (`DEBUG_WARP=1`) skips the check so old tests can join by room id.
+- Every named client (lobby or in-game) also keeps a tiny connection to the `presence` room, so the server
+  always knows who is online — that's what the invite list and the invite popup run on.
 - A name can only be used by one connected player. The same name from the same browser replaces a stale tab
   (closed but not detected yet, or open twice); from another browser it is refused while its owner is online.
 - Lost connection (closed tab, network): the player stays in the room (shown 💤) for 2 minutes
