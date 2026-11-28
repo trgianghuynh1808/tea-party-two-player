@@ -63,9 +63,11 @@ const REMOVED_ITEMS: { kind: string; image: string }[] = [
   { kind: "lantern_bronze_lit", image: "lantern_bronze_lit.png" },
   { kind: "lamp_post_brass", image: "furniture/lamp_post_brass.png" },
   { kind: "lamp_floor_cream", image: "furniture/lamp_floor_cream.png" },
+  { kind: "armchair_baroque", image: "furniture/armchair_baroque.png" },
+  { kind: "fireplace_white", image: "furniture/fireplace_white.png" },
 ];
 
-test("T2: the 37 removed items are gone from the catalog and disk, kept neighbours remain", () => {
+test("T2: the 39 removed items are gone from the catalog and disk, kept neighbours remain", () => {
   for (const { kind, image } of REMOVED_ITEMS) {
     expect(getDecorationDef(kind)).toBeUndefined();
     expect(existsSync(`client/public/assets/decor/${image}`)).toBe(false);
@@ -76,15 +78,13 @@ test("T2: the 37 removed items are gone from the catalog and disk, kept neighbou
 });
 
 const NEW_FURNITURE: { kind: string; seat?: true }[] = [
-  { kind: "armchair_baroque", seat: true },
   { kind: "armchair_cream", seat: true },
   { kind: "lamp_arc_brass" },
   { kind: "lamp_shade_white" },
   { kind: "globe" },
-  { kind: "fireplace_white" },
 ];
 
-test("T3: the 6 remaining furniture pieces are in the catalog with art on disk, the 2 chairs are seats, and no kind is duplicated", () => {
+test("T3: the 4 remaining furniture pieces are in the catalog with art on disk, only armchair_cream is a seat, and no kind is duplicated", () => {
   const kinds = DECORATION_CATALOG.map((d) => d.kind);
   for (const { kind, seat } of NEW_FURNITURE) {
     const def = getDecorationDef(kind);
