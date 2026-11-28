@@ -26,10 +26,9 @@ export interface CharacterDef {
 
 /**
  * Every character uses the maid's frame layout and body size: 72 px tall frames (40 px wide, wider only when
- * the figure needs it), feet on row 70, body ~60 px tall. Walk sheets have 3 columns (step, stand, step);
- * single-pose turnaround sheets have 1 column (no walk animation).
- * Build walk sheets with client/assets-src/characters/build_walk_sheet.py and turnaround sheets with
- * client/assets-src/characters/build_turnaround_sheet.py.
+ * the figure needs it), feet on row 70, body ~60 px tall. Every sheet has 3 columns (step, stand, step).
+ * Build walk sheets from a 4x4 source with client/assets-src/characters/build_walk_sheet.py, or derive the
+ * 3 columns from a single turnaround pose with client/assets-src/characters/build_turnaround_sheet.py.
  */
 export const CHARACTERS: CharacterDef[] = [
   {
@@ -84,11 +83,11 @@ export const CHARACTERS: CharacterDef[] = [
     id: "pink_girl",
     gender: "female",
     name: "Bé váy hồng",
-    sheet: "assets/characters/pink_girl.png", // built by client/assets-src/characters/build_turnaround_sheet.py
+    sheet: "assets/characters/pink_girl.png", // 3-column walk frames built by client/assets-src/characters/build_turnaround_sheet.py
     frameWidth: 40,
     frameHeight: 72,
-    columns: 1,
-    standColumn: 0,
+    columns: 3,
+    standColumn: 1,
     feetRow: 71,
     bodyHeight: 60,
   },
