@@ -3,6 +3,7 @@ dist
 .DS_Store
 *.log
 .playwright-mcp
+.playwright-cli/
 server/data
 
 # Playwright
