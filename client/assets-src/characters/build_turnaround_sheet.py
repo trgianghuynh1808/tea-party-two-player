@@ -20,13 +20,16 @@ from scipy import ndimage as ndi
 HERE = os.path.dirname(os.path.abspath(__file__))
 NAME = sys.argv[1] if len(sys.argv) > 1 else "pink-girl"
 BG_TOL = 20  # max-channel colour distance from the be corner colour that still counts as background
-FRINGE_TOL = 60  # softer be fringe eaten by the 2-px dilation around the background
 MIN_FRAME_W, FRAME_H = 40, 72  # same as the maid (wider frames only if a figure needs it)
 FEET_ROW = 70  # last row of the feet in every frame
 BODY_H = 61  # tallest figure after scaling (maid figures are 60-63 px)
 
 src = np.asarray(Image.open(os.path.join(HERE, f"{NAME}-original.png")).convert("RGBA")).copy()
-# The background is one flat be tone: take it from the image corners and mask by colour distance.
+# The background is one flat be tone: take it from the image corners and mask by colour distance,
+# then keep only the blobs that reach the image border. No fringe dilation around the background:
+# skin highlights land within ~21 of the be tone and mid-tone skin within ~60, so a dilation would
+# eat the face/cheeks/hands (it hollowed out the left-facing figure), and the source outline
+# already touches the flat background directly — there is no soft fringe to trim.
 corners = np.stack([src[0, 0, :3], src[0, -1, :3], src[-1, 0, :3], src[-1, -1, :3]])
 be = corners.mean(axis=0)
 dist = np.abs(src[..., :3].astype(int) - be).max(axis=-1)
@@ -34,7 +37,6 @@ bgish = dist <= BG_TOL
 lab, _ = ndi.label(bgish)
 border = set(np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]]))) - {0}
 bg = np.isin(lab, list(border))
-bg = ndi.binary_dilation(bg, iterations=2) & (dist <= FRINGE_TOL)  # soft be fringe
 fg = ~bg
 src[..., 3] = np.where(fg, 255, 0)
 
