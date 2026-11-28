@@ -307,15 +307,11 @@ export const DECORATION_CATALOG: DecorationDef[] = [
   ]),
   ...inCategory("lighting", [
     decor("lamp", "Lồng đèn đỏ", 75, "red_lantern_lit", 30, 26, 56, 0xf4a261),
-    decor("lantern_brass", "Đèn bão", 60, "lantern_brass", 26, 22, 48, 0xb08968),
     decor("lantern_lit", "Đèn bão (sáng)", 85, "lantern_gold_lit", 26, 22, 48, 0xffd166),
-    decor("lantern_bronze_lit", "Đèn bão đồng (sáng)", 85, "lantern_bronze_lit", 26, 22, 48, 0xb5838d),
     decor("floor_lamp_blue", "Đèn cây chụp xanh", 70, "bedroom/floor_lamp_blue", 24, 16, 80, 0x7ec8f0),
     // Cut from client/assets-src/sheets/furniture/ by client/assets-src/tools/cut_furniture.py (front-facing pieces only).
     decor("lamp_arc_brass", "Đèn sàn cong đồng", 70, "furniture/lamp_arc_brass", 20, 16, 110, 0xb08968),
     decor("lamp_shade_white", "Đèn sàn chụp trắng", 65, "furniture/lamp_shade_white", 20, 16, 100),
-    decor("lamp_post_brass", "Đèn sàn cột đồng", 70, "furniture/lamp_post_brass", 18, 16, 105, 0xb08968),
-    decor("lamp_floor_cream", "Đèn sàn chụp kem", 55, "furniture/lamp_floor_cream", 18, 16, 90),
   ]),
   ...inCategory("rugs", [
     // Furniture can stand on them.

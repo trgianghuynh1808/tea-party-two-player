@@ -59,15 +59,19 @@ const REMOVED_ITEMS: { kind: string; image: string }[] = [
   { kind: "chair_kitchen", image: "kitchen/chair_kitchen_right.png" },
   { kind: "bath_vent", image: "wall/bath_vent.png" },
   { kind: "bath_towel_shelf", image: "wall/bath_towel_shelf.png" },
+  { kind: "lantern_brass", image: "lantern_brass.png" },
+  { kind: "lantern_bronze_lit", image: "lantern_bronze_lit.png" },
+  { kind: "lamp_post_brass", image: "furniture/lamp_post_brass.png" },
+  { kind: "lamp_floor_cream", image: "furniture/lamp_floor_cream.png" },
 ];
 
-test("T2: the 33 removed items are gone from the catalog and disk, kept neighbours remain", () => {
+test("T2: the 37 removed items are gone from the catalog and disk, kept neighbours remain", () => {
   for (const { kind, image } of REMOVED_ITEMS) {
     expect(getDecorationDef(kind)).toBeUndefined();
     expect(existsSync(`client/public/assets/decor/${image}`)).toBe(false);
   }
   expect(getDecorationDef("lamp")).toBeDefined();
-  expect(getDecorationDef("lantern_brass")).toBeDefined();
+  expect(getDecorationDef("lantern_lit")).toBeDefined();
   expect(existsSync("client/public/assets/decor/red_lantern_lit.png")).toBe(true);
 });
 
@@ -76,13 +80,11 @@ const NEW_FURNITURE: { kind: string; seat?: true }[] = [
   { kind: "armchair_cream", seat: true },
   { kind: "lamp_arc_brass" },
   { kind: "lamp_shade_white" },
-  { kind: "lamp_post_brass" },
-  { kind: "lamp_floor_cream" },
   { kind: "globe" },
   { kind: "fireplace_white" },
 ];
 
-test("T3: the 8 remaining furniture pieces are in the catalog with art on disk, the 2 chairs are seats, and no kind is duplicated", () => {
+test("T3: the 6 remaining furniture pieces are in the catalog with art on disk, the 2 chairs are seats, and no kind is duplicated", () => {
   const kinds = DECORATION_CATALOG.map((d) => d.kind);
   for (const { kind, seat } of NEW_FURNITURE) {
     const def = getDecorationDef(kind);
