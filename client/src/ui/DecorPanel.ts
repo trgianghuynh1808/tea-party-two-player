@@ -58,6 +58,12 @@ export class DecorPanel {
     title.textContent = "🪑 Trang trí";
     this.moneyLabel = document.createElement("p");
     this.moneyLabel.className = "decor-money";
+    // Guests help the host decorate, paying from their own wallet; they may only add new pieces.
+    const guestNote = Object.assign(document.createElement("p"), {
+      className: "hint",
+      hidden: true,
+      textContent: `Bạn đang trang trí giúp ${room.state.hostName || "chủ phòng"}: tiền trừ vào ví của bạn, chỉ thêm đồ mới (không di chuyển, không bán).`,
+    });
     const help = document.createElement("p");
     help.className = "hint";
     help.textContent =
@@ -98,13 +104,15 @@ export class DecorPanel {
       list.append(section);
     }
 
-    root.append(title, this.moneyLabel, help, rotateBtn, list);
+    root.append(title, this.moneyLabel, guestNote, help, rotateBtn, list);
 
     const $ = Callbacks.get(room);
-    // Only the host can open this panel: furniture is bought from their own wallet.
+    // Furniture bought here is paid from the buyer's own wallet (host or guest helping out).
     this.unsubscribers.push(
       $.onAdd("players", (player, sessionId) => {
-        if (sessionId === room.sessionId) this.unsubscribers.push($.listen(player, "money", (money) => this.updateMoney(money)));
+        if (sessionId !== room.sessionId) return;
+        this.unsubscribers.push($.listen(player, "money", (money) => this.updateMoney(money)));
+        this.unsubscribers.push($.listen(player, "host", (host) => (guestNote.hidden = host)));
       }),
     );
   }

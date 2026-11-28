@@ -541,8 +541,9 @@ function startGame(room: Room<BobaShopState>) {
     () => game?.events.emit(BUILD_ROTATE),
   );
 
-  // Only the host decorates (the room shows their furniture), and only between shifts, inside a building.
-  // Building is on the host's land outside the shop: anyone (paying from their own wallet), any time.
+  // Decorating happens between shifts, inside a building: the host manages all furniture, guests may only
+  // add new pieces (paid from their own wallet). Building is on the host's land outside the shop: anyone
+  // (paying from their own wallet), any time.
   let amHost = false;
   let area: Area = "shop";
   /** Private rooms: only the host can invite, so the button stays disabled for guests. */
@@ -559,9 +560,9 @@ function startGame(room: Room<BobaShopState>) {
     const inYard = area === "yard";
     // The pond is a place to fish, not to decorate.
     const inPond = area === "pond";
-    decorateBtn.disabled = playing || !amHost || inYard || inPond;
+    decorateBtn.disabled = playing || inYard || inPond;
     decorateBtn.title = !amHost
-      ? `Quán này dùng nội thất của ${host}, chỉ chủ phòng mới trang trí được`
+      ? `Trang trí giúp ${host} (ngoài giờ ca), tiền trừ ví của bạn, chỉ thêm đồ mới`
       : inYard
         ? "Vào trong tiệm trà hoặc nhà hàng để trang trí"
         : inPond

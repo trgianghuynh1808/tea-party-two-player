@@ -25,7 +25,8 @@ Open http://localhost:5173:
 Rooms & usernames (`shared/src/lobby.ts`, `server/src/rooms/BobaShopRoom.ts`, `server/src/rooms/PresenceRoom.ts`):
 
 - A room holds at most 2 players. Each username has its own shop save (wallet + furniture). A room shows the
-  furniture of whoever opened it (the host); only the host can decorate it, paid from the host's wallet.
+  furniture of whoever opened it (the host). Both players can decorate: guests may only add new pieces, paid from
+  their own wallet; moving / turning / selling placed furniture is host-only (the refund goes to the host).
 - Rooms are private: joining needs a one-time invite token (valid 2 minutes) that only the host can send.
   A player coming back to their own seat (dropped, or refreshing the page) doesn't need one. The e2e server
   (`DEBUG_WARP=1`) skips the check so old tests can join by room id.
@@ -77,7 +78,8 @@ Add or change drinks, ingredients and machines in `shared/src/menu.ts`; shift le
   carried to a container. A container matching a dish exactly is served at the table or the take-away counter.
 - Trash empties a container but keeps it. Harder dishes appear later in the shift.
 
-- The dining room starts empty: the host furnishes it in decorate mode (saved with the rest of their furniture).
+- The dining room starts empty: the host furnishes it in decorate mode (guests can add new pieces paid from
+  their own wallet; everything is saved with the host's furniture).
   Customers sit on seats placed next to a table there; with no seats, everyone orders take-away at **Mang đi**.
 
 Menu, ingredients, cooking methods and the kitchen layout live in `shared/src/restaurant.ts`. Food art is cut
@@ -162,10 +164,13 @@ WebSocket from the same origin. Then either:
 
 ## Decorating & saving
 
-- The host presses **🪑 Trang trí** between shifts (not during a shift) to enter decorate mode.
-- Drag furniture from the side panel into the shop to buy it; drag placed furniture to move it, or drop it on
-  **🗑** to sell it back for 50%. Red outline = can't place there (machines, counters, other furniture).
-  Rugs lie on the floor, so furniture can go on top of them.
+- The host and guests press **🪑 Trang trí** between shifts (not during a shift) to enter decorate mode inside the
+  tea shop or the restaurant. Guests may only add new pieces, paid from their own wallet; the host also moves,
+  turns and sells placed furniture (the 50% refund goes to the host).
+- Drag furniture from the side panel into the shop to buy it (both players, paid from the buyer's wallet).
+  The host can also drag placed furniture to move it, or drop it on **🗑** to sell it back for 50%.
+  Red outline = can't place there (machines, counters, other furniture). Rugs lie on the floor, so furniture can
+  go on top of them.
 - The **⟳** badge on a catalog card means the piece has artwork for all four sides and can be turned: press **R**
   (or the **⟳ Xoay** button) to rotate the piece you're placing or have selected. Pieces with a single image (rugs,
   most beds/chairs/cabinets, outdoor props, custom furniture from the portal) can't be turned and carry no badge.

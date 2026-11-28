@@ -1551,29 +1551,37 @@ export class BobaShopRoom extends Room<{ state: BobaShopState; metadata: RoomMet
     return { amount, notes };
   }
 
-  // ---------------------------------------------------------------- Decorations (the host's furniture, paid from the host's wallet)
+  // ---------------------------------------------------------------- Decorations (the host's furniture, paid from the acting player's wallet)
 
-  /** Only the host decorates, and only between shifts. Returns an error message, or undefined if allowed. */
-  private decorateBlockedReason(client: Client): string | undefined {
-    if (!this.hostShop || this.sessionNames.get(client.sessionId) !== this.hostKey) {
+  /**
+   * Decorating only happens between shifts. Buying new pieces is open to everyone in the room (each pays
+   * from their own wallet); moving/selling placed pieces is host only. Returns an error message, or
+   * undefined if allowed.
+   */
+  private decorateBlockedReason(client: Client, hostOnly: boolean): string | undefined {
+    if (!this.hostShop || (hostOnly && this.sessionNames.get(client.sessionId) !== this.hostKey)) {
       return `Chỉ chủ phòng (${this.state.hostName}) mới trang trí được`;
     }
     return this.state.phase === GamePhase.Playing ? "Đang trong ca, trang trí sau khi hết ca nhé" : undefined;
   }
 
   private handleBuyDecoration(client: Client, payload: { kind: string; x: number; y: number; rotation?: number }) {
-    const error = this.decorateBlockedReason(client) ?? this.hostShop!.buy(payload?.kind, payload?.x, payload?.y, payload?.rotation);
+    const blocked = this.decorateBlockedReason(client, false);
+    if (blocked) return client.send(ServerEvents.InteractFailed, { reason: blocked });
+    const key = this.sessionNames.get(client.sessionId);
+    if (!key) return;
+    const error = this.hostShop!.buy(payload?.kind, payload?.x, payload?.y, payload?.rotation, shopOf(key));
     if (error) client.send(ServerEvents.InteractFailed, { reason: error });
   }
 
-  /** Move and/or turn a placed piece (rotation omitted = keep the current one). */
+  /** Move and/or turn a placed piece (rotation omitted = keep the current one). Host only. */
   private handleMoveDecoration(client: Client, payload: { id: string; x: number; y: number; rotation?: number }) {
-    const error = this.decorateBlockedReason(client) ?? this.hostShop!.move(payload?.id, payload?.x, payload?.y, payload?.rotation);
+    const error = this.decorateBlockedReason(client, true) ?? this.hostShop!.move(payload?.id, payload?.x, payload?.y, payload?.rotation);
     if (error) client.send(ServerEvents.InteractFailed, { reason: error });
   }
 
   private handleSellDecoration(client: Client, payload: { id: string }) {
-    const blocked = this.decorateBlockedReason(client);
+    const blocked = this.decorateBlockedReason(client, true);
     if (blocked) return client.send(ServerEvents.InteractFailed, { reason: blocked });
     this.hostShop!.sell(payload?.id);
   }
