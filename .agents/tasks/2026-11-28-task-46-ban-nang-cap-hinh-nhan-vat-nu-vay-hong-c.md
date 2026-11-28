@@ -1,5 +1,7 @@
 # Task: Bé váy hồng có animation bước chân (3 frame/hướng)
 
+APPROVED_BY_MANAGER
+
 Verify mode: light
 
 ## Mục tiêu
