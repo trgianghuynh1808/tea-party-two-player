@@ -7,9 +7,7 @@ export type DecorationLayer =
   /** Regular furniture: cannot overlap other furniture. */
   | "object"
   /** Hangs on the back wall (paintings, posters): only overlaps-checked against other wall pieces. */
-  | "wall"
-  /** Lies on top of a piece with a `surface` (phone/tablet on a table): moves and sells with that piece. */
-  | "tabletop";
+  | "wall";
 
 export interface DecorationDef {
   kind: string;
@@ -45,8 +43,6 @@ export interface DecorationDef {
    * (a seat is only used when a table stands next to it, see seatTableMap in seating.ts); players lie down in beds.
    */
   role?: "seat" | "table" | "bed";
-  /** Height of the piece's top surface above the floor (display px): tabletop gadgets can be placed on it. */
-  surface?: { height: number };
   /** Beds: where the sleeper's head goes, as a fraction of the artwork (0..1 from its top-left, as drawn). */
   pillow?: { x: number; y: number };
   /** Beds with per-facing artwork: the pillow point of each view instead of the single `pillow`. */
@@ -125,12 +121,8 @@ const rug = (kind: string, label: string, price: number, image: string, color: n
 /** A bed players can lie in (Space next to it): head at (x, y), fractions of the artwork. */
 const bed = (def: DecorationDef, x: number, y: number): DecorationDef => ({ ...def, role: "bed", pillow: { x, y } });
 
-/** A serving table: customers are served at it during shifts, and its top is a surface gadgets can sit on. */
-const table = (def: DecorationDef): DecorationDef => ({
-  ...def,
-  role: "table",
-  surface: { height: Math.round((def.imageHeight ?? 0) * 0.6) },
-});
+/** A serving table: customers are served at it during shifts. */
+const table = (def: DecorationDef): DecorationDef => ({ ...def, role: "table" });
 
 /** Artwork per facing of 4-view furniture, cut into a decor subfolder by an art tool
  * (views/ by build_furniture_views.py, kitchen/ by cut_kitchen.py). */
@@ -302,13 +294,12 @@ export const DECORATION_CATALOG: DecorationDef[] = [
       back: { x: 0.5, y: 0.3 },
       right: { x: 0.13, y: 0.3 },
     }),
-    // The 4-view TV stand keeps its top free for tabletop gadgets (surface 12 display px).
-    { ...viewsDecor("tv_stand", "Kệ tivi", 140, 64, 22, 74), surface: { height: 12 } },
+    viewsDecor("tv_stand", "Kệ tivi", 140, 64, 22, 74),
     viewsDecor("wardrobe_open", "Tủ quần áo hai cánh", 150, 60, 24, 104),
     viewsDecor("desk_pc", "Bàn làm việc máy tính", 130, 74, 34, 68),
     // Drawn head-on by client/assets-src/tools/draw_gadget_props.py (gadgets/ art, rotation "none").
     decor("piano_grand", "Piano cơ", 380, "gadgets/piano_grand", 64, 44, 56, 0x7a4222),
-    { ...decor("vanity_piano_gold", "Bàn trang điểm piano vàng", 260, "gadgets/vanity_piano_gold", 44, 24, 70, 0xcc9c54), surface: { height: 22 } },
+    decor("vanity_piano_gold", "Bàn trang điểm piano vàng", 260, "gadgets/vanity_piano_gold", 44, 24, 70, 0xcc9c54),
     // T33: cut from the req-2 farm sheet by cut_farm.py — one front-facing artwork each.
     decor("wardrobe_farm", "Tủ quần áo gỗ", 140, "furniture/wardrobe_farm", 54, 24, 86),
     decor("dresser_farm", "Tủ ngăn kéo gỗ", 120, "furniture/dresser_farm", 54, 26, 74),
@@ -413,12 +404,8 @@ export const DECORATION_CATALOG: DecorationDef[] = [
   ]),
   ...inCategory("gadgets", [
     // Drawn head-on by client/assets-src/tools/draw_gadget_props.py from the gadgets-ref references.
-    // Phone/tablet lie flat on a table surface (layer "tabletop"); the wood TV stand carries
-    // them on its cabinet top (surface 12 display px above the floor). Kind "tv_stand_wood"
-    // differs from the four-view "Kệ tivi" (kind tv_stand, bedroom): kinds must stay unique.
-    { ...decor("gadget_phone", "Điện thoại", 40, "gadgets/phone", 10, 16, 16, 0x3c3c44), layer: "tabletop" },
-    { ...decor("gadget_tablet", "iPad", 70, "gadgets/tablet", 18, 14, 14, 0x9cb4e4), layer: "tabletop" },
-    { ...decor("tv_stand_wood", "Kệ TV vân gỗ", 150, "gadgets/tv_stand_wood", 70, 22, 56, 0xd8c4c4), surface: { height: 12 } },
+    // Kind "tv_stand_wood" differs from the four-view "Kệ tivi" (kind tv_stand, bedroom): kinds must stay unique.
+    decor("tv_stand_wood", "Kệ TV vân gỗ", 150, "gadgets/tv_stand_wood", 70, 22, 56, 0xd8c4c4),
   ]),
 ];
 

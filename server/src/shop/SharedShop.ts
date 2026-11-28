@@ -16,7 +16,6 @@ import {
   getDecorationDef,
   getRod,
   normalizeRotation,
-  piecesOnSurface,
   refundFor,
   snapToGrid,
   tileKey,
@@ -201,30 +200,17 @@ export class SharedShop {
     const px = snapToGrid(Number(x));
     const py = snapToGrid(Number(y));
     const rot = rotation === undefined ? piece.rotation : normalizeRotation(def, rotation);
-    // Gadgets standing on this piece (found via its current position, before anything moves).
-    // piecesOnSurface returns members of this.pieces, so they are full Pieces.
-    const carried = (def.surface ? piecesOnSurface(piece, this.pieces) : []) as Piece[];
-    // Turning a surface would leave its gadgets floating on the turned footprint: refuse.
-    if (carried.length && rot !== piece.rotation) return "Dọn đồ trên bàn trước khi xoay";
     if (!canPlaceDecoration(piece.kind, px, py, this.pieces, piece.id, rot)) return "Không đặt được ở đây";
 
-    const dx = px - piece.x;
-    const dy = py - piece.y;
     piece.x = px;
     piece.y = py;
     piece.rotation = rot;
     this.emit({ type: "moved", piece });
-    // The gadgets travel with the table: their offset within its footprint stays valid.
-    for (const item of carried) {
-      item.x += dx;
-      item.y += dy;
-      this.emit({ type: "moved", piece: item });
-    }
     this.scheduleSave();
     return undefined;
   }
 
-  /** Sell a piece back (partial refund); a surface sells every gadget standing on it along with it. */
+  /** Sell a piece back (partial refund). */
   sell(id: unknown) {
     const index = this.pieces.findIndex((p) => p.id === id);
     if (index < 0) return;
@@ -232,17 +218,6 @@ export class SharedShop {
     const def = getDecorationDef(piece.kind);
     if (def) this.money += refundFor(def);
     this.emit({ type: "removed", id: piece.id });
-    // The gadgets on the sold surface go with it: one refund each, still a single money event.
-    if (def?.surface) {
-      for (const item of piecesOnSurface(piece, this.pieces)) {
-        const at = this.pieces.findIndex((p) => p.id === item.id);
-        if (at < 0) continue;
-        this.pieces.splice(at, 1);
-        const itemDef = getDecorationDef(item.kind);
-        if (itemDef) this.money += refundFor(itemDef);
-        this.emit({ type: "removed", id: item.id });
-      }
-    }
     this.emit({ type: "money", money: this.money });
     this.scheduleSave();
   }
@@ -543,13 +518,7 @@ export class SharedShop {
     // are dropped (parseShopSave already filters saves from storage; this guards the rest).
     this.caught = parseCaught(encodeCaught(save.caught ?? {}));
     let dropped = 0;
-    // Standing pieces (tables included) are placed first and tabletop gadgets after, so each gadget
-    // is validated against its table's restored position; a gadget whose table is gone gets nudged
-    // (e.g. to follow a table that moved down) and dropped when no surface takes it.
-    const isTabletop = (d: { kind: string }) => getDecorationDef(d.kind)?.layer === "tabletop";
-    const saved = save.decorations.filter((d) => !isTabletop(d));
-    saved.push(...save.decorations.filter(isTabletop));
-    for (const d of saved) {
+    for (const d of save.decorations) {
       // Re-validate in case the layout or catalog changed since the save. Pieces that no longer fit
       // (e.g. under the back wall / machines added later) are nudged down a few grid steps instead of dropped.
       const def = getDecorationDef(d.kind);

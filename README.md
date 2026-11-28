@@ -161,9 +161,6 @@ WebSocket from the same origin. Then either:
 - The **⟳** badge on a catalog card means the piece has artwork for all four sides and can be turned: press **R**
   (or the **⟳ Xoay** button) to rotate the piece you're placing or have selected. Pieces with a single image (rugs,
   most beds/chairs/cabinets, outdoor props, custom furniture from the portal) can't be turned and carry no badge.
-- Phones and iPads go on a table top: drop them fully onto a table, the TV stand or the piano vanity and they
-  sit raised on it. A table takes its tabletop items along when moved, and selling it sells them too (50% back
-  each). A table that still has items on it can't be turned — clear the top first.
 - **🔨 Xây** (build mode, in the yard) uses the same gestures as decorating for the one-cell pieces (trees,
   outdoor props, furniture): with no material picked, click a placed piece to select it, drag it to move it
   (green cell = fits, red = can't), drop it on **🗑** or press **Delete** to sell it back for 50%, **R** /
@@ -196,7 +193,7 @@ WebSocket from the same origin. Then either:
 
 The admin portal (`http://localhost:2567/portal`, requires `ADMIN_TOKEN`) has **🪑 Nội thất tuỳ chỉnh**: upload one
 PNG/JPG showing several items on a plain background, press **Phân tích** to cut them out in the browser, then define
-each piece (name, price, category, floor/wall/tabletop type, footprint, art height, rotation, role, table surface)
+each piece (name, price, category, floor/wall type, footprint, art height, rotation, role)
 and press **Lưu**. Saved pieces apply to both decorate and build mode for every player; players already in the game
 must reload the page to see them. Definitions and cut-out PNGs are stored with the same backend as the shops
 (Upstash Redis or `server/data/`, see below) and served at `/custom-decor/<kind>.png`. The portal also lists the added

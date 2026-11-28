@@ -2,7 +2,7 @@
 // Shared by server (validation) and client (drag preview). Kept apart from decor.ts so it can use the
 // restaurant and world modules without an import cycle.
 
-import { WALL_SKIRTING, footprintOf, getDecorationDef, normalizeRotation, type PlacedDecoration } from "./decor";
+import { WALL_SKIRTING, footprintOf, getDecorationDef, type PlacedDecoration } from "./decor";
 import { STATIONS, WALL_BOTTOM, type StationDef } from "./menu";
 import { RESTAURANT_STATIONS } from "./restaurant";
 import { RESTAURANT, areaOf } from "./world";
@@ -88,16 +88,11 @@ export function canPlaceDecoration(
   // Wall pieces hang behind the machines (drawn below them), so stations don't block them.
   // Rugs lie flat on the floor and are drawn below everything (depth), so they may slide under
   // counters, tables and machines; standing furniture must keep clear of them.
-  // Tabletop gadgets sit on a piece of furniture, never on the floor, so stations don't block them either.
   if (def.layer === "object") {
     for (const s of place.stations) {
       if (overlaps(r, rectOf(s.x, s.y, s.width, s.height, STATION_MARGIN))) return false;
     }
   }
-
-  // A tabletop gadget must lie entirely on one piece with a top surface; the others loop below
-  // then only rejects it where it stacks on another tabletop piece (same layer).
-  if (def.layer === "tabletop" && !surfaceUnder(kind, x, y, others, rotation)) return false;
 
   for (const o of others) {
     if (o.id === ignoreId) continue;
@@ -108,46 +103,4 @@ export function canPlaceDecoration(
     if (overlaps(r, rectOf(o.x, o.y, os.width, os.height))) return false;
   }
   return true;
-}
-
-/**
- * The piece with a top surface that a tabletop piece of `kind` at (x, y) would lie on, if any:
- * its footprint (per its own rotation) must contain the gadget's whole footprint.
- * Shared by the server (placement rules) and the client (drag preview, depth).
- */
-export function surfaceUnder(
-  kind: string,
-  x: number,
-  y: number,
-  others: Iterable<PlacedDecoration>,
-  rotation = 0,
-): PlacedDecoration | undefined {
-  const def = getDecorationDef(kind);
-  if (!def || def.layer !== "tabletop") return undefined;
-  const size = footprintOf(def, rotation);
-  const r = rectOf(x, y, size.width, size.height);
-  for (const o of others) {
-    const od = getDecorationDef(o.kind);
-    if (!od?.surface) continue;
-    const os = footprintOf(od, normalizeRotation(od, o.rotation));
-    const s = rectOf(o.x, o.y, os.width, os.height);
-    if (r.left >= s.left && r.right <= s.right && r.top >= s.top && r.bottom <= s.bottom) return o;
-  }
-  return undefined;
-}
-
-/** The tabletop pieces whose center lies within `table`'s footprint: they move and sell with the table. */
-export function piecesOnSurface(table: PlacedDecoration, others: Iterable<PlacedDecoration>): PlacedDecoration[] {
-  const td = getDecorationDef(table.kind);
-  if (!td) return [];
-  const ts = footprintOf(td, normalizeRotation(td, table.rotation));
-  const r = rectOf(table.x, table.y, ts.width, ts.height);
-  const on: PlacedDecoration[] = [];
-  for (const o of others) {
-    if (o.id === table.id) continue;
-    const od = getDecorationDef(o.kind);
-    if (!od || od.layer !== "tabletop") continue;
-    if (o.x >= r.left && o.x <= r.right && o.y >= r.top && o.y <= r.bottom) on.push(o);
-  }
-  return on;
 }

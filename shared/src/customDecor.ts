@@ -22,7 +22,7 @@ export const CUSTOM_DECOR_MAX_ITEMS = 200;
 export const CUSTOM_DECOR_MAX_IMAGE_BYTES = 300_000;
 
 const CATEGORY_IDS = new Set<string>(DECORATION_CATEGORIES.map((c) => c.id));
-const LAYERS: readonly DecorationLayer[] = ["floor", "object", "wall", "tabletop"];
+const LAYERS: readonly DecorationLayer[] = ["floor", "object", "wall"];
 
 const isIntegerBetween = (value: unknown, min: number, max: number): value is number =>
   typeof value === "number" && Number.isInteger(value) && value >= min && value <= max;
@@ -58,12 +58,6 @@ export function parseCustomDecoration(raw: unknown): DecorationDef | undefined {
     if (typeof y !== "number" || !Number.isFinite(y) || y < 0 || y > 1) return undefined;
     pillow = { x, y };
   }
-  let surface: { height: number } | undefined;
-  if (r.surface !== undefined) {
-    const height = (r.surface as { height?: unknown })?.height;
-    if (!isIntegerBetween(height, 0, 200)) return undefined;
-    surface = { height };
-  }
   const color = r.color === undefined ? 0x8d6e63 : r.color;
   if (!isIntegerBetween(color, 0, 0xffffff)) return undefined;
 
@@ -82,15 +76,14 @@ export function parseCustomDecoration(raw: unknown): DecorationDef | undefined {
   };
   if (r.category !== undefined) def.category = r.category as DecorationDef["category"];
   if (r.role !== undefined) def.role = r.role;
-  if (surface) def.surface = surface;
   if (pillow) def.pillow = pillow;
   return def;
 }
 
 /**
  * Add (or replace, keeping the kind) a custom piece: edit the decorate catalog in place and keep
- * BUILD_TILES in sync (standing pieces get one yard cell `decor_<kind>`; rugs / wall art / gadgets
- * don't map to a cell and never appear in build mode).
+ * BUILD_TILES in sync (standing pieces get one yard cell `decor_<kind>`; rugs / wall art don't
+ * map to a cell and never appear in build mode).
  */
 export function addCustomDecoration(def: DecorationDef): void {
   const index = DECORATION_CATALOG.findIndex((d) => d.kind === def.kind);

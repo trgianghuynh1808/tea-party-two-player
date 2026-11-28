@@ -13,10 +13,8 @@ import {
   footprintOf,
   getDecorationDef,
   normalizeRotation,
-  piecesOnSurface,
   rotationCount,
   snapToGrid,
-  surfaceUnder,
   type DecorationDef,
 } from "@boba/shared";
 import type { BobaShopState, Decoration } from "@boba/shared/schema";
@@ -97,8 +95,8 @@ function buildDecorVisual(
   const key = viewKey && scene.textures.exists(viewKey) ? viewKey : decorTextureKey(def.kind);
   if (scene.textures.exists(key)) {
     const img = scene.add.image(0, 0, key).setAlpha(alpha);
-    if (def.layer === "floor" || def.layer === "wall" || def.layer === "tabletop") {
-      // Flat art filling its box: rugs, wall art and tabletop gadgets never turn.
+    if (def.layer === "floor" || def.layer === "wall") {
+      // Flat art filling its box: rugs and wall art never turn.
       img.setDisplaySize(def.width, def.height);
       const effect = def.effect === "breeze" ? buildBreeze(scene, def.width, def.height / 2, alpha) : [];
       return { objects: [img, ...effect], width: size.width, halfHeight: size.height / 2, hasArt: true };
@@ -154,11 +152,6 @@ interface DecorView {
   visual: Phaser.GameObjects.GameObject[];
   /** Rotation currently drawn (may differ from state.rotation while dragging / waiting for the server). */
   rotation: number;
-  /**
-   * While a tabletop piece is dragged: the floor coordinates under the pointer (the cursor points at
-   * the raised surface, so these differ from the container's drawn position). Cleared on drag end.
-   */
-  dragFloor?: { x: number; y: number };
 }
 
 interface Ghost {
@@ -183,8 +176,6 @@ export class DecorController {
   private draggingId: string | null = null;
   private dragStart = { x: 0, y: 0, rotation: 0 };
   private lastDragPointer = { x: 0, y: 0 };
-  /** Tabletop pieces riding the piece being dragged (they preview-follow it; the server moves them too). */
-  private draggingCarried: DecorView[] = [];
   /** Last placed piece the player touched: R / ⟳ turns it. */
   private selectedId: string | null = null;
   private readonly grid: Phaser.GameObjects.Graphics;
@@ -383,53 +374,26 @@ export class DecorController {
     if (!hit || !this.enabled) return;
     this.select(hit.id);
     this.draggingId = hit.id;
-    // Tabletop pieces are drawn raised onto their table: their floor spot is the state position.
-    const floor =
-      hit.view.def.layer === "tabletop"
-        ? { x: hit.view.state.x, y: hit.view.state.y }
-        : { x: hit.view.container.x, y: hit.view.container.y };
-    this.dragStart = { ...floor, rotation: hit.view.rotation };
-    hit.view.dragFloor = hit.view.def.layer === "tabletop" ? { ...floor } : undefined;
+    this.dragStart = { x: hit.view.container.x, y: hit.view.container.y, rotation: hit.view.rotation };
     this.lastDragPointer = { x: pointer.x, y: pointer.y };
     hit.view.container.setDepth(UI_DEPTH - 1);
-    // Gadgets standing on the dragged piece preview-follow it (the server moves them for real).
-    this.draggingCarried = hit.view.def.surface
-      ? piecesOnSurface(
-          { id: hit.view.state.id, kind: hit.view.def.kind, x: hit.view.state.x, y: hit.view.state.y, rotation: hit.view.state.rotation },
-          this.placed(),
-        )
-          .map((p) => this.views.get(p.id))
-          .filter((v): v is DecorView => !!v)
-      : [];
-    for (const carried of this.draggingCarried) carried.container.setDepth(UI_DEPTH - 0.5);
     this.sellZone.setVisible(true);
   }
 
   private onDrag(pointer: Phaser.Input.Pointer, obj: Phaser.GameObjects.GameObject, dragX: number, dragY: number) {
     const hit = this.viewOf(obj);
     if (!hit || this.draggingId !== hit.id) return;
-    if (hit.view.def.layer === "tabletop") {
-      // The cursor points at the drawn (raised) surface: add the surface height back to get floor coords.
-      const at = this.tabletopFloorAt(dragX, dragY);
-      hit.view.dragFloor = { x: at.x, y: at.y };
-      hit.view.container.setPosition(at.x, at.y - at.h);
-    } else {
-      hit.view.container.setPosition(snapToGrid(dragX), snapToGrid(dragY));
-      for (const carried of this.draggingCarried) this.syncSurfaceView(carried);
-    }
+    hit.view.container.setPosition(snapToGrid(dragX), snapToGrid(dragY));
     this.lastDragPointer = { x: pointer.x, y: pointer.y };
     this.previewDrag(hit.view, pointer.x, pointer.y);
   }
 
   /** Outline + floor shading for the piece being dragged. `pointerX/Y` = screen position (for the sell zone). */
   private previewDrag(view: DecorView, pointerX: number, pointerY: number) {
-    // Tabletop pieces validate at their floor spot, not their raised drawn position.
-    const at =
-      view.def.layer === "tabletop" ? (view.dragFloor ?? { x: view.state.x, y: view.state.y }) : { x: view.container.x, y: view.container.y };
     const overSell = this.isOverSellZone(pointerX, pointerY);
-    const ok = overSell || canPlaceDecoration(view.def.kind, at.x, at.y, this.placed(), view.state.id, view.rotation);
+    const ok = overSell || canPlaceDecoration(view.def.kind, view.container.x, view.container.y, this.placed(), view.state.id, view.rotation);
     view.outline.setVisible(true).setStrokeStyle(3, ok ? OK_COLOR : BAD_COLOR);
-    this.showFootprint(view.def, view.rotation, at.x, at.y, ok, !overSell);
+    this.showFootprint(view.def, view.rotation, view.container.x, view.container.y, ok, !overSell);
     this.sellZoneBg.setFillStyle(BAD_COLOR, overSell ? 0.4 : 0.18);
   }
 
@@ -437,9 +401,7 @@ export class DecorController {
     const hit = this.viewOf(obj);
     if (!hit || this.draggingId !== hit.id) return;
     const { id, view } = hit;
-    const carried = this.draggingCarried;
     this.draggingId = null;
-    this.draggingCarried = [];
     this.sellZone.setVisible(false);
     view.outline.setStrokeStyle(3, SELECT_COLOR); // stays selected for R / ⟳
     this.footprint.setVisible(false);
@@ -449,8 +411,7 @@ export class DecorController {
       return;
     }
 
-    const tabletop = view.def.layer === "tabletop";
-    const at = tabletop ? (view.dragFloor ?? { x: view.state.x, y: view.state.y }) : { x: view.container.x, y: view.container.y };
+    const at = { x: view.container.x, y: view.container.y };
     const { rotation } = view;
     const changed = at.x !== this.dragStart.x || at.y !== this.dragStart.y || rotation !== this.dragStart.rotation;
     if (changed && canPlaceDecoration(view.def.kind, at.x, at.y, this.placed(), id, rotation)) {
@@ -458,19 +419,14 @@ export class DecorController {
       this.scene.time.delayedCall(RESYNC_MS, () => {
         this.syncPosition(id);
         this.syncRotation(id);
-        for (const c of carried) this.syncSurfaceView(c); // safety net if the server refused the batch
       });
-      view.dragFloor = undefined;
-      // Keep the predicted position until the server confirms (re-raising a tabletop piece would
-      // snap it back to its old spot); regular pieces just take the depth of where they were dropped.
-      if (!tabletop) this.applyDepth(view);
+      // Keep the predicted position until the server confirms; take the depth of where it was dropped.
+      this.applyDepth(view);
       return;
     }
-    if (tabletop) this.syncSurfaceView(view);
-    else view.container.setPosition(this.dragStart.x, this.dragStart.y);
+    view.container.setPosition(this.dragStart.x, this.dragStart.y);
     this.renderRotation(view, this.dragStart.rotation);
-    for (const c of carried) this.syncSurfaceView(c);
-    if (!tabletop) this.applyDepth(view);
+    this.applyDepth(view);
   }
 
   /** (x, y) = screen position (the zone doesn't scroll with the camera). */
@@ -553,14 +509,9 @@ export class DecorController {
     if (!inside) return undefined;
     // Screen -> world: the restaurant's camera may be scrolled.
     const cam = this.scene.cameras.main;
-    const px = cam.scrollX + ((p.x - rect.left) / rect.width) * WORLD_WIDTH;
-    const py = cam.scrollY + ((p.y - rect.top) / rect.height) * WORLD_HEIGHT;
-    // A tabletop item's cursor points at the drawn (raised) surface: add the surface height back
-    // to land on the floor coordinates the placement rules work with.
-    const lift = this.ghost.def.layer === "tabletop" ? (this.surfaceAtPoint(px, py)?.height ?? 0) : 0;
-    const x = snapToGrid(px);
-    const y = snapToGrid(py + lift);
-    return { x, y, lift, ok: canPlaceDecoration(this.ghost.def.kind, x, y, this.placed(), undefined, this.ghost.rotation) };
+    const x = snapToGrid(cam.scrollX + ((p.x - rect.left) / rect.width) * WORLD_WIDTH);
+    const y = snapToGrid(cam.scrollY + ((p.y - rect.top) / rect.height) * WORLD_HEIGHT);
+    return { x, y, ok: canPlaceDecoration(this.ghost.def.kind, x, y, this.placed(), undefined, this.ghost.rotation) };
   }
 
   private updateGhost(clientX: number, clientY: number) {
@@ -569,7 +520,7 @@ export class DecorController {
     const target = this.ghostTarget(clientX, clientY);
     this.ghost.view.setVisible(!!target);
     if (!target) return this.footprint.setVisible(false);
-    this.ghost.view.setPosition(target.x, target.y - target.lift);
+    this.ghost.view.setPosition(target.x, target.y);
     this.ghost.outline.setStrokeStyle(3, target.ok ? OK_COLOR : BAD_COLOR);
     this.showFootprint(this.ghost.def, this.ghost.rotation, target.x, target.y, target.ok);
   }
@@ -600,55 +551,7 @@ export class DecorController {
 
   private applyDepth(view: DecorView) {
     const { layer } = view.def;
-    if (layer === "tabletop") {
-      this.syncSurfaceView(view);
-      return;
-    }
     view.container.setDepth(layer === "floor" ? FLOOR_DEPTH : layer === "wall" ? WALL_DECOR_DEPTH : view.container.y);
-  }
-
-  /**
-   * Place a tabletop piece: raised onto its supporting table's surface height and drawn just above
-   * that table in depth. While the table itself is dragged, the piece previews the same offset,
-   * above everything (the server sends a `moved` for it afterwards).
-   */
-  private syncSurfaceView(view: DecorView) {
-    const table = surfaceUnder(view.def.kind, view.state.x, view.state.y, this.placed(), view.state.rotation);
-    const tableView = table ? this.views.get(table.id) : undefined;
-    const height = tableView?.def.surface?.height ?? 0;
-    if (table && tableView && this.draggingId === table.id) {
-      view.container.setPosition(
-        view.state.x + (tableView.container.x - tableView.state.x),
-        view.state.y + (tableView.container.y - tableView.state.y) - height,
-      );
-      view.container.setDepth(UI_DEPTH - 0.5);
-      return;
-    }
-    view.container.setPosition(view.state.x, view.state.y - height);
-    // Just above the table (its depth is its y), so a gadget never hides behind its own table.
-    view.container.setDepth(tableView ? tableView.container.y + 1 : view.state.y);
-  }
-
-  /** The surface piece under a world point (its footprint contains the point). */
-  private surfaceAtPoint(x: number, y: number): { id: string; height: number } | undefined {
-    for (const p of this.placed()) {
-      const def = getDecorationDef(p.kind);
-      if (!def?.surface) continue;
-      const size = footprintOf(def, normalizeRotation(def, p.rotation));
-      if (Math.abs(x - p.x) <= size.width / 2 && Math.abs(y - p.y) <= size.height / 2) {
-        return { id: p.id, height: def.surface.height };
-      }
-    }
-    return undefined;
-  }
-
-  /**
-   * Floor coordinates for a tabletop piece whose cursor sits at world (px, py): the cursor points at
-   * the table's drawn surface (raised by its surface height), so add that height back to the y.
-   */
-  private tabletopFloorAt(px: number, py: number) {
-    const h = this.surfaceAtPoint(px, py)?.height ?? 0;
-    return { x: snapToGrid(px), y: snapToGrid(py + h), h };
   }
 
   /** Veil + cell grid over a box (a room's floor or wall). */

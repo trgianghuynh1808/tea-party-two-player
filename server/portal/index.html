@@ -436,7 +436,6 @@ const CD_LAYERS = [
   { id: "object", label: "Đứng sàn" },
   { id: "floor", label: "Thảm" },
   { id: "wall", label: "Treo tường" },
-  { id: "tabletop", label: "Để bàn" },
 ];
 const CD_ROLES = [
   { id: "", label: "Không" },
@@ -633,12 +632,6 @@ function cdCandidateCard(piece, index) {
     { id: "flip", label: "Lật (trái ↔ phải)" },
   ], "none");
   const roleSelect = cdSelect(CD_ROLES, "");
-  const surfaceInput = document.createElement("input");
-  surfaceInput.type = "number";
-  surfaceInput.min = "0";
-  surfaceInput.max = "200";
-  surfaceInput.step = "1";
-  surfaceInput.placeholder = "— (không có)";
 
   // Default sizes from the cut-out: the art renders at about half its pixel size.
   const clamp4to400 = (n) => String(Math.min(400, Math.max(4, Math.round(n))));
@@ -661,7 +654,7 @@ function cdCandidateCard(piece, index) {
   imageHeightInput.step = "1";
   imageHeightInput.value = clamp4to400(piece.height / 2);
 
-  // Rotation "rotate" only fits rugs; roles / table surfaces only fit standing pieces.
+  // Rotation "rotate" only fits rugs; roles only fit standing pieces.
   const syncLayer = () => {
     const layer = layerSelect.value;
     const rotateOption = rotationSelect.querySelector('option[value="rotate"]');
@@ -677,8 +670,6 @@ function cdCandidateCard(piece, index) {
     const standing = layer === "object";
     roleSelect.disabled = !standing;
     if (!standing) roleSelect.value = "";
-    surfaceInput.disabled = !standing;
-    if (!standing) surfaceInput.value = "";
   };
   layerSelect.addEventListener("change", syncLayer);
   syncLayer();
@@ -696,7 +687,6 @@ function cdCandidateCard(piece, index) {
     cdField("Cao ảnh hiển thị (px)", imageHeightInput),
     cdField("Xoay", rotationSelect),
     cdField("Vai trò", roleSelect),
-    cdField("Mặt bàn cao (px)", surfaceInput),
   );
 
   const saveBtn = document.createElement("button");
@@ -706,7 +696,7 @@ function cdCandidateCard(piece, index) {
   skipBtn.textContent = "Bỏ qua";
   form.append(saveBtn, skipBtn);
 
-  const els = { nameInput, priceInput, categorySelect, layerSelect, widthInput, depthInput, imageHeightInput, rotationSelect, roleSelect, surfaceInput };
+  const els = { nameInput, priceInput, categorySelect, layerSelect, widthInput, depthInput, imageHeightInput, rotationSelect, roleSelect };
   skipBtn.addEventListener("click", () => card.remove());
   saveBtn.addEventListener("click", () => void cdSaveCandidate(card, piece, els));
 
@@ -730,8 +720,6 @@ async function cdSaveCandidate(card, piece, els) {
     rotation: els.rotationSelect.value,
   };
   if (els.roleSelect.value) def.role = els.roleSelect.value;
-  const surface = Number(els.surfaceInput.value);
-  if (els.surfaceInput.value !== "" && Number.isInteger(surface)) def.surface = { height: surface };
   // imageBase64 = the cut-out PNG without its "data:image/png;base64," prefix.
   const imageBase64 = piece.dataUrl.slice(piece.dataUrl.indexOf(",") + 1);
   try {

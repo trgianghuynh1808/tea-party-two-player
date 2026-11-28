@@ -1,28 +1,22 @@
-"""Draw the 5 tilted gadget pieces head-on as original pixel art, straight from code.
+"""Draw the 3 standing gadget pieces head-on as original pixel art, straight from code.
 
     .venv-art/bin/python client/assets-src/tools/draw_gadget_props.py
 
-Writes  client/public/assets/decor/gadgets/{phone,tablet,tv_stand_wood,piano_grand,vanity_piano_gold}.png
-plus a  preview client/assets-src/sheets/gadgets-preview.png (all 5 pieces on a
+Writes  client/public/assets/decor/gadgets/{tv_stand_wood,piano_grand,vanity_piano_gold}.png
+plus a  preview client/assets-src/sheets/gadgets-preview.png (all 3 pieces on a
 neutral grey, 3x, labelled).
 
 Style follows draw_bathroom_props.py: light from the top-left, 3-4 tones per material
 with a 2x2 Bayer dither, sel-out outline. Palettes are sampled from the tilted
-references in client/assets-src/sheets/gadgets-ref/ (phone/tablet grey bodies and
-teal-to-lavender screens, TV slate screen #24243c with pale pinkish wood,
-mahogany #6c3c24 with gold #cc9c54 trim, cream #e4e4cc vanity top).
+references in client/assets-src/sheets/gadgets-ref/ (TV slate screen #24243c with pale
+pinkish wood, mahogany #6c3c24 with gold #cc9c54 trim, cream #e4e4cc vanity top).
 
-The tabletop gadgets (phone, tablet) are drawn flat from straight above; the three
-standing pieces (TV stand, grand piano, vanity piano) face the viewer. Each sprite
-is drawn at half its display size in pixels and saved upscaled x4, so every PNG ends
-up at 2x display size + an 8px pad, matching the bathroom set:
+The pieces face the viewer. Each sprite is drawn at half its display size in pixels and
+saved upscaled x4, so every PNG ends up at 2x display size + an 8px pad, matching the
+bathroom set:
 
-    phone 7x10 -> 28x40 (10x16)   tablet 11x9 -> 44x36 (18x14)
     tv_stand_wood 37x30 -> 148x120 (70x56)   piano_grand 34x30 -> 136x120 (64x56)
     vanity_piano_gold 24x37 -> 96x148 (44x70)
-
-The TV cabinet top and the vanity counter sit at 6 and 11 canvas rows above the
-art bottom, i.e. surface heights of 12 and 22 display px (see shared/src/decor.ts).
 """
 import os
 import sys
@@ -37,9 +31,8 @@ PREVIEW = os.path.join(ROOT, "client", "assets-src", "sheets", "gadgets-preview.
 
 # ---------------------------------------------------------------- palettes (dark -> light), sampled from the refs
 
-BODY = [(34, 34, 38), (64, 64, 70), (100, 100, 108), (138, 138, 146)]  # phone/tablet grey case
 SCREEN = [(34, 56, 104), (58, 128, 176), (118, 178, 218), (188, 222, 242)]  # #243c6c / #3c84b4
-SILVER = [(84, 84, 88), (128, 128, 132), (168, 168, 172), (206, 206, 210)]  # stylus / TV legs
+SILVER = [(84, 84, 88), (128, 128, 132), (168, 168, 172), (206, 206, 210)]  # TV legs
 SLATE = [(28, 28, 46), (46, 46, 70), (66, 70, 96), (96, 104, 130)]  # TV screen #24243c / #3c3c54
 BEZEL = [(40, 40, 44), (66, 66, 72), (104, 104, 112), (146, 146, 154)]  # TV frame grey
 PALEWOOD = [(130, 106, 106), (162, 136, 136), (194, 168, 168), (222, 202, 202)]  # pale pinkish wood
@@ -77,10 +70,6 @@ def tone(palette, value, x, y):
     n = len(palette)
     v = (value + 1) / 2 * (n - 1) + (BAYER[y % 2][x % 2] - 0.5) * 0.7
     return palette[max(0, min(n - 1, int(round(v))))]
-
-
-def blend(a, b, t):
-    return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
 
 
 def darker(col, k=0.55):
@@ -131,66 +120,13 @@ def keys(c, x0, x1, y0, y1, ivory=IVORY, black=BLACKKEY):
             c.put(x, y, black[0] if (x + y) % 2 else black[1])
 
 
-# ---------------------------------------------------------------- tabletop pieces (seen from straight above)
-
-
-def phone():
-    """Smartphone lying flat, seen from above: grey body, blue screen with a clock."""
-    c = Canvas(7, 10)
-    # Body 5x8 with cut corners, lit from the top-left.
-    for y in range(1, 9):
-        for x in range(1, 6):
-            if (x, y) in ((1, 1), (5, 1), (1, 8), (5, 8)):
-                continue  # rounded corners
-            v = 0.4 - (x - 1) / 5 * 0.9 - (0.4 if y == 8 else 0.0)
-            c.put(x, y, tone(BODY, v, x, y))
-    # Screen inset in the bezel, brighter towards the top-left corner.
-    for y in range(2, 6):
-        for x in range(2, 5):
-            v = 0.5 - (y - 2) * 0.42 + (0.25 if x == 2 else 0.0)
-            c.put(x, y, tone(SCREEN, v, x, y))
-    c.put(3, 3, SCREEN[3])  # the clock face
-    c.put(3, 4, SCREEN[2])
-    c.put(3, 1, BODY[3])  # front camera
-    c.put(3, 7, BODY[3])  # home indicator
-    outline(c)
-    return to_rgba(c)
-
-
-def tablet():
-    """Tablet lying flat, seen from above: teal-to-lavender screen, silver stylus below."""
-    c = Canvas(11, 9)
-    # Body 9x6 with cut corners.
-    for y in range(1, 7):
-        for x in range(1, 10):
-            if (x, y) in ((1, 1), (9, 1), (1, 6), (9, 6)):
-                continue
-            v = 0.4 - (x - 1) / 9 * 0.85 - (0.4 if y == 6 else 0.0)
-            c.put(x, y, tone(BODY, v, x, y))
-    # Screen: teal on the left flowing to lavender-pink on the right, bright top row.
-    stops = [(132, 204, 204), (140, 172, 220), (172, 172, 224), (214, 180, 226)]
-    for y in range(2, 6):
-        for x in range(2, 9):
-            t = (x - 2) / 6.0
-            i = min(3, int(t * 4))
-            col = blend(stops[i], stops[min(3, i + 1)], t * 4 - i)
-            k = 1.14 - (y - 2) * 0.1
-            c.put(x, y, tuple(min(255, int(v * k)) for v in col))
-    # Stylus resting below the tablet: silver barrel with a dark tip.
-    for x in range(3, 9):
-        c.put(x, 7, tone(SILVER, 0.45 if x == 5 else -0.05, x, 7))
-    c.put(8, 7, (52, 52, 56))
-    outline(c)
-    return to_rgba(c)
-
-
 # ---------------------------------------------------------------- standing pieces (front view)
 
 
 def tv_stand_wood():
     """TV on silver legs over a low pale-wood cabinet with two compartments."""
     c = Canvas(37, 30)
-    # Cabinet: top slab at y23 (surface height 6 rows = 12 display px), front with two
+    # Cabinet: top slab at y23, front with two
     # dark compartments between the side stiles, bottom rail and plinth feet on the floor.
     slab(c, 1, 35, 23, 23, PALEWOOD, 0.95, 0.6)
     slab(c, 1, 35, 24, 24, PALEWOOD, 0.05, -0.55)
@@ -291,7 +227,7 @@ def vanity_piano_gold():
                 if 5 < d % 13 < 8:
                     v += 0.85  # shine bands
                 c.put(x, y, tone(GLASS, v, x, y))
-    # Counter: cream top (surface height 11 rows = 22 display px), keys, cream front with gold line.
+    # Counter: cream top, keys, cream front with gold line.
     slab(c, 2, 21, 25, 25, CREAM, 0.85, 0.35)
     keys(c, 3, 20, 26, 28)
     slab(c, 2, 21, 29, 29, CREAM, -0.25, -0.25)
@@ -309,15 +245,13 @@ def vanity_piano_gold():
 
 
 PROPS = [
-    ("phone", phone),
-    ("tablet", tablet),
     ("tv_stand_wood", tv_stand_wood),
     ("piano_grand", piano_grand),
     ("vanity_piano_gold", vanity_piano_gold),
 ]
 
 
-# ---------------------------------------------------------------- preview (all 5 pieces)
+# ---------------------------------------------------------------- preview (all 3 pieces)
 
 def preview():
     """Every gadget piece at its pixel-grid size x3 on flat grey, with labels."""
@@ -326,7 +260,6 @@ def preview():
     scale, pad, label_h = 3, 14, 10
     rows = [
         [("tv_stand_wood", "tv_stand_wood"), ("piano_grand", "piano_grand"), ("vanity_piano_gold", "vanity_piano_gold")],
-        [("phone", "phone"), ("tablet", "tablet")],
     ]
     imgs = []
     for row in rows:
