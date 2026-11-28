@@ -24,7 +24,7 @@ Verify mode: light
 
 ## Plan
 - [x] 1. [vừa] `client/assets-src/characters/build_turnaround_sheet.py` → sửa phần tách nền (mask `bg`/`fg`) để không còn mất pixel bên trong hình (nhất là hàng left), rồi chạy script để ghi lại `client/public/assets/characters/pink_girl.png`. Kiểm tra: không còn pixel trong suốt "lỗ" bên trong thân (dùng `ndi.binary_fill_holes` so sánh alpha từng frame: số pixel lỗ = 0), 4 frame vẫn nằm trong 40x72, chân ở hàng 70/71.
-- [ ] 2. [dễ] `client/public/assets/characters/pink_girl.png` → mở ảnh phóng 6x trên nền xanh, đối chiếu với `pink-girl-original.png`, xác nhận hướng trái đầy đủ (mặt, má, tay, váy, giày). Chạy `npm run typecheck`. Ghi kết quả vào "Trạng thái hiện tại" (kèm "Docs checked: no change needed" nếu không đổi docs).
+- [x] 2. [dễ] `client/public/assets/characters/pink_girl.png` → mở ảnh phóng 6x trên nền xanh, đối chiếu với `pink-girl-original.png`, xác nhận hướng trái đầy đủ (mặt, má, tay, váy, giày). Chạy `npm run typecheck`. Ghi kết quả vào "Trạng thái hiện tại" (kèm "Docs checked: no change needed" nếu không đổi docs).
 
 ## Test cases
 - [x] T1. Sheet không có lỗ — alpha mỗi frame của `pink_girl.png` không có lỗ bên trong — kiểm tra bằng script Python một lần (không cần spec)
@@ -41,9 +41,15 @@ Verify mode: light
 - Lưu ý: sheet mới khác sheet cũ khá ít ở alpha cuối (left +7/−3 px rải rác ở viền thân tay/váy, vùng mặt hàng 16–21 không đổi) vì bước box-downscale + ngưỡng 128 đã hấp thụ phần lớn xói 2 px của mask cũ; nhưng mask giờ giữ toàn bộ pixel da (đặc biệt hàng left) nên sheet được build từ dữ liệu gốc không bị hủy — kết luận "mặt/cằm/má đầy đủ như gốc" cần bước 2 soi ảnh phóng 6x (chưa làm theo chỉ dẫn chỉ làm bước 1).
 - Lưu ý: các túi nền be khép kín trong hình (khe chân/váy) vẫn giữ nguyên opaque màu be (7–14 px/frame, như sheet cũ) — nếu làm trong suốt sẽ tạo lỗ `binary_fill_holes` và fail T1.
 - Lưu ý: session này không xem được ảnh bằng tool Read (model không hỗ trợ image input) nên mọi kết luận ảnh đều bằng phân tích pixel (NumPy/SciPy), giống task-36.
+- Bước 2 xong: dựng preview 6x trên nền xanh lá (sheet, frame left, frame left bản cũ, ideal, và left-vs-ảnh-gốc) tại `/var/folders/9d/v45vxhbx72l_4ntwxqmf2zd80000gn/T/opencode/preview_{sheet,left,old_left,ideal_left,left_vs_source}_6x*green*.png` (file tạm, không commit) rồi đối chiếu bằng phân tích pixel với bản ideal (nearest downscale từ hình left của `pink-girl-original.png` với mask đúng).
+- Hướng trái đầy đủ: bản đồ lớp màu frame left cho thấy tóc/đầu hàng 10–25, **mặt/má da hàng 16–20** (S), cổ–tay–bàn tay da hàng 27–33 và 40–50, **váy hồng hàng 37–54** (P), **chân da hàng 56–61**, tất trắng 63–64 (W), **giày tối hàng 65–70** (K/H) — không thiếu bộ phận nào.
+- Định lượng: frame left có 28 px da vùng mặt so với 24 px ở sheet cũ (+4 px da được khôi phục; ideal 32); tổng px da ideal 138, chỉ thiếu 1 px (cùng thiếu ở bản cũ) do lượng tử viền box-filter; silhouette chỉ 1 thành phần liên thông, lỗ = 0; px "ideal-only" thiếu = 46 ở cả bản mới và bản cũ (đều ở viền lưng tóc x29, do box-filter vs nearest, không phải lỗi mask). Kết luận: hướng trái khớp ảnh gốc trong sai số lượng tử 1 px.
+- Docs checked: no change needed (bước 2 không đổi code/docs).
+- Chạy `npm run typecheck` sau bước 2: PASS.
+- Lưu ý: vì model không xem được ảnh, "xác nhận" của bước 2 là bằng số liệu pixel + preview 6x (đường dẫn tạm như trên); phép kiểm tra mắt người (chụp màn hình trong game) thuộc pha Verify (Verify light), chưa chạy ở đây.
 
 ## Test status
-- Lần chạy cuối: script Python một lần (venv `client/assets-src/tools/.venv-art`), ngày 28-11-2026, sau khi build lại sheet; `npm run typecheck` PASS.
+- Lần chạy cuối: 28-11-2026 — script Python kiểm tra ảnh (venv `client/assets-src/tools/.venv-art`) sau khi build lại sheet (bước 1) và sau kiểm tra 6x/nền xanh + đối chiếu ideal (bước 2); `npm run typecheck` PASS (cả sau bước 1 và bước 2). Bước 2 không có test case mới.
 - Kết quả từng test:
   - T1: PASS — 4 frame 40x72 của `pink_girl.png`: số pixel khác nhau giữa `alpha>0` và `binary_fill_holes(alpha>0)` = 0 (down/left/right/up đều 0).
 - Fail chi tiết: -
