@@ -224,7 +224,6 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     // Built by client/assets-src/tools/build_table_view.py (front view only: the table is round, so it doesn't turn).
     table(decor("table", "Bàn khách", 90, "wicker_table", 44, 26, 48, 0x8d6e63)),
     // Cut from client/assets-src/sheets/furniture/ by client/assets-src/tools/cut_furniture.py (front-facing pieces only).
-    { ...decor("armchair_baroque", "Ghế bành hoàng gia", 90, "furniture/armchair_baroque", 34, 26, 70), role: "seat" },
     { ...decor("armchair_cream", "Ghế bành kem", 85, "furniture/armchair_cream", 30, 26, 76, 0xc29a78), role: "seat" },
     // 4-view furniture from client/assets-src/sheets/views/ (build_furniture_views.py).
     viewsDecor("sofa_lilac", "Sofa tím oải hương", 160, 88, 36, 44, 0xb9a3d6),
@@ -284,7 +283,6 @@ export const DECORATION_CATALOG: DecorationDef[] = [
     decor("nightstand_green_lamp", "Tủ đầu giường đèn lá", 80, "bedroom/nightstand_green_lamp", 42, 22, 54, 0x7a3f3a),
     // Cut from client/assets-src/sheets/furniture/ by client/assets-src/tools/cut_furniture.py (front-facing pieces only).
     decor("globe", "Quả địa cầu", 80, "furniture/globe", 26, 22, 60),
-    decor("fireplace_white", "Lò sưởi trắng", 180, "furniture/fireplace_white", 50, 24, 80),
     // 4-view furniture from client/assets-src/sheets/views/ (build_furniture_views.py).
     viewsDecor("nightstand_clock", "Tủ đầu giường đồng hồ", 95, 40, 24, 60),
     viewsDecor("bookshelf", "Kệ sách", 130, 70, 22, 96),
@@ -307,15 +305,11 @@ export const DECORATION_CATALOG: DecorationDef[] = [
   ]),
   ...inCategory("lighting", [
     decor("lamp", "Lồng đèn đỏ", 75, "red_lantern_lit", 30, 26, 56, 0xf4a261),
-    decor("lantern_brass", "Đèn bão", 60, "lantern_brass", 26, 22, 48, 0xb08968),
     decor("lantern_lit", "Đèn bão (sáng)", 85, "lantern_gold_lit", 26, 22, 48, 0xffd166),
-    decor("lantern_bronze_lit", "Đèn bão đồng (sáng)", 85, "lantern_bronze_lit", 26, 22, 48, 0xb5838d),
     decor("floor_lamp_blue", "Đèn cây chụp xanh", 70, "bedroom/floor_lamp_blue", 24, 16, 80, 0x7ec8f0),
     // Cut from client/assets-src/sheets/furniture/ by client/assets-src/tools/cut_furniture.py (front-facing pieces only).
     decor("lamp_arc_brass", "Đèn sàn cong đồng", 70, "furniture/lamp_arc_brass", 20, 16, 110, 0xb08968),
     decor("lamp_shade_white", "Đèn sàn chụp trắng", 65, "furniture/lamp_shade_white", 20, 16, 100),
-    decor("lamp_post_brass", "Đèn sàn cột đồng", 70, "furniture/lamp_post_brass", 18, 16, 105, 0xb08968),
-    decor("lamp_floor_cream", "Đèn sàn chụp kem", 55, "furniture/lamp_floor_cream", 18, 16, 90),
   ]),
   ...inCategory("rugs", [
     // Furniture can stand on them.
